@@ -883,6 +883,7 @@ fieldPath
 fieldref
 filesystem
 finalizer
+finalizers
 findstr
 fio
 fips

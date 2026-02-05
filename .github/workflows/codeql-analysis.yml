@@ -27,8 +27,9 @@ on:
       - '**/*.py'
       - '**/*.sh'
       - 'hack/**'
-  schedule:
-    - cron: '24 0 * * 5'
+  # DISABLED: scheduled runs
+  # schedule:
+  #   - cron: '24 0 * * 5'
 
 permissions: read-all
 

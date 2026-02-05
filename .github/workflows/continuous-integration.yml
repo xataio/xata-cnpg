@@ -11,8 +11,9 @@ on:
       - release-*
   pull_request:
   workflow_dispatch:
-  schedule:
-    - cron:  '0 1 * * *'
+  # DISABLED: scheduled runs
+  # schedule:
+  #   - cron:  '0 1 * * *'
 
 permissions: read-all
 

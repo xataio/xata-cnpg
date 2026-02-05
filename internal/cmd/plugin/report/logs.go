@@ -31,9 +31,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/podlogs"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	"github.com/xataio/xata-cnpg/internal/cmd/plugin"
+	"github.com/xataio/xata-cnpg/pkg/podlogs"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 const jobMatcherLabel = "job-name"

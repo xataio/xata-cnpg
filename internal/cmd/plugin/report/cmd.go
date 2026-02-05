@@ -22,7 +22,7 @@ package report
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin"
+	"github.com/xataio/xata-cnpg/internal/cmd/plugin"
 )
 
 // NewCmd creates the new "report" command

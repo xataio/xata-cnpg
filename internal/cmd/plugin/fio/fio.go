@@ -31,8 +31,8 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	"github.com/xataio/xata-cnpg/internal/cmd/plugin"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 type fioCommand struct {

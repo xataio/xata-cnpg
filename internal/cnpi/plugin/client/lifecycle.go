@@ -34,8 +34,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/connection"
+	"github.com/xataio/xata-cnpg/internal/cnpi/plugin"
+	"github.com/xataio/xata-cnpg/internal/cnpi/plugin/connection"
 )
 
 var runtimeScheme = runtime.NewScheme()

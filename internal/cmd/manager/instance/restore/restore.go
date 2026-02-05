@@ -30,8 +30,8 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
+	"github.com/xataio/xata-cnpg/pkg/management"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 )
 
 type restoreRunnable struct {

@@ -9,7 +9,7 @@ permissions: read-all
 
 jobs:
   trigger-sync:
-    if: ${{ github.repository_owner == 'cloudnative-pg' }}
+    if: ${{ github.repository_owner == 'xataio' }}
     runs-on: ubuntu-latest
     steps:
       - name: Invoke repository dispatch

@@ -53,7 +53,7 @@ env:
   REGISTRY: "ghcr.io"
   REGISTRY_USER: ${{ github.actor }}
   REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-  REPOSITORY_OWNER: "cloudnative-pg"
+  REPOSITORY_OWNER: "xataio"
   SIGN_IMAGES: "true"
   SLACK_USERNAME: "cnpg-bot"
   BUILD_MANAGER_RELEASE_ARGS: "build --skip=validate --clean --id manager"
@@ -490,7 +490,7 @@ jobs:
       (always() && !cancelled()) &&
       needs.buildx.result == 'success' &&
       needs.buildx.outputs.upload_artifacts == 'true' &&
-      github.repository_owner == 'cloudnative-pg'
+      github.repository_owner == 'xataio'
     runs-on: ubuntu-24.04
     steps:
       -
@@ -528,7 +528,7 @@ jobs:
           COMMIT_MESSAGE: |
             ${{ needs.buildx.outputs.commit_msg }}
 
-            https://github.com/cloudnative-pg/cloudnative-pg/commit/${{ needs.buildx.outputs.commit_sha }}
+            https://github.com/xataio/xata-cnpg/commit/${{ needs.buildx.outputs.commit_sha }}
         run: |
           # Skip creating the commit if there are no changes
           [ -n "$(git status -s)" ] || exit 0

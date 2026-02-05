@@ -22,7 +22,7 @@ package controller
 import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 func isPluginService(object client.Object, operatorNamespace string) bool {

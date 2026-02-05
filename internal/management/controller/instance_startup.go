@@ -31,10 +31,10 @@ import (
 	pgTime "github.com/cloudnative-pg/machinery/pkg/postgres/time"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/controller"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/archiver"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/specs"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/controller"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/archiver"
+	"github.com/xataio/xata-cnpg/pkg/specs"
 )
 
 // verifyPgDataCoherenceForPrimary will abort the execution if the current server is a primary

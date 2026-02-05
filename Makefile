@@ -42,9 +42,9 @@ endif
 COMMIT := $(shell git rev-parse --short HEAD || echo unknown)
 DATE := $(shell git log -1 --pretty=format:'%ad' --date short)
 VERSION := $(shell git describe --tags --match 'v*' | sed -e 's/^v//; s/-g[0-9a-f]\+$$//; s/-\([0-9]\+\)$$/-dev\1/')
-LDFLAGS= "-X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildVersion=${VERSION} $\
--X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildCommit=${COMMIT} $\
--X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildDate=${DATE}"
+LDFLAGS= "-X github.com/xataio/xata-cnpg/pkg/versions.buildVersion=${VERSION} $\
+-X github.com/xataio/xata-cnpg/pkg/versions.buildCommit=${COMMIT} $\
+-X github.com/xataio/xata-cnpg/pkg/versions.buildDate=${DATE}"
 DIST_PATH := $(shell pwd)/dist
 OPERATOR_MANIFEST_PATH := ${DIST_PATH}/operator-manifest.yaml
 LOCALBIN ?= $(shell pwd)/bin

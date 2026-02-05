@@ -25,7 +25,7 @@ import (
 
 	"github.com/cloudnative-pg/machinery/pkg/types"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 // TokenVerificationError are raised when the promotion token

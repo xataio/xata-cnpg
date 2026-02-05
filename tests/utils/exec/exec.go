@@ -30,9 +30,9 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/specs"
-	pkgutils "github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/pods"
+	"github.com/xataio/xata-cnpg/pkg/specs"
+	pkgutils "github.com/xataio/xata-cnpg/pkg/utils"
+	"github.com/xataio/xata-cnpg/tests/utils/pods"
 
 	. "github.com/onsi/gomega" // nolint
 )

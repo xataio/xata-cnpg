@@ -36,14 +36,14 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/specs"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/versions"
-	"github.com/cloudnative-pg/cloudnative-pg/tests"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/clusterutils"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/exec"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/timeouts"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/specs"
+	"github.com/xataio/xata-cnpg/pkg/versions"
+	"github.com/xataio/xata-cnpg/tests"
+	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
+	"github.com/xataio/xata-cnpg/tests/utils/exec"
+	"github.com/xataio/xata-cnpg/tests/utils/postgres"
+	"github.com/xataio/xata-cnpg/tests/utils/timeouts"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -213,7 +213,7 @@ var _ = Describe("Configuration update", Label(tests.LabelClusterMetadata), func
 		Expect(err).NotTo(HaveOccurred())
 		// Skip this test for development PostgreSQL versions (newer than default)
 		// because they may not have compatible extensions like pgaudit available.
-		// See https://github.com/cloudnative-pg/cloudnative-pg/issues/9331
+		// See https://github.com/xataio/xata-cnpg/issues/9331
 		if currentVersion.Major() > defaultVersion.Major() {
 			Skip("Running on a version newer than the default image, skipping this test")
 		}
@@ -259,7 +259,7 @@ var _ = Describe("Configuration update", Label(tests.LabelClusterMetadata), func
 		}
 
 		// TODO: remove this once all E2Es run on minimal images
-		// https://github.com/cloudnative-pg/cloudnative-pg/issues/8123
+		// https://github.com/xataio/xata-cnpg/issues/8123
 		targetTag = strings.Split(env.PostgresImageTag, "-")[0]
 	})
 

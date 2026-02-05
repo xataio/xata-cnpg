@@ -27,9 +27,9 @@ import (
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/management/controller/slots/infrastructure"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/management/controller/slots/infrastructure"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 )
 
 // A Replicator is a runner that keeps replication slots in sync between the primary and this replica

@@ -36,12 +36,12 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/prometheus/client_golang/prometheus"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	pluginClient "github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/client"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/repository"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/metrics/histogram"
-	postgresutils "github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/utils"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	pluginClient "github.com/xataio/xata-cnpg/internal/cnpi/plugin/client"
+	"github.com/xataio/xata-cnpg/internal/cnpi/plugin/repository"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/metrics/histogram"
+	postgresutils "github.com/xataio/xata-cnpg/pkg/management/postgres/utils"
 )
 
 // QueriesCollector is the implementation of PgCollector for a certain

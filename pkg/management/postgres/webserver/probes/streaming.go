@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 )
 
 // pgStreamingChecker checks if the replica is connected via streaming

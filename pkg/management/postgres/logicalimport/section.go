@@ -19,7 +19,7 @@ SPDX-License-Identifier: Apache-2.0
 
 package logicalimport
 
-import apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+import apiv1 "github.com/xataio/xata-cnpg/api/v1"
 
 // section is a possible value of the --section flag
 type section string

@@ -30,8 +30,8 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	types "github.com/cloudnative-pg/machinery/pkg/types"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/utils"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/utils"
 )
 
 // BackupResultData is the result of executing pg_start_backup and pg_stop_backup

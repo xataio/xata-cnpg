@@ -23,7 +23,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/environment"
+	"github.com/xataio/xata-cnpg/tests/utils/environment"
 )
 
 // Level - Define test importance. Each test should define its own importance

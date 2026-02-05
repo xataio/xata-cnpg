@@ -22,7 +22,7 @@ package remote
 import (
 	"time"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver/client/common"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/common"
 )
 
 // Client is the interface to interact with the remote webserver

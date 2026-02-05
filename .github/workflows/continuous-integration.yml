@@ -36,7 +36,7 @@ env:
   BUILD_PUSH_CACHE_TO: ""
   BUILD_PLUGIN_RELEASE_ARGS: "build --skip=validate --clean --id kubectl-cnpg --timeout 60m"
   BUILD_MANAGER_RELEASE_ARGS: "build --skip=validate --clean --id manager-race"
-  REPOSITORY_OWNER: "cloudnative-pg"
+  REPOSITORY_OWNER: "xataio"
   REGISTRY: "ghcr.io"
   REGISTRY_USER: ${{ github.actor }}
   REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
@@ -760,7 +760,7 @@ jobs:
     if: |
       (always() && !cancelled()) &&
       needs.olm-bundle.result == 'success' &&
-      github.repository_owner == 'cloudnative-pg'
+      github.repository_owner == 'xataio'
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -812,7 +812,7 @@ jobs:
     if: |
       (always() && !cancelled()) &&
       needs.olm-bundle.result == 'success' &&
-      github.repository_owner == 'cloudnative-pg'
+      github.repository_owner == 'xataio'
     env:
       VERSION: ${{ needs.buildx.outputs.commit_version }}
       OPP_DEBUG: 1

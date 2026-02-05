@@ -28,10 +28,6 @@ ifneq (,${IMAGE_TAG})
 CONTROLLER_IMG = ${IMAGE_NAME}:${IMAGE_TAG}
 endif
 endif
-CATALOG_IMG ?= ${CONTROLLER_IMG}-catalog
-BUNDLE_IMG ?= ${CONTROLLER_IMG}-bundle
-INDEX_IMG ?= ${CONTROLLER_IMG}-index
-
 # Define CONTROLLER_IMG_WITH_DIGEST by appending CONTROLLER_IMG_SHA to CONTROLLER_IMG with '@' if CONTROLLER_IMG_SHA is set
 ifneq ($(CONTROLLER_IMG_DIGEST),)
 CONTROLLER_IMG_WITH_DIGEST := $(CONTROLLER_IMG)@$(CONTROLLER_IMG_DIGEST)
@@ -64,13 +60,6 @@ GORELEASER_VERSION ?= v2.13.3
 SPELLCHECK_VERSION ?= 0.58.0
 # renovate: datasource=docker depName=getwoke/woke versioning=docker
 WOKE_VERSION ?= 0.19.0
-# renovate: datasource=github-releases depName=operator-framework/operator-sdk versioning=loose
-OPERATOR_SDK_VERSION ?= v1.42.0
-# renovate: datasource=github-tags depName=operator-framework/operator-registry
-OPM_VERSION ?= v1.63.0
-# renovate: datasource=github-tags depName=redhat-openshift-ecosystem/openshift-preflight
-PREFLIGHT_VERSION ?= 1.16.0
-OPENSHIFT_VERSIONS ?= v4.14-v4.21
 ARCH ?= amd64
 
 export CONTROLLER_IMG
@@ -323,41 +312,3 @@ GOBIN=$(PROJECT_DIR)/bin go install $(2) ;\
 }
 endef
 
-.PHONY: operator-sdk
-OPERATOR_SDK = $(LOCALBIN)/operator-sdk
-operator-sdk: ## Install the operator-sdk app
-ifneq ($(shell $(OPERATOR_SDK) version 2>/dev/null | awk -F '"' '{print $$2}'), $(OPERATOR_SDK_VERSION))
-	@{ \
-	set -e ;\
-	mkdir -p $(LOCALBIN) ;\
-	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSL "https://github.com/operator-framework/operator-sdk/releases/download/${OPERATOR_SDK_VERSION}/operator-sdk_$${OS}_$${ARCH}" -o "$(OPERATOR_SDK)" ;\
-	chmod +x "$(LOCALBIN)/operator-sdk" ;\
-	}
-endif
-
-.PHONY: opm
-OPM = $(LOCALBIN)/opm
-opm: ## Download opm locally if necessary.
-ifneq ($(shell $(OPM) version 2>/dev/null | awk -F '"' '{print $$2}'), $(OPM_VERSION))
-	@{ \
-	set -e ;\
-	mkdir -p $(LOCALBIN) ;\
-	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSL https://github.com/operator-framework/operator-registry/releases/download/${OPM_VERSION}/$${OS}-$${ARCH}-opm -o "$(OPM)";\
-	chmod +x $(LOCALBIN)/opm ;\
-	}
-endif
-
-.PHONY: preflight
-PREFLIGHT = $(LOCALBIN)/preflight
-preflight: ## Download preflight locally if necessary.
-ifneq ($(shell $(PREFLIGHT) --version 2>/dev/null | awk '{print $$3}'), $(PREFLIGHT_VERSION))
-	@{ \
-	set -e ;\
-	mkdir -p $(LOCALBIN) ;\
-	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSL "https://github.com/redhat-openshift-ecosystem/openshift-preflight/releases/download/${PREFLIGHT_VERSION}/preflight-$${OS}-$${ARCH}" -o "$(PREFLIGHT)" ;\
-	chmod +x $(LOCALBIN)/preflight ;\
-	}
-endif

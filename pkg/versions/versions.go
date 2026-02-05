@@ -17,7 +17,7 @@ limitations under the License.
 SPDX-License-Identifier: Apache-2.0
 */
 
-// Package versions contains the version of the CloudNativePG operator and the software
+// Package versions contains the version of the Xata CNPG operator and the software
 // that is used by it
 package versions
 

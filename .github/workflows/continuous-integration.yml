@@ -414,6 +414,7 @@ jobs:
       actions: read
       contents: read
       packages: write
+      pull-requests: read
       security-events: write
       id-token: write
     outputs:

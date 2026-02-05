@@ -123,7 +123,7 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(github.com/cloudnative-pg/cloudnative-pg)
+        - prefix(github.com/xataio/xata-cnpg)
         - blank
         - dot
   exclusions:

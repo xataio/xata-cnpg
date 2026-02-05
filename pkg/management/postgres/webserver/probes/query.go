@@ -23,7 +23,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 )
 
 // pgQueryChecker checks if the PostgreSQL server can execute a simple query

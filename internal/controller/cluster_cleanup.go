@@ -27,7 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 // cleanupCompletedJobs remove all the Jobs which are completed

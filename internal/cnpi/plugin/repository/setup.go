@@ -30,7 +30,7 @@ import (
 	"github.com/jackc/puddle/v2"
 	"go.uber.org/multierr"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/connection"
+	"github.com/xataio/xata-cnpg/internal/cnpi/plugin/connection"
 )
 
 // Interface is the interface to use a plugin repository

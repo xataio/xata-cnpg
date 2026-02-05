@@ -20,11 +20,11 @@ SPDX-License-Identifier: Apache-2.0
 package e2e
 
 import (
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/tests"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/timeouts"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/yaml"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/tests"
+	"github.com/xataio/xata-cnpg/tests/utils/postgres"
+	"github.com/xataio/xata-cnpg/tests/utils/timeouts"
+	"github.com/xataio/xata-cnpg/tests/utils/yaml"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

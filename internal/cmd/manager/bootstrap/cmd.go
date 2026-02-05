@@ -27,7 +27,7 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/spf13/cobra"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/versions"
+	"github.com/xataio/xata-cnpg/pkg/versions"
 )
 
 // NewCmd create a new cobra command

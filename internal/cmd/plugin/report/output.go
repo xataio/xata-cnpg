@@ -30,7 +30,7 @@ import (
 
 	"github.com/cloudnative-pg/machinery/pkg/fileutils"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin"
+	"github.com/xataio/xata-cnpg/internal/cmd/plugin"
 )
 
 // Format to generate a sortable timestamp `YYYYMMDD_hhmmss`

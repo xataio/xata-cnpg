@@ -24,8 +24,8 @@ import (
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/pool"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/pool"
 )
 
 // Microservice executes the microservice clone type

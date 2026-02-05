@@ -24,7 +24,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 )
 
 type databaseObjectSpec interface {

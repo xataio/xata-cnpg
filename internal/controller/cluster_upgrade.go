@@ -31,13 +31,13 @@ import (
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/configuration"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver/client/remote"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/persistentvolumeclaim"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/specs"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/configuration"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/remote"
+	"github.com/xataio/xata-cnpg/pkg/postgres"
+	"github.com/xataio/xata-cnpg/pkg/reconciler/persistentvolumeclaim"
+	"github.com/xataio/xata-cnpg/pkg/specs"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 // errLogShippingReplicaElected is raised when the pod update process need

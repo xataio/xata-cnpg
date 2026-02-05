@@ -29,15 +29,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	config "github.com/cloudnative-pg/cloudnative-pg/internal/configuration"
-	pgBouncerConfig "github.com/cloudnative-pg/cloudnative-pg/pkg/management/pgbouncer/config"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/url"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/podspec"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/specs"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils/hash"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	config "github.com/xataio/xata-cnpg/internal/configuration"
+	pgBouncerConfig "github.com/xataio/xata-cnpg/pkg/management/pgbouncer/config"
+	"github.com/xataio/xata-cnpg/pkg/management/url"
+	"github.com/xataio/xata-cnpg/pkg/podspec"
+	"github.com/xataio/xata-cnpg/pkg/postgres"
+	"github.com/xataio/xata-cnpg/pkg/specs"
+	"github.com/xataio/xata-cnpg/pkg/utils"
+	"github.com/xataio/xata-cnpg/pkg/utils/hash"
 )
 
 // Deployment create the deployment of pgbouncer, given

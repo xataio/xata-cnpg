@@ -26,15 +26,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/initdb"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/join"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/pgbasebackup"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/restore"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/restoresnapshot"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/run"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/status"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/upgrade"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/postgres"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/initdb"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/join"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/pgbasebackup"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/restore"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/restoresnapshot"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/run"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/status"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/upgrade"
+	"github.com/xataio/xata-cnpg/pkg/postgres"
 )
 
 // NewCmd creates the "instance" command

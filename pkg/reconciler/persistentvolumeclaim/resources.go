@@ -27,7 +27,7 @@ import (
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 )
 
 // FilterByPodSpec returns all the corev1.PersistentVolumeClaim that are used inside the podSpec

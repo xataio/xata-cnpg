@@ -41,11 +41,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	// +kubebuilder:scaffold:imports
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	schemeBuilder "github.com/cloudnative-pg/cloudnative-pg/internal/scheme"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/certs"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/persistentvolumeclaim"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/specs"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	schemeBuilder "github.com/xataio/xata-cnpg/internal/scheme"
+	"github.com/xataio/xata-cnpg/pkg/certs"
+	"github.com/xataio/xata-cnpg/pkg/reconciler/persistentvolumeclaim"
+	"github.com/xataio/xata-cnpg/pkg/specs"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

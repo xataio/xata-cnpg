@@ -33,7 +33,7 @@ import (
 	"github.com/logrusorgru/aurora/v4"
 	"github.com/spf13/cobra"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin"
+	"github.com/xataio/xata-cnpg/internal/cmd/plugin"
 )
 
 type prettyCmd struct {

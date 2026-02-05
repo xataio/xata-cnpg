@@ -25,8 +25,8 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/cloudnative-pg/machinery/pkg/stringset"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/connection"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/repository"
+	"github.com/xataio/xata-cnpg/internal/cnpi/plugin/connection"
+	"github.com/xataio/xata-cnpg/internal/cnpi/plugin/repository"
 )
 
 // data represent a new CNPI client collection

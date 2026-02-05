@@ -33,12 +33,12 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/configfile"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/pool"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/resources"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/clusterutils"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/forwardconnection"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/secrets"
+	"github.com/xataio/xata-cnpg/pkg/configfile"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/pool"
+	"github.com/xataio/xata-cnpg/pkg/resources"
+	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
+	"github.com/xataio/xata-cnpg/tests/utils/forwardconnection"
+	"github.com/xataio/xata-cnpg/tests/utils/secrets"
 )
 
 // PSQLForwardConnection manages the creation of a port-forwarding to open a new database connection

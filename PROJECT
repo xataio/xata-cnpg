@@ -3,7 +3,7 @@ version: "3"
 layout:
 - go.kubebuilder.io/v4
 projectName: cloudnative-pg-kubebuilderv4
-repo: github.com/cloudnative-pg/cloudnative-pg
+repo: github.com/xataio/xata-cnpg
 resources:
 - api:
     crdVersion: v1
@@ -12,7 +12,7 @@ resources:
   domain: cnpg.io
   group: postgresql
   kind: Cluster
-  path: github.com/cloudnative-pg/cloudnative-pg/api/v1
+  path: github.com/xataio/xata-cnpg/api/v1
   version: v1
   webhooks:
     defaulting: true
@@ -25,7 +25,7 @@ resources:
   domain: cnpg.io
   group: postgresql
   kind: Backup
-  path: github.com/cloudnative-pg/cloudnative-pg/api/v1
+  path: github.com/xataio/xata-cnpg/api/v1
   version: v1
   webhooks:
     defaulting: true
@@ -38,7 +38,7 @@ resources:
   domain: cnpg.io
   group: postgresql
   kind: ScheduledBackup
-  path: github.com/cloudnative-pg/cloudnative-pg/api/v1
+  path: github.com/xataio/xata-cnpg/api/v1
   version: v1
   webhooks:
     defaulting: true
@@ -51,7 +51,7 @@ resources:
   domain: cnpg.io
   group: postgresql
   kind: Pooler
-  path: github.com/cloudnative-pg/cloudnative-pg/api/v1
+  path: github.com/xataio/xata-cnpg/api/v1
   version: v1
   webhooks:
     defaulting: true
@@ -64,7 +64,7 @@ resources:
   domain: cnpg.io
   group: postgresql
   kind: Database
-  path: github.com/cloudnative-pg/cloudnative-pg/api/v1
+  path: github.com/xataio/xata-cnpg/api/v1
   version: v1
 - api:
     crdVersion: v1
@@ -73,7 +73,7 @@ resources:
   domain: cnpg.io
   group: postgresql
   kind: Publication
-  path: github.com/cloudnative-pg/cloudnative-pg/api/v1
+  path: github.com/xataio/xata-cnpg/api/v1
   version: v1
 - api:
     crdVersion: v1
@@ -82,7 +82,7 @@ resources:
   domain: cnpg.io
   group: postgresql
   kind: Subscription
-  path: github.com/cloudnative-pg/cloudnative-pg/api/v1
+  path: github.com/xataio/xata-cnpg/api/v1
   version: v1
 - api:
     crdVersion: v1
@@ -91,5 +91,5 @@ resources:
   domain: cnpg.io
   group: postgresql
   kind: FailoverQuorum
-  path: github.com/cloudnative-pg/cloudnative-pg/api/v1
+  path: github.com/xataio/xata-cnpg/api/v1
   version: v1

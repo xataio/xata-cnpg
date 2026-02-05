@@ -54,9 +54,9 @@ linters:
       line-length: 120
     importas:
       alias:
-        - pkg: github.com/cloudnative-pg/cloudnative-pg/api/v1
+        - pkg: github.com/xataio/xata-cnpg/api/v1
           alias: apiv1
-        - pkg: github.com/cloudnative-pg/cloudnative-pg/internal/webhook/v1
+        - pkg: github.com/xataio/xata-cnpg/internal/webhook/v1
           alias: webhookv1
         - pkg: github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1
           alias: volumesnapshotv1

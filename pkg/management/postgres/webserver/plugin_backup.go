@@ -30,12 +30,12 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	pluginClient "github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/client"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/repository"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/resources"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/resources/status"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	pluginClient "github.com/xataio/xata-cnpg/internal/cnpi/plugin/client"
+	"github.com/xataio/xata-cnpg/internal/cnpi/plugin/repository"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+	"github.com/xataio/xata-cnpg/pkg/resources"
+	"github.com/xataio/xata-cnpg/pkg/resources/status"
 )
 
 // PluginBackupCommand represent a backup command that is being executed

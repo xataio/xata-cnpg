@@ -31,9 +31,9 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/certs"
-	postgresSpec "github.com/cloudnative-pg/cloudnative-pg/pkg/postgres"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/certs"
+	postgresSpec "github.com/xataio/xata-cnpg/pkg/postgres"
 )
 
 // Reconciler returns a certificate reconciler

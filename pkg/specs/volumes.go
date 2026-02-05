@@ -28,8 +28,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/postgres"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/postgres"
 )
 
 // PgWalVolumePath is the path used by the WAL volume when present

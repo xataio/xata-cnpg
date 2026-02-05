@@ -38,12 +38,12 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/controller"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/deployments"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/objects"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/pods"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/run"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/controller"
+	"github.com/xataio/xata-cnpg/pkg/utils"
+	"github.com/xataio/xata-cnpg/tests/utils/deployments"
+	"github.com/xataio/xata-cnpg/tests/utils/objects"
+	"github.com/xataio/xata-cnpg/tests/utils/pods"
+	"github.com/xataio/xata-cnpg/tests/utils/run"
 )
 
 // ReloadDeployment finds and deletes the operator pod. Returns

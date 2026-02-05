@@ -35,13 +35,13 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/certs"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/deployments"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/objects"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/pods"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/run"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/secrets"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/certs"
+	"github.com/xataio/xata-cnpg/tests/utils/deployments"
+	"github.com/xataio/xata-cnpg/tests/utils/objects"
+	"github.com/xataio/xata-cnpg/tests/utils/pods"
+	"github.com/xataio/xata-cnpg/tests/utils/run"
+	"github.com/xataio/xata-cnpg/tests/utils/secrets"
 )
 
 const (

@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/resources"
+	"github.com/xataio/xata-cnpg/pkg/resources"
 )
 
 var errNoWalArchivePresent = errors.New("no wal-archive present")

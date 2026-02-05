@@ -27,7 +27,7 @@ import (
 
 	"github.com/lib/pq"
 
-	postgresutils "github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/utils"
+	postgresutils "github.com/xataio/xata-cnpg/pkg/management/postgres/utils"
 )
 
 const (

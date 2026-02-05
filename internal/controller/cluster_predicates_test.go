@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/configuration"
+	"github.com/xataio/xata-cnpg/internal/configuration"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

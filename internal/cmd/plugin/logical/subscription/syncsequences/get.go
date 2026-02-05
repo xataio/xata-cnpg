@@ -29,7 +29,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin/logical"
+	"github.com/xataio/xata-cnpg/internal/cmd/plugin/logical"
 )
 
 const sqlGetSequences = `

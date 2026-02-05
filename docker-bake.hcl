@@ -51,11 +51,11 @@ variable "revision" {
 
 suffix = (environment == "testing") ? "-testing" : ""
 
-title = "CloudNativePG Operator"
-description = "This Docker image contains CloudNativePG Operator."
-authors = "The CloudNativePG Contributors"
-url = "https://github.com/cloudnative-pg/cloudnative-pg"
-documentation = "https://cloudnative-pg.io/documentation/current/"
+title = "Xata CNPG Operator"
+description = "This Docker image contains Xata CNPG Operator."
+authors = "Xata"
+url = "https://github.com/xataio/xata-cnpg"
+documentation = "https://github.com/xataio/xata-cnpg"
 license = "Apache-2.0"
 now = timestamp()
 
@@ -65,18 +65,12 @@ distros = {
     baseImage = "gcr.io/distroless/static-debian12:nonroot@sha256:e8a4044e0b4ae4257efa45fc026c0bc30ad320d43bd4c1a7d5271bd241e386d0",
     tag = ""
   }
-  ubi = {
-    # renovate: datasource=docker
-    baseImage = "registry.access.redhat.com/ubi9/ubi-micro:latest@sha256:e14a8cbcaa0c26b77140ac85d40a47b5e910a4068686b02ebcad72126e9b5f86",
-    tag = "-ubi9"
-  }
 }
 
 target "default" {
   matrix = {
     distro = [
-      "distroless",
-      "ubi"
+      "distroless"
     ]
   }
 

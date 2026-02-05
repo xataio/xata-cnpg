@@ -29,8 +29,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"k8s.io/utils/strings/slices"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/pool"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/pool"
 )
 
 type databaseSnapshotter struct {

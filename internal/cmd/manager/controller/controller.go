@@ -35,15 +35,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/repository"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/configuration"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/controller"
-	schemeBuilder "github.com/cloudnative-pg/cloudnative-pg/internal/scheme"
-	webhookv1 "github.com/cloudnative-pg/cloudnative-pg/internal/webhook/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/certs"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/multicache"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/versions"
+	"github.com/xataio/xata-cnpg/internal/cnpi/plugin/repository"
+	"github.com/xataio/xata-cnpg/internal/configuration"
+	"github.com/xataio/xata-cnpg/internal/controller"
+	schemeBuilder "github.com/xataio/xata-cnpg/internal/scheme"
+	webhookv1 "github.com/xataio/xata-cnpg/internal/webhook/v1"
+	"github.com/xataio/xata-cnpg/pkg/certs"
+	"github.com/xataio/xata-cnpg/pkg/multicache"
+	"github.com/xataio/xata-cnpg/pkg/utils"
+	"github.com/xataio/xata-cnpg/pkg/versions"
 )
 
 var (

@@ -26,10 +26,10 @@ import (
 	k8client "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin"
-	pluginclient "github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/client"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/scheme"
-	contextutils "github.com/cloudnative-pg/cloudnative-pg/pkg/utils/context"
+	"github.com/xataio/xata-cnpg/internal/cnpi/plugin"
+	pluginclient "github.com/xataio/xata-cnpg/internal/cnpi/plugin/client"
+	"github.com/xataio/xata-cnpg/internal/scheme"
+	contextutils "github.com/xataio/xata-cnpg/pkg/utils/context"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

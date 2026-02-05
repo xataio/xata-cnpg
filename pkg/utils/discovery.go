@@ -33,7 +33,7 @@ import (
 	"k8s.io/client-go/discovery"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/executablehash"
+	"github.com/xataio/xata-cnpg/pkg/executablehash"
 )
 
 // haveSCC stores the result of the DetectSecurityContextConstraints check

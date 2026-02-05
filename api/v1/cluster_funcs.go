@@ -40,11 +40,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/configuration"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/system"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
-	contextutils "github.com/cloudnative-pg/cloudnative-pg/pkg/utils/context"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/versions"
+	"github.com/xataio/xata-cnpg/internal/configuration"
+	"github.com/xataio/xata-cnpg/pkg/system"
+	"github.com/xataio/xata-cnpg/pkg/utils"
+	contextutils "github.com/xataio/xata-cnpg/pkg/utils/context"
+	"github.com/xataio/xata-cnpg/pkg/versions"
 )
 
 // GetOnline tells whether this volume snapshot configuration allows

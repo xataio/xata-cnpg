@@ -1,4 +1,4 @@
-module github.com/cloudnative-pg/cloudnative-pg
+module github.com/xataio/xata-cnpg
 
 go 1.25.0
 

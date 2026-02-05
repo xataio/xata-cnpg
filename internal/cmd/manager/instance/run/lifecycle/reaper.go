@@ -31,7 +31,7 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/mitchellh/go-ps"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 )
 
 // PostgresOrphansReaper implements the Runnable interface and handles orphaned

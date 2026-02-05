@@ -32,14 +32,14 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/fileutils"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/configfile"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/constants"
-	postgresutils "github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/utils"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/postgres/plugin"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/postgres/replication"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/configfile"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/constants"
+	postgresutils "github.com/xataio/xata-cnpg/pkg/management/postgres/utils"
+	"github.com/xataio/xata-cnpg/pkg/postgres"
+	"github.com/xataio/xata-cnpg/pkg/postgres/plugin"
+	"github.com/xataio/xata-cnpg/pkg/postgres/replication"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 // InstallPgDataFileContent installs a file in PgData, returning true/false if

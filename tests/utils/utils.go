@@ -29,11 +29,11 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	utils2 "github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/clusterutils"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/run"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/storage"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	utils2 "github.com/xataio/xata-cnpg/pkg/utils"
+	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
+	"github.com/xataio/xata-cnpg/tests/utils/run"
+	"github.com/xataio/xata-cnpg/tests/utils/storage"
 )
 
 // PrintClusterResources prints a summary of the cluster pods, jobs, pvcs etc.

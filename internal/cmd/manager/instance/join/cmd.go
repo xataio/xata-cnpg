@@ -28,12 +28,12 @@ import (
 	"github.com/spf13/cobra"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/management/istio"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/management/linkerd"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
-	instancecertificate "github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/instance/certificate"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/management/istio"
+	"github.com/xataio/xata-cnpg/internal/management/linkerd"
+	"github.com/xataio/xata-cnpg/pkg/management"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+	instancecertificate "github.com/xataio/xata-cnpg/pkg/reconciler/instance/certificate"
 )
 
 // NewCmd creates the new "join" command

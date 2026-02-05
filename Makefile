@@ -18,7 +18,7 @@
 #
 
 # Image URL to use all building/pushing image targets
-IMAGE_NAME ?= ghcr.io/cloudnative-pg/cloudnative-pg-testing
+IMAGE_NAME ?= ghcr.io/xataio/xata-cnpg-testing
 
 # Prevent e2e tests to proceed with empty tag which
 # will be considered as "latest".
@@ -170,51 +170,6 @@ docker-build: go-releaser ## Build the docker image.
 	  --set distroless.tags="$${CONTROLLER_IMG}" \
 	  --push distroless
 
-olm-bundle: manifests kustomize operator-sdk ## Build the bundle for OLM installation
-	set -xeEuo pipefail ;\
-	CONFIG_TMP_DIR=$$(mktemp -d) ;\
-	cp -r config "$${CONFIG_TMP_DIR}" ;\
-	( \
-		cd "$${CONFIG_TMP_DIR}/config/default" ;\
-		$(KUSTOMIZE) edit set image controller="$${CONTROLLER_IMG}" ;\
-		cd "$${CONFIG_TMP_DIR}" ;\
-	) ;\
-	rm -fr bundle bundle.Dockerfile ;\
-	sed -i -e "s/ClusterRole/Role/" "$${CONFIG_TMP_DIR}/config/rbac/role.yaml" "$${CONFIG_TMP_DIR}/config/rbac/role_binding.yaml"  ;\
-	($(KUSTOMIZE) build "$${CONFIG_TMP_DIR}/config/olm-manifests") | \
-	$(OPERATOR_SDK) generate bundle --verbose --overwrite --manifests --metadata --package cloudnative-pg --channels stable-v1 --use-image-digests --default-channel stable-v1 --version "${VERSION}" ; \
-	echo -e "\n  # OpenShift annotations." >> bundle/metadata/annotations.yaml ;\
-	echo -e "  com.redhat.openshift.versions: $(OPENSHIFT_VERSIONS)" >> bundle/metadata/annotations.yaml ;\
-	DOCKER_BUILDKIT=1 docker build --push --no-cache -f bundle.Dockerfile -t ${BUNDLE_IMG} . ;\
-	export BUNDLE_IMG="${BUNDLE_IMG}"
-
-olm-catalog: olm-bundle opm ## Build and push the index image for OLM Catalog
-	set -xeEuo pipefail ;\
-	rm -fr catalog* cloudnative-pg-operator-template.yaml ;\
-	mkdir -p catalog/cloudnative-pg ;\
-	$(OPM) generate dockerfile catalog
-	echo -e "Schema: olm.semver\n\
-	GenerateMajorChannels: true\n\
-	GenerateMinorChannels: false\n\
-	Stable:\n\
-	    Bundles:\n\
-	    - Image: ${BUNDLE_IMG}" | envsubst > cloudnative-pg-operator-template.yaml
-	$(OPM) alpha render-template semver -o yaml < cloudnative-pg-operator-template.yaml > catalog/catalog.yaml ;\
-	$(OPM) validate catalog/ ;\
-	$(OPM) index add --mode semver --container-tool docker --bundles "${BUNDLE_IMG}" --tag "${INDEX_IMG}" ;\
-	docker push ${INDEX_IMG} ;\
-	DOCKER_BUILDKIT=1 docker build --push -f catalog.Dockerfile -t ${CATALOG_IMG} . ;\
-	echo -e "apiVersion: operators.coreos.com/v1alpha1\n\
-	kind: CatalogSource\n\
-	metadata:\n\
-	   name: cloudnative-pg-catalog\n\
-	   namespace: operators\n\
-	spec:\n\
-	   sourceType: grpc\n\
-	   image: ${CATALOG_IMG}\n\
-	   secrets:\n\
-       - cnpg-pull-secret" | envsubst > cloudnative-pg-catalog.yaml ;\
-
 ##@ Deployment
 install: manifests kustomize ## Install CRDs into a cluster.
 	$(KUSTOMIZE) build config/crd | kubectl apply --server-side -f -
@@ -248,9 +203,6 @@ manifests: controller-gen ## Generate manifests e.g. CRD, RBAC etc.
 
 generate: controller-gen ## Generate code.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
-
-olm-scorecard: operator-sdk ## Run the Scorecard test from operator-sdk
-	$(OPERATOR_SDK) scorecard ${BUNDLE_IMG} --wait-time 60s --verbose
 
 ##@ Formatters and Linters
 

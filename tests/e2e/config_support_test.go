@@ -28,10 +28,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudnative-pg/cloudnative-pg/tests"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/clusterutils"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/operator"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/run"
+	"github.com/xataio/xata-cnpg/tests"
+	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
+	"github.com/xataio/xata-cnpg/tests/utils/operator"
+	"github.com/xataio/xata-cnpg/tests/utils/run"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

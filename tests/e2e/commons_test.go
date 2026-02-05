@@ -20,7 +20,7 @@ SPDX-License-Identifier: Apache-2.0
 package e2e
 
 import (
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/cloudvendors"
+	"github.com/xataio/xata-cnpg/tests/utils/cloudvendors"
 )
 
 func MustGetEnvProfile() cloudvendors.EnvProfile {

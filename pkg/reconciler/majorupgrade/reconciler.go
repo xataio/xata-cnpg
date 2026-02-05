@@ -33,12 +33,12 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/configuration"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/resources/status"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/specs"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/versions"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/configuration"
+	"github.com/xataio/xata-cnpg/pkg/resources/status"
+	"github.com/xataio/xata-cnpg/pkg/specs"
+	"github.com/xataio/xata-cnpg/pkg/utils"
+	"github.com/xataio/xata-cnpg/pkg/versions"
 )
 
 // ErrIncoherentMajorUpgradeJob is raised when the major upgrade job

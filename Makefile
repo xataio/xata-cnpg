@@ -18,7 +18,7 @@
 #
 
 # Image URL to use all building/pushing image targets
-IMAGE_NAME ?= ghcr.io/cloudnative-pg/cloudnative-pg-testing
+IMAGE_NAME ?= ghcr.io/xataio/cloudnative-pg-testing
 
 # Prevent e2e tests to proceed with empty tag which
 # will be considered as "latest".
@@ -28,10 +28,6 @@ ifneq (,${IMAGE_TAG})
 CONTROLLER_IMG = ${IMAGE_NAME}:${IMAGE_TAG}
 endif
 endif
-CATALOG_IMG ?= ${CONTROLLER_IMG}-catalog
-BUNDLE_IMG ?= ${CONTROLLER_IMG}-bundle
-INDEX_IMG ?= ${CONTROLLER_IMG}-index
-
 # Define CONTROLLER_IMG_WITH_DIGEST by appending CONTROLLER_IMG_SHA to CONTROLLER_IMG with '@' if CONTROLLER_IMG_SHA is set
 ifneq ($(CONTROLLER_IMG_DIGEST),)
 CONTROLLER_IMG_WITH_DIGEST := $(CONTROLLER_IMG)@$(CONTROLLER_IMG_DIGEST)
@@ -42,9 +38,9 @@ endif
 COMMIT := $(shell git rev-parse --short HEAD || echo unknown)
 DATE := $(shell git log -1 --pretty=format:'%ad' --date short)
 VERSION := $(shell git describe --tags --match 'v*' | sed -e 's/^v//; s/-g[0-9a-f]\+$$//; s/-\([0-9]\+\)$$/-dev\1/')
-LDFLAGS= "-X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildVersion=${VERSION} $\
--X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildCommit=${COMMIT} $\
--X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildDate=${DATE}"
+LDFLAGS= "-X github.com/xataio/xata-cnpg/pkg/versions.buildVersion=${VERSION} $\
+-X github.com/xataio/xata-cnpg/pkg/versions.buildCommit=${COMMIT} $\
+-X github.com/xataio/xata-cnpg/pkg/versions.buildDate=${DATE}"
 DIST_PATH := $(shell pwd)/dist
 OPERATOR_MANIFEST_PATH := ${DIST_PATH}/operator-manifest.yaml
 LOCALBIN ?= $(shell pwd)/bin
@@ -64,13 +60,6 @@ GORELEASER_VERSION ?= v2.13.3
 SPELLCHECK_VERSION ?= 0.58.0
 # renovate: datasource=docker depName=getwoke/woke versioning=docker
 WOKE_VERSION ?= 0.19.0
-# renovate: datasource=github-releases depName=operator-framework/operator-sdk versioning=loose
-OPERATOR_SDK_VERSION ?= v1.42.0
-# renovate: datasource=github-tags depName=operator-framework/operator-registry
-OPM_VERSION ?= v1.63.0
-# renovate: datasource=github-tags depName=redhat-openshift-ecosystem/openshift-preflight
-PREFLIGHT_VERSION ?= 1.16.0
-OPENSHIFT_VERSIONS ?= v4.14-v4.21
 ARCH ?= amd64
 
 export CONTROLLER_IMG
@@ -170,51 +159,6 @@ docker-build: go-releaser ## Build the docker image.
 	  --set distroless.tags="$${CONTROLLER_IMG}" \
 	  --push distroless
 
-olm-bundle: manifests kustomize operator-sdk ## Build the bundle for OLM installation
-	set -xeEuo pipefail ;\
-	CONFIG_TMP_DIR=$$(mktemp -d) ;\
-	cp -r config "$${CONFIG_TMP_DIR}" ;\
-	( \
-		cd "$${CONFIG_TMP_DIR}/config/default" ;\
-		$(KUSTOMIZE) edit set image controller="$${CONTROLLER_IMG}" ;\
-		cd "$${CONFIG_TMP_DIR}" ;\
-	) ;\
-	rm -fr bundle bundle.Dockerfile ;\
-	sed -i -e "s/ClusterRole/Role/" "$${CONFIG_TMP_DIR}/config/rbac/role.yaml" "$${CONFIG_TMP_DIR}/config/rbac/role_binding.yaml"  ;\
-	($(KUSTOMIZE) build "$${CONFIG_TMP_DIR}/config/olm-manifests") | \
-	$(OPERATOR_SDK) generate bundle --verbose --overwrite --manifests --metadata --package cloudnative-pg --channels stable-v1 --use-image-digests --default-channel stable-v1 --version "${VERSION}" ; \
-	echo -e "\n  # OpenShift annotations." >> bundle/metadata/annotations.yaml ;\
-	echo -e "  com.redhat.openshift.versions: $(OPENSHIFT_VERSIONS)" >> bundle/metadata/annotations.yaml ;\
-	DOCKER_BUILDKIT=1 docker build --push --no-cache -f bundle.Dockerfile -t ${BUNDLE_IMG} . ;\
-	export BUNDLE_IMG="${BUNDLE_IMG}"
-
-olm-catalog: olm-bundle opm ## Build and push the index image for OLM Catalog
-	set -xeEuo pipefail ;\
-	rm -fr catalog* cloudnative-pg-operator-template.yaml ;\
-	mkdir -p catalog/cloudnative-pg ;\
-	$(OPM) generate dockerfile catalog
-	echo -e "Schema: olm.semver\n\
-	GenerateMajorChannels: true\n\
-	GenerateMinorChannels: false\n\
-	Stable:\n\
-	    Bundles:\n\
-	    - Image: ${BUNDLE_IMG}" | envsubst > cloudnative-pg-operator-template.yaml
-	$(OPM) alpha render-template semver -o yaml < cloudnative-pg-operator-template.yaml > catalog/catalog.yaml ;\
-	$(OPM) validate catalog/ ;\
-	$(OPM) index add --mode semver --container-tool docker --bundles "${BUNDLE_IMG}" --tag "${INDEX_IMG}" ;\
-	docker push ${INDEX_IMG} ;\
-	DOCKER_BUILDKIT=1 docker build --push -f catalog.Dockerfile -t ${CATALOG_IMG} . ;\
-	echo -e "apiVersion: operators.coreos.com/v1alpha1\n\
-	kind: CatalogSource\n\
-	metadata:\n\
-	   name: cloudnative-pg-catalog\n\
-	   namespace: operators\n\
-	spec:\n\
-	   sourceType: grpc\n\
-	   image: ${CATALOG_IMG}\n\
-	   secrets:\n\
-       - cnpg-pull-secret" | envsubst > cloudnative-pg-catalog.yaml ;\
-
 ##@ Deployment
 install: manifests kustomize ## Install CRDs into a cluster.
 	$(KUSTOMIZE) build config/crd | kubectl apply --server-side -f -
@@ -248,9 +192,6 @@ manifests: controller-gen ## Generate manifests e.g. CRD, RBAC etc.
 
 generate: controller-gen ## Generate code.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
-
-olm-scorecard: operator-sdk ## Run the Scorecard test from operator-sdk
-	$(OPERATOR_SDK) scorecard ${BUNDLE_IMG} --wait-time 60s --verbose
 
 ##@ Formatters and Linters
 
@@ -371,41 +312,3 @@ GOBIN=$(PROJECT_DIR)/bin go install $(2) ;\
 }
 endef
 
-.PHONY: operator-sdk
-OPERATOR_SDK = $(LOCALBIN)/operator-sdk
-operator-sdk: ## Install the operator-sdk app
-ifneq ($(shell $(OPERATOR_SDK) version 2>/dev/null | awk -F '"' '{print $$2}'), $(OPERATOR_SDK_VERSION))
-	@{ \
-	set -e ;\
-	mkdir -p $(LOCALBIN) ;\
-	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSL "https://github.com/operator-framework/operator-sdk/releases/download/${OPERATOR_SDK_VERSION}/operator-sdk_$${OS}_$${ARCH}" -o "$(OPERATOR_SDK)" ;\
-	chmod +x "$(LOCALBIN)/operator-sdk" ;\
-	}
-endif
-
-.PHONY: opm
-OPM = $(LOCALBIN)/opm
-opm: ## Download opm locally if necessary.
-ifneq ($(shell $(OPM) version 2>/dev/null | awk -F '"' '{print $$2}'), $(OPM_VERSION))
-	@{ \
-	set -e ;\
-	mkdir -p $(LOCALBIN) ;\
-	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSL https://github.com/operator-framework/operator-registry/releases/download/${OPM_VERSION}/$${OS}-$${ARCH}-opm -o "$(OPM)";\
-	chmod +x $(LOCALBIN)/opm ;\
-	}
-endif
-
-.PHONY: preflight
-PREFLIGHT = $(LOCALBIN)/preflight
-preflight: ## Download preflight locally if necessary.
-ifneq ($(shell $(PREFLIGHT) --version 2>/dev/null | awk '{print $$3}'), $(PREFLIGHT_VERSION))
-	@{ \
-	set -e ;\
-	mkdir -p $(LOCALBIN) ;\
-	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSL "https://github.com/redhat-openshift-ecosystem/openshift-preflight/releases/download/${PREFLIGHT_VERSION}/preflight-$${OS}-$${ARCH}" -o "$(PREFLIGHT)" ;\
-	chmod +x $(LOCALBIN)/preflight ;\
-	}
-endif

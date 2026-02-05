@@ -22,7 +22,7 @@ package local
 import (
 	"time"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver/client/common"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/common"
 )
 
 // Client is an entity capable of interacting with the local webserver endpoints

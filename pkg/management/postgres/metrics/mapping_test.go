@@ -25,7 +25,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	postgresutils "github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/utils"
+	postgresutils "github.com/xataio/xata-cnpg/pkg/management/postgres/utils"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

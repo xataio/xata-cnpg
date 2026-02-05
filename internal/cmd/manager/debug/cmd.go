@@ -23,7 +23,7 @@ package debug
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/debug/architectures"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/debug/architectures"
 )
 
 // NewCmd creates the new cobra command

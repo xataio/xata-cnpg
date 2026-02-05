@@ -25,9 +25,9 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/external"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/cmd/plugin"
+	"github.com/xataio/xata-cnpg/pkg/management/external"
 )
 
 // GetConnectionString gets the connection string to be used to connect to

@@ -23,7 +23,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/pool"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/pool"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

@@ -27,9 +27,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver/client/remote"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/remote"
 )
 
 type onlineExecutor struct {

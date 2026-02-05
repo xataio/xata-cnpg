@@ -26,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 )
 
 // Builder contains the fluent methods to build a schema

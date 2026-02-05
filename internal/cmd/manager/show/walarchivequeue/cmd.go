@@ -26,8 +26,8 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/spf13/cobra"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/specs"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+	"github.com/xataio/xata-cnpg/pkg/specs"
 )
 
 // NewCmd creates the new cobra command

@@ -24,7 +24,7 @@ import (
 
 	"github.com/cloudnative-pg/machinery/pkg/fileutils"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/specs"
+	"github.com/xataio/xata-cnpg/pkg/specs"
 )
 
 type (

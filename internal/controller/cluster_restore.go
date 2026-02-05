@@ -31,10 +31,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/persistentvolumeclaim"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/specs"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/reconciler/persistentvolumeclaim"
+	"github.com/xataio/xata-cnpg/pkg/specs"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 // reconcileRestoredCluster ensures that we own again any orphan resources when cluster gets reconciled for

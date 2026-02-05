@@ -31,11 +31,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver/client/remote"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/resources/status"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/remote"
+	"github.com/xataio/xata-cnpg/pkg/postgres"
+	"github.com/xataio/xata-cnpg/pkg/resources/status"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 // Reconcile reconciles the cluster replica cluster switching.

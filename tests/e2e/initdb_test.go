@@ -24,9 +24,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cloudnative-pg/cloudnative-pg/tests"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/clusterutils"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/exec"
+	"github.com/xataio/xata-cnpg/tests"
+	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
+	"github.com/xataio/xata-cnpg/tests/utils/exec"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

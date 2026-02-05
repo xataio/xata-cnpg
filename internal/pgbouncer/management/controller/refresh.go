@@ -26,7 +26,7 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/fileutils"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/pgbouncer/config"
+	"github.com/xataio/xata-cnpg/pkg/management/pgbouncer/config"
 )
 
 // refreshConfigurationFiles writes the configuration files, returning a

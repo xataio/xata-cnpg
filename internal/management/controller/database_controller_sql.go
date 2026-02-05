@@ -30,7 +30,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/lib/pq"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 )
 
 type extInfo struct {

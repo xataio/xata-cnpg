@@ -27,9 +27,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin"
-	cnpgiClient "github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/client"
-	contextutils "github.com/cloudnative-pg/cloudnative-pg/pkg/utils/context"
+	"github.com/xataio/xata-cnpg/internal/cnpi/plugin"
+	cnpgiClient "github.com/xataio/xata-cnpg/internal/cnpi/plugin/client"
+	contextutils "github.com/xataio/xata-cnpg/pkg/utils/context"
 )
 
 type extendedClient struct {

@@ -28,7 +28,7 @@ import (
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver"
 )
 
 // executeRequestWithError executes an http request and returns a webserver.response and any error encountered

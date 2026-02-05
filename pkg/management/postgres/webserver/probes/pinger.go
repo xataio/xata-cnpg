@@ -29,10 +29,10 @@ import (
 	"os"
 	"time"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/certs"
-	cnpgUrl "github.com/cloudnative-pg/cloudnative-pg/pkg/management/url"
-	postgresSpec "github.com/cloudnative-pg/cloudnative-pg/pkg/postgres"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/certs"
+	cnpgUrl "github.com/xataio/xata-cnpg/pkg/management/url"
+	postgresSpec "github.com/xataio/xata-cnpg/pkg/postgres"
 )
 
 // pinger can check if a certain instance is reachable by using

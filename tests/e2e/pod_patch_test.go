@@ -22,9 +22,9 @@ package e2e
 import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
-	"github.com/cloudnative-pg/cloudnative-pg/tests"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/clusterutils"
+	"github.com/xataio/xata-cnpg/pkg/utils"
+	"github.com/xataio/xata-cnpg/tests"
+	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

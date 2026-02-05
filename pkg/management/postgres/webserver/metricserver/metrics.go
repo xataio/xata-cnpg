@@ -28,9 +28,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/url"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver"
+	"github.com/xataio/xata-cnpg/pkg/management/url"
 )
 
 // MetricsServer exposes the metrics of the postgres instance

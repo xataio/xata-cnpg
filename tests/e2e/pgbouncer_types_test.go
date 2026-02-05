@@ -25,10 +25,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	pkgutils "github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
-	"github.com/cloudnative-pg/cloudnative-pg/tests"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/run"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/yaml"
+	pkgutils "github.com/xataio/xata-cnpg/pkg/utils"
+	"github.com/xataio/xata-cnpg/tests"
+	"github.com/xataio/xata-cnpg/tests/utils/run"
+	"github.com/xataio/xata-cnpg/tests/utils/yaml"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

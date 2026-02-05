@@ -25,7 +25,7 @@ import (
 	"encoding/pem"
 	"time"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/configuration"
+	"github.com/xataio/xata-cnpg/internal/configuration"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

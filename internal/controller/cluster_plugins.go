@@ -26,8 +26,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	cnpgiclient "github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/client"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	cnpgiclient "github.com/xataio/xata-cnpg/internal/cnpi/plugin/client"
 )
 
 // updatePluginsStatus ensures that we load the plugins that are required to reconcile

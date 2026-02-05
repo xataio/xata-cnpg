@@ -33,11 +33,11 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/management/cache"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/url"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/resources/status"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/management/cache"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+	"github.com/xataio/xata-cnpg/pkg/management/url"
+	"github.com/xataio/xata-cnpg/pkg/resources/status"
 )
 
 type localWebserverEndpoints struct {

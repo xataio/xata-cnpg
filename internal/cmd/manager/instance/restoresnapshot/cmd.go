@@ -35,12 +35,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/management/istio"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/management/linkerd"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/scheme"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/management/istio"
+	"github.com/xataio/xata-cnpg/internal/management/linkerd"
+	"github.com/xataio/xata-cnpg/internal/scheme"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver"
 )
 
 // NewCmd creates the "restoresnapshot" subcommand

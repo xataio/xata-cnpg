@@ -22,8 +22,8 @@ package e2e
 import (
 	"fmt"
 
-	"github.com/cloudnative-pg/cloudnative-pg/tests"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/run"
+	"github.com/xataio/xata-cnpg/tests"
+	"github.com/xataio/xata-cnpg/tests/utils/run"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

@@ -32,9 +32,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/controller"
-	"github.com/cloudnative-pg/cloudnative-pg/tests/utils/objects"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/controller"
+	"github.com/xataio/xata-cnpg/tests/utils/objects"
 )
 
 // GetMutatingWebhookByName get the MutatingWebhook filtered by the name of one

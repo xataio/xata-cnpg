@@ -27,9 +27,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/resources"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/resources"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 type reconciliationUnit func(

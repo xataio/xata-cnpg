@@ -23,8 +23,8 @@ package upgrade
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/upgrade/execute"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/upgrade/prepare"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/upgrade/execute"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/upgrade/prepare"
 )
 
 // NewCmd creates the "instance upgrade" subcommand

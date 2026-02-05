@@ -20,7 +20,7 @@ SPDX-License-Identifier: Apache-2.0
 package specs
 
 import (
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

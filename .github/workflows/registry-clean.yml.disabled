@@ -31,7 +31,7 @@ jobs:
 
       - name: Delete '-testing' operand images
         uses: snok/container-retention-policy@3b0972b2276b171b212f8c4efbca59ebba26eceb # v3.0.1
-        if: ${{ github.repository_owner == 'cloudnative-pg' }}
+        if: ${{ github.repository_owner == 'xataio' }}
         with:
           image-names: ${{ env.CONTAINER_IMAGE_NAMES }}
           cut-off: 1w

@@ -29,7 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 )
 
 // EnsureInstancePVCGroupIsDeleted ensures that all the expected pvc for a given instance are deleted

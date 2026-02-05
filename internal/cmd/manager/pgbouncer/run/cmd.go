@@ -35,10 +35,10 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/cloudnative-pg/cloudnative-pg/internal/pgbouncer/management/controller"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/pgbouncer/config"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/pgbouncer/metricsserver"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/versions"
+	"github.com/xataio/xata-cnpg/internal/pgbouncer/management/controller"
+	"github.com/xataio/xata-cnpg/pkg/management/pgbouncer/config"
+	"github.com/xataio/xata-cnpg/pkg/management/pgbouncer/metricsserver"
+	"github.com/xataio/xata-cnpg/pkg/versions"
 )
 
 // NewCmd creates the "instance run" subcommand

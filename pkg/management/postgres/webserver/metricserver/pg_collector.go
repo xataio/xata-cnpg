@@ -31,13 +31,13 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/prometheus/client_golang/prometheus"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/management/cache"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
-	m "github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/metrics"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver/client/local"
-	postgresconf "github.com/cloudnative-pg/cloudnative-pg/pkg/postgres"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/specs"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/management/cache"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+	m "github.com/xataio/xata-cnpg/pkg/management/postgres/metrics"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/local"
+	postgresconf "github.com/xataio/xata-cnpg/pkg/postgres"
+	"github.com/xataio/xata-cnpg/pkg/specs"
 )
 
 // PrometheusNamespace is the namespace to be used for all custom metrics exposed by instances

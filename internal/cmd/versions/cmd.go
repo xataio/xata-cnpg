@@ -25,7 +25,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/versions"
+	"github.com/xataio/xata-cnpg/pkg/versions"
 )
 
 // NewCmd is a cobra command printing build information

@@ -42,15 +42,15 @@ import (
 	"github.com/jackc/pgx/v5"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	pluginClient "github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/client"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/configfile"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/external"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/constants"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/logicalimport"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/pool"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/system"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	pluginClient "github.com/xataio/xata-cnpg/internal/cnpi/plugin/client"
+	"github.com/xataio/xata-cnpg/pkg/configfile"
+	"github.com/xataio/xata-cnpg/pkg/management"
+	"github.com/xataio/xata-cnpg/pkg/management/external"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/constants"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/logicalimport"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/pool"
+	"github.com/xataio/xata-cnpg/pkg/system"
 )
 
 type connectionProvider interface {

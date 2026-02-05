@@ -25,7 +25,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

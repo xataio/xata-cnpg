@@ -21,7 +21,7 @@ SPDX-License-Identifier: Apache-2.0
 package system
 
 import (
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/system/compatibility"
+	"github.com/xataio/xata-cnpg/pkg/system/compatibility"
 )
 
 const (

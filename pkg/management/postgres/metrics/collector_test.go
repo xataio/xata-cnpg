@@ -27,8 +27,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	io_prometheus_client "github.com/prometheus/client_model/go"
 
-	pluginClient "github.com/cloudnative-pg/cloudnative-pg/internal/cnpi/plugin/client"
-	postgresutils "github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/utils"
+	pluginClient "github.com/xataio/xata-cnpg/internal/cnpi/plugin/client"
+	postgresutils "github.com/xataio/xata-cnpg/pkg/management/postgres/utils"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

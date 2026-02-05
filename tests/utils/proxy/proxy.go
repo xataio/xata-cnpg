@@ -27,7 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/url"
+	"github.com/xataio/xata-cnpg/pkg/management/url"
 )
 
 // runProxyRequest makes a GET call on the pod interface proxy, and returns the raw response

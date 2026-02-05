@@ -28,8 +28,8 @@ import (
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/configparser"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/versions"
+	"github.com/xataio/xata-cnpg/pkg/configparser"
+	"github.com/xataio/xata-cnpg/pkg/versions"
 )
 
 var configurationLog = log.WithName("configuration")

@@ -32,9 +32,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/internal/management/utils"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/management/utils"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 )
 
 // roleAction encodes the action necessary for a role, i.e. ignore, or CRUD

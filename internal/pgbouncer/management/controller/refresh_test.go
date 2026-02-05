@@ -23,7 +23,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/pgbouncer/config"
+	"github.com/xataio/xata-cnpg/pkg/management/pgbouncer/config"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

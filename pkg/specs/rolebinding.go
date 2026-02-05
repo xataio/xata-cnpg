@@ -23,7 +23,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 // CreateRoleBinding is the binding between the permissions that the instance manager can use

@@ -22,9 +22,9 @@ package controller
 import (
 	"fmt"
 
-	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/promotiontoken"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/promotiontoken"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 // Assuming this PostgreSQL instance is a replica and we have a promotion token

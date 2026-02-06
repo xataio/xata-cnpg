@@ -597,3 +597,24 @@ jobs:
             jq -r '.[] | (."image.name" | sub(",.*";"" )) + "@" + ."containerimage.digest"'
           )
           cosign sign --yes ${images}
+
+      - name: Generate operator manifest
+        if: env.PUSH == 'true'
+        env:
+          CONTROLLER_IMG_DIGEST: ${{ fromJSON(steps.bake-push.outputs.metadata)['distroless']['containerimage.digest'] }}
+        run: |
+          make generate-manifest
+
+      - name: Setup Flux CLI
+        if: env.PUSH == 'true'
+        uses: fluxcd/flux2/action@main
+
+      - name: Push manifest as OCI artifact
+        if: env.PUSH == 'true'
+        run: |
+          flux push artifact \
+            oci://${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/cloudnative-pg-manifest:${{ env.IMAGE_TAG }} \
+            --path="${OPERATOR_MANIFEST_PATH}" \
+            --source="${{ github.server_url }}/${{ github.repository }}" \
+            --revision="${{ env.IMAGE_TAG }}@sha1:${{ env.COMMIT_SHA }}" \
+            --reproducible

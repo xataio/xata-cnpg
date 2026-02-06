@@ -606,20 +606,6 @@ jobs:
         run: |
           make generate-manifest
 
-      - name: Setup Flux CLI
-        if: env.PUSH == 'true'
-        uses: fluxcd/flux2/action@main
-
-      - name: Push manifest as OCI artifact
-        if: env.PUSH == 'true'
-        run: |
-          flux push artifact \
-            oci://${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/cloudnative-pg-manifest:${{ env.IMAGE_TAG }} \
-            --path="${OPERATOR_MANIFEST_PATH}" \
-            --source="${{ github.server_url }}/${{ github.repository }}" \
-            --revision="${{ env.IMAGE_TAG }}@sha1:${{ env.COMMIT_SHA }}" \
-            --reproducible
-
       - name: Checkout maki repo
         if: env.PUSH == 'true'
         uses: actions/checkout@v4
@@ -633,111 +619,58 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GIT_TOKEN }}
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
-        working-directory: maki-repo
         run: |
           set -euo pipefail
 
-          COMPONENT_DIR="kustomize/components/xata-cnpg-1.28.0"
-          SOURCE_COMPONENT_DIR="kustomize/components/cnpg-1.28.0"
-          MANIFEST_OCI_URL="oci://ghcr.io/xataio/cloudnative-pg-manifest"
+          COMPONENT_DIR="maki-repo/kustomize/components/xata-cnpg-1.28.0"
+          SOURCE_COMPONENT_DIR="maki-repo/kustomize/components/cnpg-1.28.0"
 
           # Create component directory
           mkdir -p "$COMPONENT_DIR"
+
+          # Copy the generated manifest directly into the component
+          cp "${OPERATOR_MANIFEST_PATH}" "$COMPONENT_DIR/operator-manifest.yaml"
 
           # Copy static files from original component
           cp "$SOURCE_COMPONENT_DIR/network.yaml" "$COMPONENT_DIR/"
           cp "$SOURCE_COMPONENT_DIR/custom-metrics.yaml" "$COMPONENT_DIR/"
           cp "$SOURCE_COMPONENT_DIR/cnpg-rollout-config.yaml" "$COMPONENT_DIR/"
+          cp "$SOURCE_COMPONENT_DIR/patch-cnpg.yaml.patch" "$COMPONENT_DIR/"
           cp "$SOURCE_COMPONENT_DIR/patch-scale-to-zero-rbac.yaml.patch" "$COMPONENT_DIR/"
 
-          # Create OCIRepository resource
-          cat > "$COMPONENT_DIR/oci-source.yaml" << EOF
-          apiVersion: source.toolkit.fluxcd.io/v1beta2
-          kind: OCIRepository
-          metadata:
-            name: xata-cnpg-operator
-            namespace: flux-system
-          spec:
-            interval: 5m
-            url: ${MANIFEST_OCI_URL}
-            ref:
-              tag: ${IMAGE_TAG}
-            secretRef:
-              name: ghcr-io
-          EOF
-
-          # Create Flux Kustomization with patches
-          cat > "$COMPONENT_DIR/flux-kustomization.yaml" << 'EOF'
-          apiVersion: kustomize.toolkit.fluxcd.io/v1
-          kind: Kustomization
-          metadata:
-            name: xata-cnpg-operator
-            namespace: flux-system
-          spec:
-            interval: 10m
-            sourceRef:
-              kind: OCIRepository
-              name: xata-cnpg-operator
-            path: ./
-            prune: true
-            targetNamespace: cnpg-system
-            patches:
-              - patch: |
-                  apiVersion: apps/v1
-                  kind: Deployment
-                  metadata:
-                    name: cnpg-controller-manager
-                  spec:
-                    replicas: 2
-                    template:
-                      spec:
-                        affinity:
-                          podAntiAffinity:
-                            preferredDuringSchedulingIgnoredDuringExecution:
-                              - weight: 100
-                                podAffinityTerm:
-                                  labelSelector:
-                                    matchLabels:
-                                      app.kubernetes.io/name: cloudnative-pg
-                                  topologyKey: kubernetes.io/hostname
-                        tolerations:
-                          - key: "xata.io/workload"
-                            value: "dataplane"
-                            effect: "NoSchedule"
-                        containers:
-                          - name: manager
-                            resources:
-                              limits:
-                                cpu: "1"
-                                memory: 1Gi
-                              requests:
-                                cpu: 100m
-                                memory: 1Gi
-                target:
-                  kind: Deployment
-                  name: cnpg-controller-manager
-          EOF
-
           # Create kustomization.yaml for the component
+          # Same structure as cnpg-1.28.0 but with local manifest instead of URL
           cat > "$COMPONENT_DIR/kustomization.yaml" << 'EOF'
           apiVersion: kustomize.config.k8s.io/v1alpha1
           kind: Component
 
           resources:
-            - oci-source.yaml
-            - flux-kustomization.yaml
+            - operator-manifest.yaml
             - https://github.com/xataio/cnpg-i-scale-to-zero/releases/download/v0.1.6/manifest.yaml
+
             - network.yaml
             - custom-metrics.yaml
             - cnpg-rollout-config.yaml
+
+            # Pod and ServiceMonitor from the prometheus-operator. These are required by
+            # CNPG[1] since it wants to create this resource as monitored is enabled. We
+            # do not run Prometheus in our clusters, but we can still use the CRDs for
+            # discovery in OTEL and the like.
+            #
+            # [1]: https://cloudnative-pg.io/documentation/1.25/monitoring/#monitoring-the-operator
             - https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.82.0/example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml
             - https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.82.0/example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml
 
           patches:
+            - path: patch-cnpg.yaml.patch
+              target:
+                kind: Deployment
+                name: cnpg-controller-manager
             - path: patch-scale-to-zero-rbac.yaml.patch
               target:
                 kind: ClusterRole
                 name: cnpg-scale-to-zero-sidecar-role
+            # Add dataplane tolerations to CNPG deployments (same as base/dataplane applies to its resources)
             - target:
                 kind: Deployment
                 namespace: cnpg-system
@@ -755,12 +688,7 @@ jobs:
                           effect: "NoSchedule"
           EOF
 
-          # Update dev overlays to use xata-cnpg component
-          for overlay in kustomize/overlays/dev/dataplane/us-east-1/*/kustomization.yaml; do
-            if [ -f "$overlay" ]; then
-              sed -i 's|components/cnpg-1.28.0|components/xata-cnpg-1.28.0|g' "$overlay"
-            fi
-          done
+          cd maki-repo
 
           # Check if there are changes
           if git diff --quiet && git diff --cached --quiet; then
@@ -778,10 +706,12 @@ jobs:
 
           # Commit and push
           git add .
-          git commit -m "Test xata-cnpg operator: ${IMAGE_TAG}
+          git commit -m "Add xata-cnpg-1.28.0 component: ${IMAGE_TAG}
 
-          Configures dev environment to use xata-cnpg operator fork.
-          Manifest: ${MANIFEST_OCI_URL}:${IMAGE_TAG}
+          Adds the xata-cnpg operator component for testing.
+          Image: ghcr.io/xataio/cloudnative-pg:${IMAGE_TAG}
+
+          To use: change your overlay to reference components/xata-cnpg-1.28.0 instead of components/cnpg-1.28.0
 
           Source: ${{ github.server_url }}/${{ github.repository }}/commit/${{ env.COMMIT_SHA }}"
 
@@ -795,18 +725,22 @@ jobs:
             echo "PR URL: https://github.com/xataio/maki/pull/${EXISTING_PR}"
           else
             PR_URL=$(gh pr create \
-              --title "Test xata-cnpg operator: ${IMAGE_TAG}" \
+              --title "Add xata-cnpg operator component: ${IMAGE_TAG}" \
               --body "## Summary
-          Configures dev environment to use xata-cnpg operator fork for testing.
+          Adds the \`xata-cnpg-1.28.0\` component containing the xata-cnpg operator fork.
 
           ### Details
-          - **Manifest OCI**: \`${MANIFEST_OCI_URL}:${IMAGE_TAG}\`
+          - **Image**: \`ghcr.io/xataio/cloudnative-pg:${IMAGE_TAG}\`
           - **Source commit**: ${{ github.server_url }}/${{ github.repository }}/commit/${{ env.COMMIT_SHA }}
 
           ### Usage
-          Deploy to dev using this branch to test the changes.
+          To test, update your overlay's kustomization.yaml to use this component:
+          \`\`\`yaml
+          components:
+            - ../../../components/xata-cnpg-1.28.0  # instead of cnpg-1.28.0
+          \`\`\`
 
-          > ⚠️ This PR is for testing only and should not be merged to main.
+          > **Note**: This PR only adds the component. It does NOT automatically switch any overlays to use it.
 
           ---
           🤖 Generated by [xata-cnpg CI](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})")

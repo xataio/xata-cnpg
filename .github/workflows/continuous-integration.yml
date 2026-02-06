@@ -590,8 +590,10 @@ jobs:
         if: |
           env.SIGN_IMAGES == 'true' &&
           env.PUSH == 'true'
+        env:
+          BAKE_METADATA: ${{ steps.bake-push.outputs.metadata }}
         run: |
-          images=$(echo '${{ steps.bake-push.outputs.metadata }}' |
+          images=$(echo "${BAKE_METADATA}" |
             jq -r '.[] | (."image.name" | sub(",.*";"" )) + "@" + ."containerimage.digest"'
           )
           cosign sign --yes ${images}

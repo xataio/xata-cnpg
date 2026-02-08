@@ -695,7 +695,7 @@ var _ = Describe("PodSpec drift detection", func() {
 							ReadOnly:         false,
 							MountPath:        "/var/lib/postgresql/data",
 							SubPath:          "",
-							MountPropagation: nil,
+							MountPropagation: ptr.To(corev1.MountPropagationHostToContainer),
 							SubPathExpr:      "",
 						},
 						{
@@ -729,7 +729,7 @@ var _ = Describe("PodSpec drift detection", func() {
 							ReadOnly:         false,
 							MountPath:        "/var/lib/postgresql/data",
 							SubPath:          "",
-							MountPropagation: nil,
+							MountPropagation: ptr.To(corev1.MountPropagationHostToContainer),
 							SubPathExpr:      "",
 						},
 					},
@@ -799,7 +799,7 @@ var _ = Describe("PodSpec drift detection", func() {
 							ReadOnly:         false,
 							MountPath:        "/var/lib/postgresql/data",
 							SubPath:          "",
-							MountPropagation: nil,
+							MountPropagation: ptr.To(corev1.MountPropagationHostToContainer),
 							SubPathExpr:      "",
 						},
 						{

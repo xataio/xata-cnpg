@@ -229,10 +229,12 @@ func createVolumesAndVolumeMountsForSQLRefs(
 // CreatePostgresVolumeMounts creates the volume mounts that are used
 // by PostgreSQL Pods
 func CreatePostgresVolumeMounts(cluster apiv1.Cluster) []corev1.VolumeMount {
+	mountPropagationHostToContainer := corev1.MountPropagationHostToContainer
 	volumeMounts := []corev1.VolumeMount{
 		{
-			Name:      "pgdata",
-			MountPath: "/var/lib/postgresql/data",
+			Name:             "pgdata",
+			MountPath:        "/var/lib/postgresql/data",
+			MountPropagation: &mountPropagationHostToContainer,
 		},
 		{
 			Name:      "scratch-data",

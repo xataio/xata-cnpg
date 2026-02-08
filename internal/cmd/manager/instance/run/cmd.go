@@ -179,6 +179,10 @@ func runSubCommand( //nolint:gocognit,gocyclo
 		"build", versions.Info,
 		"skipNameValidation", skipNameValidation)
 
+	if err := waitForPGData(ctx, instance.PgData); err != nil {
+		return err
+	}
+
 	contextLogger.Info("Checking for free disk space for WALs before starting PostgreSQL")
 	hasDiskSpaceForWals, err := instance.CheckHasDiskSpaceForWAL(ctx)
 	if err != nil {

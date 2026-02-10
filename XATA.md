@@ -25,12 +25,12 @@ This is Xata's fork of [CloudNativePG](https://github.com/cloudnative-pg/cloudna
 
 | Artifact | Location |
 |----------|----------|
-| Image | `ghcr.io/xataio/xata-cnpg:sha.<commit>` |
-| Chart | `oci://ghcr.io/xataio/xata-cnpg/charts/xata-cnpg:0.0.0-sha.<commit>` |
+| Image | `ghcr.io/xataio/xata-cnpg:g<commit>` |
+| Chart | `oci://ghcr.io/xataio/xata-cnpg/charts/xata-cnpg:0.0.0-g<commit>` |
 
 ### Versioning
 
-Both image and chart use the same version: `sha.<7-char-commit>`.
+Both image and chart use the same version: `g<7-char-commit>`.
 
 This means:
 - Every commit produces a unique, traceable version

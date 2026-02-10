@@ -4,7 +4,7 @@ CHART_NAME := xata-cnpg
 CHART_REGISTRY ?= oci://ghcr.io/xataio/xata-cnpg/charts
 
 GIT_COMMIT_FULL := $(shell git rev-parse HEAD)
-GIT_COMMIT_SHORT := sha.$(shell printf '%.7s' $(GIT_COMMIT_FULL))
+GIT_COMMIT_SHORT := g$(shell printf '%.7s' $(GIT_COMMIT_FULL))
 
 env: # Print Makefile variables for debugging
 	@echo "CHART_NAME: $(CHART_NAME)"

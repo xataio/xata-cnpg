@@ -380,9 +380,6 @@ jobs:
             exit 1
           fi
 
-      - name: Install kustomize
-        uses: imranismail/setup-kustomize@v2
-
       - name: Check chart CRDs are up to date
         working-directory: charts
         run: |
@@ -631,14 +628,6 @@ jobs:
             --source="${{ github.server_url }}/${{ github.repository }}" \
             --revision="${{ env.IMAGE_TAG }}@sha1:${{ env.COMMIT_SHA }}" \
             --reproducible
-
-      - name: Set up Helm
-        if: env.PUSH == 'true'
-        uses: azure/setup-helm@v4
-
-      - name: Install yq
-        if: env.PUSH == 'true'
-        uses: mikefarah/yq@master
 
       - name: Login to GHCR (Helm)
         if: env.PUSH == 'true'

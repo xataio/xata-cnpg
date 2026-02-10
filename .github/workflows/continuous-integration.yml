@@ -380,6 +380,15 @@ jobs:
             exit 1
           fi
 
+      - name: Check chart CRDs are up to date
+        working-directory: charts
+        run: |
+          make update-crds
+          if git status --porcelain xata-cnpg/templates/crds | grep '^ M'; then
+            echo "Chart CRDs are out of date. Please run 'make update-crds' in the charts directory."
+            exit 1
+          fi
+
   buildx:
     name: Build containers
     needs:
@@ -464,7 +473,7 @@ jobs:
           echo "VERSION=${commit_version}" >> $GITHUB_ENV
           echo "COMMIT=${commit_short}" >> $GITHUB_ENV
           echo "COMMIT_SHA=${commit_sha}" >> $GITHUB_ENV
-          echo "IMAGE_TAG=${tag_name,,}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=g${commit_short}" >> $GITHUB_ENV
           echo "REPO_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
           # By default the container image is being pushed to the registry
@@ -619,3 +628,15 @@ jobs:
             --source="${{ github.server_url }}/${{ github.repository }}" \
             --revision="${{ env.IMAGE_TAG }}@sha1:${{ env.COMMIT_SHA }}" \
             --reproducible
+
+      - name: Login to GHCR (Helm)
+        if: env.PUSH == 'true'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push Helm chart
+        if: env.PUSH == 'true'
+        working-directory: charts
+        run: |
+          make inject-tags IMAGE="${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/xata-cnpg" TAG="${{ env.IMAGE_TAG }}"
+          make push-charts

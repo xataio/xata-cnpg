@@ -12,10 +12,14 @@ env: # Print Makefile variables for debugging
 	@echo "GIT_COMMIT_FULL: $(GIT_COMMIT_FULL)"
 	@echo "GIT_COMMIT_SHORT: $(GIT_COMMIT_SHORT)"
 
-# Update CRDs from operator source
+# Update CRDs from operator source.
+# Wraps output with Helm conditional so users can skip CRD installation via values.yaml (crds.create: false).
+# This matches upstream's release process: https://github.com/cloudnative-pg/charts/blob/main/RELEASE.md
 update-crds:
 	@echo "Updating CRDs from config/helm"
-	kustomize build ../config/helm > $(CHART_NAME)/templates/crds/crds.yaml
+	@echo '{{- if .Values.crds.create }}' > $(CHART_NAME)/templates/crds/crds.yaml
+	@kustomize build ../config/helm >> $(CHART_NAME)/templates/crds/crds.yaml
+	@echo '{{- end }}' >> $(CHART_NAME)/templates/crds/crds.yaml
 
 # Inject image tag into chart values.yaml
 # Usage: make inject-tags IMAGE=ghcr.io/xataio/xata-cnpg TAG=g1234567

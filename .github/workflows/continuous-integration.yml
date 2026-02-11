@@ -657,11 +657,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          OVERLAY_DIR="maki-repo/kustomize/overlays/dev/dataplane/us-east-1/cell-1"
+          cd maki-repo
+
+          OVERLAY_DIR="kustomize/overlays/dev/dataplane/us-east-1/cell-1"
           KUSTOMIZATION_FILE="$OVERLAY_DIR/kustomization.yaml"
           VALUES_FILE="$OVERLAY_DIR/xata-cnpg-values.yaml"
-
-          cd maki-repo
 
           # Switch component from cnpg-1.28.0 to xata-cnpg-1.28.0
           sed -i 's|components/cnpg-1.28.0|components/xata-cnpg-1.28.0|g' "$KUSTOMIZATION_FILE"

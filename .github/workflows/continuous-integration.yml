@@ -639,7 +639,7 @@ jobs:
         working-directory: charts
         run: |
           make inject-tags IMAGE="${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/xata-cnpg" TAG="${{ env.IMAGE_TAG }}"
-          make push-charts
+          make push-charts VERSION="${{ env.IMAGE_TAG }}"
 
       - name: Checkout maki repo
         if: env.PUSH == 'true'

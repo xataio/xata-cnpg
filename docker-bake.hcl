@@ -17,14 +17,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-variable "environment" {
-  default = "testing"
-  validation {
-    condition = contains(["testing", "production"], environment)
-    error_message = "environment must be either testing or production"
-  }
-}
-
 variable "registry" {
   default = "localhost:5000"
 }
@@ -48,8 +40,6 @@ variable "buildVersion" {
 variable "revision" {
   default = ""
 }
-
-suffix = (environment == "testing") ? "-testing" : ""
 
 title = "Xata CNPG Operator"
 description = "This Docker image contains Xata CNPG Operator."
@@ -77,8 +67,8 @@ target "default" {
   name = "${distro}"
   platforms = ["linux/amd64", "linux/arm64"]
   tags = [
-    "${registry}/cloudnative-pg${suffix}:${tag}${distros[distro].tag}",
-    latest("${registry}/cloudnative-pg${suffix}", "${latest}"),
+    "${registry}/cloudnative-pg:${tag}${distros[distro].tag}",
+    latest("${registry}/cloudnative-pg", "${latest}"),
   ]
 
   dockerfile = "Dockerfile"

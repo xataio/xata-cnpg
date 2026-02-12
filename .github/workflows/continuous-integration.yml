@@ -26,7 +26,7 @@ env:
   KUBEBUILDER_VERSION: "2.3.1"
   # renovate: datasource=github-tags depName=kubernetes-sigs/kind versioning=semver
   KIND_VERSION: "v0.30.0"
-  OPERATOR_IMAGE_NAME: "ghcr.io/${{ github.repository }}-testing"
+  OPERATOR_IMAGE_NAME: "ghcr.io/${{ github.repository }}/cloudnative-pg"
   API_DOC_NAME: "cloudnative-pg.v1.md"
   # Keep in mind that adding more platforms (architectures) will increase the building
   # time even if we use the ghcache for the building process.
@@ -37,10 +37,12 @@ env:
   BUILD_PLUGIN_RELEASE_ARGS: "build --skip=validate --clean --id kubectl-cnpg --timeout 60m"
   BUILD_MANAGER_RELEASE_ARGS: "build --skip=validate --clean --id manager-race"
   REPOSITORY_OWNER: "xataio"
+  REPO: ${{ github.repository }}
   REGISTRY: "ghcr.io"
   REGISTRY_USER: ${{ github.actor }}
   REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
   SIGN_IMAGES: "true"
+  OPERATOR_MANIFEST_PATH: "dist/operator-manifest.yaml"
 
 defaults:
   run:
@@ -84,7 +86,7 @@ jobs:
           concurrent_skipping: 'same_content'
           skip_after_successful_duplicate: 'true'
           paths_ignore: '["README.md", "docs/**"]'
-          do_not_skip: '["pull_request", "workflow_dispatch", "schedule"]'
+          do_not_skip: '["push", "pull_request", "workflow_dispatch", "schedule"]'
 
   # Classify codebase changes along 5 different dimensions based on the files
   # changed in the commit/PR, and create 5 different filters which are used in
@@ -379,6 +381,15 @@ jobs:
             exit 1
           fi
 
+      - name: Check chart CRDs are up to date
+        working-directory: charts
+        run: |
+          make update-crds
+          if git status --porcelain cloudnative-pg/templates/crds | grep '^ M'; then
+            echo "Chart CRDs are out of date. Please run 'make update-crds' in the charts directory."
+            exit 1
+          fi
+
   buildx:
     name: Build containers
     needs:
@@ -463,7 +474,7 @@ jobs:
           echo "VERSION=${commit_version}" >> $GITHUB_ENV
           echo "COMMIT=${commit_short}" >> $GITHUB_ENV
           echo "COMMIT_SHA=${commit_sha}" >> $GITHUB_ENV
-          echo "IMAGE_TAG=${tag_name,,}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=g${commit_short}" >> $GITHUB_ENV
           echo "REPO_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
           # By default the container image is being pushed to the registry
@@ -538,10 +549,9 @@ jobs:
         uses: docker/bake-action@3acf805d94d93a86cce4ca44798a76464a75b88c # v6
         id: bake-push
         env:
-          environment: "testing"
           buildVersion: ${{ env.VERSION }}
           tag: ${{ env.IMAGE_TAG }}
-          registry: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}
+          registry: ${{ env.REGISTRY }}/${{ env.REPO }}
           revision: ${{ env.COMMIT }}
         with:
           source: .
@@ -590,8 +600,43 @@ jobs:
         if: |
           env.SIGN_IMAGES == 'true' &&
           env.PUSH == 'true'
+        env:
+          BAKE_METADATA: ${{ steps.bake-push.outputs.metadata }}
         run: |
-          images=$(echo '${{ steps.bake-push.outputs.metadata }}' |
+          images=$(echo "${BAKE_METADATA}" |
             jq -r '.[] | (."image.name" | sub(",.*";"" )) + "@" + ."containerimage.digest"'
           )
           cosign sign --yes ${images}
+
+      - name: Generate operator manifest
+        if: env.PUSH == 'true'
+        env:
+          CONTROLLER_IMG_DIGEST: ${{ fromJSON(steps.bake-push.outputs.metadata)['distroless']['containerimage.digest'] }}
+        run: |
+          make generate-manifest
+
+      - name: Setup Flux CLI
+        if: env.PUSH == 'true'
+        uses: fluxcd/flux2/action@main
+
+      - name: Push manifest as OCI artifact
+        if: env.PUSH == 'true'
+        run: |
+          flux push artifact \
+            oci://${{ env.REGISTRY }}/${{ env.REPO }}/cloudnative-pg-manifest:${{ env.IMAGE_TAG }} \
+            --path="${OPERATOR_MANIFEST_PATH}" \
+            --source="${{ github.server_url }}/${{ github.repository }}" \
+            --revision="${{ env.IMAGE_TAG }}@sha1:${{ env.COMMIT_SHA }}" \
+            --reproducible
+
+      - name: Login to GHCR (Helm)
+        if: env.PUSH == 'true'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push Helm chart
+        if: env.PUSH == 'true'
+        working-directory: charts
+        run: |
+          make inject-tags IMAGE="${{ env.REGISTRY }}/${{ env.REPO }}/cloudnative-pg" TAG="${{ env.IMAGE_TAG }}"
+          make push-charts

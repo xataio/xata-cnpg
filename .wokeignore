@@ -1,5 +1,6 @@
 licenses
 testdata
 releases/
+charts/
 .github/workflows/release-publish.yml
 .github/workflows/continuous-integration.yml

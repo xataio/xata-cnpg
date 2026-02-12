@@ -118,7 +118,7 @@ CONFIG_TMP_DIR=$(mktemp -d)
 cp -r config/* "${CONFIG_TMP_DIR}"
 (
     cd "${CONFIG_TMP_DIR}/manager"
-    "${KUSTOMIZE}" edit set image controller="ghcr.io/cloudnative-pg/cloudnative-pg:${release_version}"
+    "${KUSTOMIZE}" edit set image controller="ghcr.io/xataio/xata-cnpg/cloudnative-pg:${release_version}"
 )
 
 "${KUSTOMIZE}" build "${CONFIG_TMP_DIR}/default" > "${release_manifest}"

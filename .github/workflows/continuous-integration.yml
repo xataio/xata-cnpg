@@ -26,7 +26,7 @@ env:
   KUBEBUILDER_VERSION: "2.3.1"
   # renovate: datasource=github-tags depName=kubernetes-sigs/kind versioning=semver
   KIND_VERSION: "v0.30.0"
-  OPERATOR_IMAGE_NAME: "ghcr.io/${{ env.REPO }}/cloudnative-pg"
+  OPERATOR_IMAGE_NAME: "ghcr.io/${{ github.repository }}/cloudnative-pg"
   API_DOC_NAME: "cloudnative-pg.v1.md"
   # Keep in mind that adding more platforms (architectures) will increase the building
   # time even if we use the ghcache for the building process.

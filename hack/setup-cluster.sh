@@ -534,7 +534,7 @@ deploy() {
 }
 
 print_image() {
-  echo "${registry_name}:5000/cloudnative-pg-testing:latest"
+  echo "${registry_name}:5000/cloudnative-pg:latest"
 }
 
 export_logs() {

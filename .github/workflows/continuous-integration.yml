@@ -480,12 +480,12 @@ jobs:
           # By default the container image is being pushed to the registry
           echo "PUSH=true" >> $GITHUB_ENV
 
-          # Check if commit message contains [skip-pr] to skip PR generation
+          # Check if commit message contains [create-pr] to create maki PR
           commit_message=$(git log -1 --pretty=format:'%s' "${commit_sha}")
-          if [[ "$commit_message" == *"[skip-pr]"* ]]; then
-            echo "SKIP_PR=true" >> $GITHUB_ENV
+          if [[ "$commit_message" == *"[create-pr]"* ]]; then
+            echo "CREATE_PR=true" >> $GITHUB_ENV
           else
-            echo "SKIP_PR=false" >> $GITHUB_ENV
+            echo "CREATE_PR=false" >> $GITHUB_ENV
           fi
 
       # GITHUB_TOKEN has restricted permissions if the pull_request has been opened
@@ -650,7 +650,7 @@ jobs:
           make push-charts VERSION="${{ env.IMAGE_TAG }}"
 
       - name: Checkout maki repo
-        if: env.PUSH == 'true' && env.SKIP_PR != 'true'
+        if: env.PUSH == 'true' && env.CREATE_PR == 'true'
         uses: actions/checkout@v4
         with:
           repository: xataio/maki
@@ -658,7 +658,7 @@ jobs:
           path: maki-repo
 
       - name: Create PR in maki for dev testing
-        if: env.PUSH == 'true' && env.SKIP_PR != 'true'
+        if: env.PUSH == 'true' && env.CREATE_PR == 'true'
         env:
           GH_TOKEN: ${{ secrets.GIT_TOKEN }}
           CHART_VERSION: 0.0.0-${{ env.IMAGE_TAG }}

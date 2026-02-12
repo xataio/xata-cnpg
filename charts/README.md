@@ -13,7 +13,7 @@
 ## Local Testing
 
 ```bash
-make inject-tags IMAGE=ghcr.io/xataio/xata-cnpg TAG=local
+make inject-tags IMAGE=ghcr.io/xataio/xata-cnpg/cloudnative-pg TAG=local
 make lint
 make template
 helm install xata-cnpg ./xata-cnpg -n cnpg-system --create-namespace

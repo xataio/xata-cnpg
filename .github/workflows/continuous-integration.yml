@@ -26,7 +26,7 @@ env:
   KUBEBUILDER_VERSION: "2.3.1"
   # renovate: datasource=github-tags depName=kubernetes-sigs/kind versioning=semver
   KIND_VERSION: "v0.30.0"
-  OPERATOR_IMAGE_NAME: "ghcr.io/${{ github.repository }}-testing"
+  OPERATOR_IMAGE_NAME: "ghcr.io/${{ github.repository }}/cloudnative-pg"
   API_DOC_NAME: "cloudnative-pg.v1.md"
   # Keep in mind that adding more platforms (architectures) will increase the building
   # time even if we use the ghcache for the building process.
@@ -37,6 +37,7 @@ env:
   BUILD_PLUGIN_RELEASE_ARGS: "build --skip=validate --clean --id kubectl-cnpg --timeout 60m"
   BUILD_MANAGER_RELEASE_ARGS: "build --skip=validate --clean --id manager-race"
   REPOSITORY_OWNER: "xataio"
+  REPO: ${{ github.repository }}
   REGISTRY: "ghcr.io"
   REGISTRY_USER: ${{ github.actor }}
   REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
@@ -384,7 +385,7 @@ jobs:
         working-directory: charts
         run: |
           make update-crds
-          if git status --porcelain xata-cnpg/templates/crds | grep '^ M'; then
+          if git status --porcelain cloudnative-pg/templates/crds | grep '^ M'; then
             echo "Chart CRDs are out of date. Please run 'make update-crds' in the charts directory."
             exit 1
           fi
@@ -548,10 +549,9 @@ jobs:
         uses: docker/bake-action@3acf805d94d93a86cce4ca44798a76464a75b88c # v6
         id: bake-push
         env:
-          environment: "testing"
           buildVersion: ${{ env.VERSION }}
           tag: ${{ env.IMAGE_TAG }}
-          registry: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}
+          registry: ${{ env.REGISTRY }}/${{ env.REPO }}
           revision: ${{ env.COMMIT }}
         with:
           source: .
@@ -623,7 +623,7 @@ jobs:
         if: env.PUSH == 'true'
         run: |
           flux push artifact \
-            oci://${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/cloudnative-pg-manifest:${{ env.IMAGE_TAG }} \
+            oci://${{ env.REGISTRY }}/${{ env.REPO }}/cloudnative-pg-manifest:${{ env.IMAGE_TAG }} \
             --path="${OPERATOR_MANIFEST_PATH}" \
             --source="${{ github.server_url }}/${{ github.repository }}" \
             --revision="${{ env.IMAGE_TAG }}@sha1:${{ env.COMMIT_SHA }}" \
@@ -638,5 +638,5 @@ jobs:
         if: env.PUSH == 'true'
         working-directory: charts
         run: |
-          make inject-tags IMAGE="${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/xata-cnpg" TAG="${{ env.IMAGE_TAG }}"
+          make inject-tags IMAGE="${{ env.REGISTRY }}/${{ env.REPO }}/cloudnative-pg" TAG="${{ env.IMAGE_TAG }}"
           make push-charts

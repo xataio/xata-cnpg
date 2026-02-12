@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-CHART_NAME := xata-cnpg
+CHART_NAME := cloudnative-pg
 CHART_REGISTRY ?= oci://ghcr.io/xataio/xata-cnpg/charts
 
 GIT_COMMIT_FULL := $(shell git rev-parse HEAD)
@@ -22,7 +22,7 @@ update-crds:
 	@echo '{{- end }}' >> $(CHART_NAME)/templates/crds/crds.yaml
 
 # Inject image tag into chart values.yaml
-# Usage: make inject-tags IMAGE=ghcr.io/xataio/xata-cnpg TAG=g1234567
+# Usage: make inject-tags IMAGE=ghcr.io/xataio/xata-cnpg/cloudnative-pg TAG=g1234567
 inject-tags:
 	@echo "Injecting image $(IMAGE):$(TAG) into $(CHART_NAME)/values.yaml"
 	yq eval '.image.repository = "$(IMAGE)"' -i $(CHART_NAME)/values.yaml

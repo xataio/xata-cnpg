@@ -675,7 +675,7 @@ jobs:
               version: '"$CHART_VERSION"'\
               releaseName: cloudnative-pg\
               namespace: cnpg-system\
-              valuesFile: cloudnative-pg-values.yaml' "$KUSTOMIZATION_FILE"
+              valuesFile: ../../../../../components/xata-cnpg-1.28.0/cloudnative-pg-values.yaml' "$KUSTOMIZATION_FILE"
           else
             # Update existing version
             sed -i 's|version: 0.0.0-g[a-f0-9]*|version: '"$CHART_VERSION"'|g' "$KUSTOMIZATION_FILE"

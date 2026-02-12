@@ -18,7 +18,7 @@
 #
 
 # Image URL to use all building/pushing image targets
-IMAGE_NAME ?= ghcr.io/xataio/cloudnative-pg-testing
+IMAGE_NAME ?= ghcr.io/xataio/xata-cnpg/cloudnative-pg
 
 # Prevent e2e tests to proceed with empty tag which
 # will be considered as "latest".

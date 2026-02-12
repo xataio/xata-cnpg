@@ -25,8 +25,8 @@ This is Xata's fork of [CloudNativePG](https://github.com/cloudnative-pg/cloudna
 
 | Artifact | Location |
 |----------|----------|
-| Image | `ghcr.io/xataio/xata-cnpg:g<commit>` |
-| Chart | `oci://ghcr.io/xataio/xata-cnpg/charts/xata-cnpg:0.0.0-g<commit>` |
+| Image | `ghcr.io/xataio/xata-cnpg/cloudnative-pg:g<commit>` |
+| Chart | `oci://ghcr.io/xataio/xata-cnpg/charts/cloudnative-pg:0.0.0-g<commit>` |
 
 ### Versioning
 

@@ -385,7 +385,7 @@ jobs:
         working-directory: charts
         run: |
           make update-crds
-          if git status --porcelain xata-cnpg/templates/crds | grep '^ M'; then
+          if git status --porcelain cloudnative-pg/templates/crds | grep '^ M'; then
             echo "Chart CRDs are out of date. Please run 'make update-crds' in the charts directory."
             exit 1
           fi

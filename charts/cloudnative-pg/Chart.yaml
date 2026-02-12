@@ -17,7 +17,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 apiVersion: v2
-name: xata-cnpg
+name: cloudnative-pg
 description: Xata's CloudNativePG Operator Helm Chart
 type: application
 version: "0.1.0"

@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-CHART_NAME := xata-cnpg
+CHART_NAME := cloudnative-pg
 CHART_REGISTRY ?= oci://ghcr.io/xataio/xata-cnpg/charts
 
 GIT_COMMIT_FULL := $(shell git rev-parse HEAD)

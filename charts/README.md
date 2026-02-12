@@ -1,4 +1,4 @@
-# xata-cnpg Helm Chart
+# cloudnative-pg Helm Chart
 
 ## Makefile Targets
 
@@ -16,7 +16,7 @@
 make inject-tags IMAGE=ghcr.io/xataio/xata-cnpg/cloudnative-pg TAG=local
 make lint
 make template
-helm install xata-cnpg ./xata-cnpg -n cnpg-system --create-namespace
+helm install cloudnative-pg ./cloudnative-pg -n cnpg-system --create-namespace
 ```
 
 ## Registry

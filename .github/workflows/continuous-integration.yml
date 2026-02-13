@@ -709,6 +709,8 @@ jobs:
               --body "## Summary
           Updates xata-cnpg component to use cloudnative-pg chart version ${CHART_VERSION}.
 
+          > ⚠️ **Warning**: This is for testing in dev environments only. Do not deploy to staging/production without proper review.
+
           ### Details
           - **Chart**: \`oci://ghcr.io/xataio/xata-cnpg/charts/cloudnative-pg:${CHART_VERSION}\`
           - **Image**: \`ghcr.io/xataio/xata-cnpg/cloudnative-pg:${{ env.IMAGE_TAG }}\`

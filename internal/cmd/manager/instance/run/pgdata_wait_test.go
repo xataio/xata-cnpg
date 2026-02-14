@@ -33,7 +33,7 @@ var _ = Describe("waitForPGData", func() {
 	It("returns immediately when PGDATA already exists", func() {
 		tmpDir := GinkgoT().TempDir()
 		pgData := filepath.Join(tmpDir, "pgdata")
-		Expect(os.Mkdir(pgData, 0o755)).To(Succeed())
+		Expect(os.Mkdir(pgData, 0o750)).To(Succeed())
 
 		ctx := context.Background()
 		err := waitForPGData(ctx, pgData)
@@ -47,7 +47,7 @@ var _ = Describe("waitForPGData", func() {
 		// Create PGDATA after a short delay
 		go func() {
 			time.Sleep(50 * time.Millisecond)
-			Expect(os.Mkdir(pgData, 0o755)).To(Succeed())
+			Expect(os.Mkdir(pgData, 0o750)).To(Succeed())
 		}()
 
 		ctx := context.Background()
@@ -63,9 +63,9 @@ var _ = Describe("waitForPGData", func() {
 		// Create marker file after a short delay
 		go func() {
 			time.Sleep(50 * time.Millisecond)
-			f, err := os.Create(markerPath)
+			f, err := os.Create(markerPath) //nolint:gosec
 			Expect(err).ToNot(HaveOccurred())
-			f.Close()
+			defer func() { Expect(f.Close()).To(Succeed()) }()
 		}()
 
 		ctx := context.Background()

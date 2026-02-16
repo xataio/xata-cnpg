@@ -12,7 +12,13 @@ This is Xata's fork of [CloudNativePG](https://github.com/cloudnative-pg/cloudna
    make manifests
    cd charts && make update-crds
    ```
-3. Test locally, commit, and open a PR
+3. Test locally:
+   - **Unit tests**: `make test`
+   - **Local cluster**: `./hack/setup-cluster.sh create load deploy` (builds and deploys to a local `kind` cluster)
+   - **E2E tests**: See [contribute/e2e_testing_environment/README.md](contribute/e2e_testing_environment/README.md)
+
+   For full development environment setup, see [contribute/development_environment/README.md](contribute/development_environment/README.md).
+4. Commit and open a PR
 
 ### CI Pipeline
 
@@ -21,16 +27,30 @@ This is Xata's fork of [CloudNativePG](https://github.com/cloudnative-pg/cloudna
 - Verifies CRDs are up to date (both `config/crd` and `charts/`)
 - Builds and pushes image + Helm chart
 
+**Creating a test PR in maki:**
+
+Include `[create-pr]` in your commit message to automatically create a PR in the maki repo that updates the cloudnative-pg chart version. This is useful for testing changes in dev environments.
+
+```bash
+git commit -m "My changes [create-pr]"
+```
+
+> ⚠️ **Use with care:** This updates the chart version in the `xata-cnpg-1.28.0` component, which may affect multiple stages. Only merge for dev testing and revert before deploying to staging/production.
+
 **Artifacts:**
 
 | Artifact | Location |
 |----------|----------|
 | Image | `ghcr.io/xataio/xata-cnpg/cloudnative-pg:g<commit>` |
 | Chart | `oci://ghcr.io/xataio/xata-cnpg/charts/cloudnative-pg:0.0.0-g<commit>` |
+| Manifest | `oci://ghcr.io/xataio/xata-cnpg/cloudnative-pg-manifest:g<commit>` |
+
+> **Note:** The operator manifest is generated and pushed as an OCI artifact but is not currently used. It's available for future use cases like GitOps deployments without Helm.
 
 ### Versioning
 
-Both image and chart use the same version: `g<7-char-commit>`.
+- **Image tag**: `g<7-char-commit>` (e.g., `gf6db633`)
+- **Chart version**: `0.0.0-g<7-char-commit>` (e.g., `0.0.0-gf6db633`)
 
 This means:
 - Every commit produces a unique, traceable version

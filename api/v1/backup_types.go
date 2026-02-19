@@ -121,6 +121,7 @@ const (
 	BackupMethodPgBackRest BackupMethod = "pgBackRest"
 )
 
+// PgBackRestConfiguration defines the backup configuration using pgbackrest.
 type PgBackRestConfiguration struct {
 	Destination *PgBackRestDestination `json:"destination"`
 	Retention   *PgBackRestRetention   `json:"retention,omitempty"`
@@ -149,7 +150,7 @@ type PgBackRestS3 struct {
 	Endpoint string `json:"endpoint,omitempty"`
 	// The reference to the access key id
 	// +optional
-	AccessKeyId *SecretKeySelector `json:"accessKeyId,omitempty"`
+	AccessKeyID *SecretKeySelector `json:"accessKeyId,omitempty"`
 	// The reference to the secret access key
 	// +optional
 	SecretAccessKey *SecretKeySelector `json:"secretAccessKey,omitempty"`

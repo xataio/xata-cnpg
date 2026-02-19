@@ -2167,7 +2167,7 @@ const (
 )
 
 // BackupConfiguration defines how the backup of the cluster are taken.
-// The supported backup methods are BarmanObjectStore and VolumeSnapshot.
+// The supported backup methods are BarmanObjectStore, VolumeSnapshot, and PgBackRest.
 // For details and examples refer to the Backup and Recovery section of the
 // documentation
 type BackupConfiguration struct {
@@ -2178,6 +2178,10 @@ type BackupConfiguration struct {
 	// The configuration for the barman-cloud tool suite
 	// +optional
 	BarmanObjectStore *BarmanObjectStoreConfiguration `json:"barmanObjectStore,omitempty"`
+
+	// The configuration for pgbackrest
+	// +optional
+	PgBackRest *PgBackRestConfiguration `json:"pgBackRest,omitempty"`
 
 	// RetentionPolicy is the retention policy to be used for backups
 	// and WALs (i.e. '60d'). The retention policy is expressed in the form

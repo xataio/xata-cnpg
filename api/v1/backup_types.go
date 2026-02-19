@@ -116,7 +116,129 @@ const (
 	// BackupMethodPlugin means that this backup should be handled by
 	// a plugin
 	BackupMethodPlugin BackupMethod = "plugin"
+
+	// BackupMethodPgBackRest means using pgbackrest for backups
+	BackupMethodPgBackRest BackupMethod = "pgBackRest"
 )
+
+type PgBackRestConfiguration struct {
+	Destination *PgBackRestDestination `json:"destination"`
+	Retention   *PgBackRestRetention   `json:"retention,omitempty"`
+	Options     *PgBackRestOptions     `json:"options,omitempty"`
+}
+
+// PgBackRestDestination defines the storage destination for pgbackrest backups.
+// Exactly one of s3, gcs, or azure must be specified.
+// +kubebuilder:validation:XValidation:rule="[has(self.s3), has(self.gcs), has(self.azure)].filter(x, x).size() == 1",message="exactly one of s3, gcs, or azure must be specified"
+type PgBackRestDestination struct {
+	S3    *PgBackRestS3    `json:"s3,omitempty"`
+	GCS   *PgBackRestGCS   `json:"gcs,omitempty"`
+	Azure *PgBackRestAzure `json:"azure,omitempty"`
+}
+
+// PgBackRestS3 defines the S3-compatible storage configuration for pgbackrest.
+// +kubebuilder:validation:XValidation:rule="(self.inheritFromIAMRole == true) != (has(self.accessKeyId) && has(self.secretAccessKey))",message="either inheritFromIAMRole or both accessKeyId and secretAccessKey must be specified, but not both"
+type PgBackRestS3 struct {
+	// The S3 bucket name
+	Bucket string `json:"bucket"`
+	// The S3 region
+	Region string `json:"region"`
+	// The S3 endpoint, overriding the automatic endpoint discovery.
+	// Required for non-AWS S3-compatible storage (e.g. MinIO).
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+	// The reference to the access key id
+	// +optional
+	AccessKeyId *SecretKeySelector `json:"accessKeyId,omitempty"`
+	// The reference to the secret access key
+	// +optional
+	SecretAccessKey *SecretKeySelector `json:"secretAccessKey,omitempty"`
+	// Use IAM role-based authentication (e.g. IRSA, instance profile).
+	// Sets pgbackrest repo1-s3-key-type=auto.
+	// +optional
+	InheritFromIAMRole bool `json:"inheritFromIAMRole,omitempty"`
+}
+
+// PgBackRestRetention defines the backup retention policy for pgbackrest.
+type PgBackRestRetention struct {
+	// Number of full backups to retain. Required.
+	// +kubebuilder:validation:Minimum=1
+	Full int `json:"full"`
+	// Type of full backup retention: "count" (number of backups) or "time" (days).
+	// Defaults to "count".
+	// +optional
+	// +kubebuilder:validation:Enum=count;time
+	// +kubebuilder:default:=count
+	FullType string `json:"fullType,omitempty"`
+	// Number of WAL archive sets to retain. If not set, pgbackrest will
+	// use the full backup retention to determine WAL expiration.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	Archive *int `json:"archive,omitempty"`
+	// TODO: add differential backup retention (diff, diffType) when
+	// differential backups are supported
+}
+
+// PgBackRestOptions defines process-level settings for pgbackrest.
+type PgBackRestOptions struct {
+	// Compression algorithm. Defaults to "lz4".
+	// +optional
+	// +kubebuilder:validation:Enum=none;gz;bz2;lz4;zst
+	// +kubebuilder:default:=lz4
+	CompressType string `json:"compressType,omitempty"`
+	// Compression level (0-9). The meaning depends on the algorithm.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=9
+	CompressLevel *int `json:"compressLevel,omitempty"`
+	// Maximum number of parallel processes for backup/restore.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	ProcessMax *int `json:"processMax,omitempty"`
+	// Force an immediate checkpoint at backup start instead of
+	// waiting for the next scheduled checkpoint.
+	// +optional
+	StartFast *bool `json:"startFast,omitempty"`
+	// Only restore files that have changed. Speeds up restores.
+	// +optional
+	Delta *bool `json:"delta,omitempty"`
+	// Enable async WAL archiving for better throughput.
+	// +optional
+	ArchiveAsync *bool `json:"archiveAsync,omitempty"`
+	// Max size of the WAL archive push queue when archiveAsync is enabled.
+	// Uses pgbackrest size format (e.g. "1GiB", "256MiB").
+	// +optional
+	ArchivePushQueueMax string `json:"archivePushQueueMax,omitempty"`
+	// Max size of the WAL restore queue when archiveAsync is enabled.
+	// Uses pgbackrest size format (e.g. "1GiB", "256MiB").
+	// +optional
+	ArchiveGetQueueMax string `json:"archiveGetQueueMax,omitempty"`
+	// Bundle small files together for more efficient object storage operations.
+	// +optional
+	Bundle *bool `json:"bundle,omitempty"`
+	// Enable block-level incremental backup. Only changed blocks within files
+	// are backed up instead of entire files. Requires pgbackrest 2.46+.
+	// +optional
+	BlockIncremental *bool `json:"blockIncremental,omitempty"`
+	// Take backups from a standby instance instead of the primary,
+	// reducing load on the primary.
+	// +optional
+	BackupStandby *bool `json:"backupStandby,omitempty"`
+	// TODO: add in future iterations:
+	// - encryption: cipherType, cipherPass
+	// - backup behavior: stopAuto, manifestSaveThreshold, resumeOff
+	// - network/performance: bufferSize, protocolTimeout, ioReadRateMax, ioWriteRateMax, ioBurstDurationSec
+	// - WAL: archiveTimeout, archiveMissing
+	// - repo: repoHardlink, bundleLimit
+}
+
+// PgBackRestGCS defines the Google Cloud Storage configuration for pgbackrest.
+// TODO: implement in a future iteration
+type PgBackRestGCS struct{}
+
+// PgBackRestAzure defines the Azure Blob Storage configuration for pgbackrest.
+// TODO: implement in a future iteration
+type PgBackRestAzure struct{}
 
 // BackupSpec defines the desired state of Backup
 // +kubebuilder:validation:XValidation:rule="oldSelf == self",message="BackupSpec is immutable once set"

@@ -295,7 +295,7 @@ func (configuration *BackupPluginConfiguration) IsEmpty() bool {
 
 // IsManagedByInstance returns true if the backup is managed by the instance manager
 func (b BackupMethod) IsManagedByInstance() bool {
-	return b == BackupMethodPlugin || b == BackupMethodBarmanObjectStore
+	return b == BackupMethodPlugin || b == BackupMethodBarmanObjectStore || b == BackupMethodPgBackRest
 }
 
 // IsManagedByOperator returns true if the backup is managed by the operator

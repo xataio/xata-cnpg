@@ -431,7 +431,8 @@ jobs:
     outputs:
       commit_version: ${{ env.VERSION }}
       commit: ${{ env.COMMIT_SHA }}
-      controller_img: ${{ env.CONTROLLER_IMG }}
+      image: ${{ env.REGISTRY }}/${{ env.REPO }}/cloudnative-pg
+      tag: ${{ env.IMAGE_TAG }}
       push: ${{ env.PUSH }}
     steps:
       - name: Checkout
@@ -457,8 +458,8 @@ jobs:
           # use git describe to get the nearest tag and use that to build the version (e.g. 1.4.0-dev24 or 1.4.0)
           commit_version=$(git describe --tags --match 'v*' "${commit_sha}"| sed -e 's/^v//; s/-g[0-9a-f]\+$//; s/-\([0-9]\+\)$/-dev\1/')
 
-          # shortened commit sha
-          commit_short=$(git rev-parse --short "${commit_sha}")
+          # shortened commit sha (exactly 7 chars)
+          commit_short=$(printf '%.7s' "${commit_sha}")
 
           # extract branch name
           branch_name=${GITHUB_REF#refs/heads/}
@@ -479,14 +480,6 @@ jobs:
 
           # By default the container image is being pushed to the registry
           echo "PUSH=true" >> $GITHUB_ENV
-
-          # Check if commit message contains [create-pr] to create maki PR
-          commit_message=$(git log -1 --pretty=format:'%s' "${commit_sha}")
-          if [[ "$commit_message" == *"[create-pr]"* ]]; then
-            echo "CREATE_PR=true" >> $GITHUB_ENV
-          else
-            echo "CREATE_PR=false" >> $GITHUB_ENV
-          fi
 
       # GITHUB_TOKEN has restricted permissions if the pull_request has been opened
       # from a forked repository, so we avoid pushing to the container registry if
@@ -637,86 +630,37 @@ jobs:
             --revision="${{ env.IMAGE_TAG }}@sha1:${{ env.COMMIT_SHA }}" \
             --reproducible
 
-      - name: Login to GHCR (Helm)
-        if: env.PUSH == 'true'
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+  build-charts:
+    if: needs.buildx.outputs.push == 'true'
+    needs: [buildx]
+    uses: ./.github/workflows/build-charts.yaml
+    with:
+      image_specs: |
+        IMAGE=${{ needs.buildx.outputs.image }} TAG=${{ needs.buildx.outputs.tag }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    secrets: inherit
 
-      - name: Push Helm chart
-        if: env.PUSH == 'true'
-        working-directory: charts
-        run: |
-          make inject-tags IMAGE="${{ env.REGISTRY }}/${{ env.REPO }}/cloudnative-pg" TAG="${{ env.IMAGE_TAG }}"
-          make push-charts VERSION="${{ env.IMAGE_TAG }}"
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [build-charts]
+    uses: ./.github/workflows/sync-charts.yaml
+    with:
+      sync_key: ${{ github.repository }}@main
+      action: deploy
+      source_pr: ""
+      ref: ${{ github.sha }}
+    secrets: inherit
 
-      - name: Checkout maki repo
-        if: env.PUSH == 'true' && env.CREATE_PR == 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: xataio/maki
-          token: ${{ secrets.GIT_TOKEN }}
-          path: maki-repo
-
-      - name: Create PR in maki for dev testing
-        if: env.PUSH == 'true' && env.CREATE_PR == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GIT_TOKEN }}
-          CHART_VERSION: 0.0.0-${{ env.IMAGE_TAG }}
-        run: |
-          set -euo pipefail
-
-          cd maki-repo
-
-          COMPONENT_FILE="kustomize/components/xata-cnpg-1.28.0/kustomization.yaml"
-
-          # Update the chart version in the component
-          sed -i 's|version: 0.0.0-g[a-f0-9]*|version: '"$CHART_VERSION"'|g' "$COMPONENT_FILE"
-
-          # Check if there are changes
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-
-          # Configure git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Create branch
-          BRANCH_NAME="cloudnative-pg-dev-${CHART_VERSION}"
-          git checkout -b "$BRANCH_NAME"
-
-          # Commit and push
-          git add .
-          git commit -m "Update cloudnative-pg to ${CHART_VERSION}
-
-          - Chart: oci://ghcr.io/xataio/xata-cnpg/charts/cloudnative-pg:${CHART_VERSION}
-          - Image: ghcr.io/xataio/xata-cnpg/cloudnative-pg:${{ env.IMAGE_TAG }}
-
-          Source: ${{ github.server_url }}/${{ github.repository }}/commit/${{ env.COMMIT_SHA }}"
-
-          git push -u origin "$BRANCH_NAME" --force
-
-          # Create or update PR
-          EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number' || echo "")
-
-          if [[ -n "$EXISTING_PR" ]]; then
-            echo "Updated existing PR #${EXISTING_PR}"
-            echo "PR URL: https://github.com/xataio/maki/pull/${EXISTING_PR}"
-          else
-            PR_URL=$(gh pr create \
-              --title "Update cloudnative-pg to ${CHART_VERSION}" \
-              --body "## Summary
-          Updates xata-cnpg component to use cloudnative-pg chart version ${CHART_VERSION}.
-
-          > ⚠️ **Warning**: This is for testing in dev environments only. Do not deploy to staging/production without proper review.
-
-          ### Details
-          - **Chart**: \`oci://ghcr.io/xataio/xata-cnpg/charts/cloudnative-pg:${CHART_VERSION}\`
-          - **Image**: \`ghcr.io/xataio/xata-cnpg/cloudnative-pg:${{ env.IMAGE_TAG }}\`
-          - **Source commit**: ${{ github.server_url }}/${{ github.repository }}/commit/${{ env.COMMIT_SHA }}
-
-          ---
-          🤖 Generated by [xata-cnpg CI](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})")
-            echo "Created PR: $PR_URL"
-          fi
+  preview:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'preview')
+    needs: [build-charts]
+    uses: ./.github/workflows/sync-charts.yaml
+    with:
+      sync_key: ${{ github.repository }}#${{ github.event.pull_request.number }}
+      action: preview
+      source_pr: ${{ github.event.pull_request.number }}
+      ref: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit

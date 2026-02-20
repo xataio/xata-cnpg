@@ -17,6 +17,23 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+# Finds first tag thats not latest for the given image
+find-tag:
+	@set -e; \
+	FULL_IMAGE="${IMAGE}"; \
+	IMAGE_WITHOUT_TAG="$${FULL_IMAGE%:*}"; \
+	TARGET_DIGEST=$$(regctl manifest digest "$$FULL_IMAGE"); \
+	TAGS_SORTED=$$(regctl tag ls "$$IMAGE_WITHOUT_TAG" | sort -t- -k1,1nr); \
+	echo "$$TAGS_SORTED" | while read -r tag; do \
+		if [ "$$tag" != "latest" ]; then \
+			CURRENT_DIGEST=$$(regctl manifest digest "$${IMAGE_WITHOUT_TAG}:$${tag}"); \
+			if [ "$$CURRENT_DIGEST" = "$$TARGET_DIGEST" ]; then \
+				echo "$$tag"; \
+				exit 0; \
+			fi; \
+		fi; \
+	done
+
 # Image URL to use all building/pushing image targets
 IMAGE_NAME ?= ghcr.io/xataio/xata-cnpg/cloudnative-pg
 

@@ -229,7 +229,7 @@ var _ = Describe("Storage source", func() {
 				Expect(source.Name).To(Equal("completed-backup"))
 			})
 
-			It("should fall back to the bootstrap snapshot when the backup VolumeSnapshot has been deleted", func(ctx context.Context) {
+			It("should use the bootstrap snapshot if the backup snapshot is deleted", func(ctx context.Context) {
 				cli := makeFakeClient(makeSnapshot(pgDataSnapshotVolumeName))
 				source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
 					ctx,

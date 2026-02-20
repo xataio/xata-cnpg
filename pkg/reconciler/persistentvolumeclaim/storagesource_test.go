@@ -23,9 +23,13 @@ import (
 	"context"
 	"time"
 
+	volumesnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	"github.com/xataio/xata-cnpg/internal/scheme"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/pkg/utils"
@@ -33,6 +37,24 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
+
+const testNamespace = "test-ns"
+
+func makeSnapshot(name string) *volumesnapshotv1.VolumeSnapshot {
+	return &volumesnapshotv1.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: testNamespace,
+		},
+	}
+}
+
+func makeFakeClient(objects ...client.Object) client.Client {
+	return fake.NewClientBuilder().
+		WithScheme(scheme.BuildWithAllKnownScheme()).
+		WithObjects(objects...).
+		Build()
+}
 
 var _ = Describe("Storage configuration", func() {
 	cluster := &apiv1.Cluster{
@@ -54,9 +76,13 @@ var _ = Describe("Storage configuration", func() {
 })
 
 var _ = Describe("Storage source", func() {
+	const testNamespace = "test-ns"
 	pgDataSnapshotVolumeName := "pgdata-snapshot"
 	pgWalSnapshotVolumeName := "pgwal-snapshot"
 	clusterWithBootstrapSnapshot := &apiv1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+		},
 		Spec: apiv1.ClusterSpec{
 			StorageConfiguration: apiv1.StorageConfiguration{},
 			WalStorage:           &apiv1.StorageConfiguration{},
@@ -85,6 +111,9 @@ var _ = Describe("Storage source", func() {
 	}
 
 	clusterWithBackupSection := &apiv1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+		},
 		Spec: apiv1.ClusterSpec{
 			StorageConfiguration: apiv1.StorageConfiguration{},
 			WalStorage:           &apiv1.StorageConfiguration{},
@@ -97,6 +126,9 @@ var _ = Describe("Storage source", func() {
 	}
 
 	clusterWithPluginOnly := &apiv1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+		},
 		Spec: apiv1.ClusterSpec{
 			StorageConfiguration: apiv1.StorageConfiguration{},
 			WalStorage:           &apiv1.StorageConfiguration{},
@@ -139,16 +171,18 @@ var _ = Describe("Storage source", func() {
 		When("we don't have backups", func() {
 			When("there's no source WAL archive", func() {
 				It("should return the correct source when choosing pgdata", func(ctx context.Context) {
+					cli := makeFakeClient(makeSnapshot(pgDataSnapshotVolumeName))
 					source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
-						ctx, clusterWithBootstrapSnapshot, apiv1.BackupList{}))
+						ctx, cli, clusterWithBootstrapSnapshot, apiv1.BackupList{}))
 					Expect(err).ToNot(HaveOccurred())
 					Expect(source).ToNot(BeNil())
 					Expect(source.Name).To(Equal(pgDataSnapshotVolumeName))
 				})
 
 				It("should return the correct source when choosing pgwal", func(ctx context.Context) {
+					cli := makeFakeClient(makeSnapshot(pgDataSnapshotVolumeName))
 					source, err := NewPgWalCalculator().GetSource(GetCandidateStorageSourceForReplica(
-						ctx, clusterWithBootstrapSnapshot, apiv1.BackupList{}))
+						ctx, cli, clusterWithBootstrapSnapshot, apiv1.BackupList{}))
 					Expect(err).ToNot(HaveOccurred())
 					Expect(source).ToNot(BeNil())
 					Expect(source.Name).To(Equal(pgWalSnapshotVolumeName))
@@ -157,10 +191,12 @@ var _ = Describe("Storage source", func() {
 
 			When("there's a source WAL archive", func() {
 				It("should return an empty storage source", func(ctx context.Context) {
+					cli := makeFakeClient()
 					clusterSourceWALArchive := clusterWithBootstrapSnapshot.DeepCopy()
 					clusterSourceWALArchive.Spec.Bootstrap.Recovery.Source = "test"
 					source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
 						ctx,
+						cli,
 						clusterSourceWALArchive,
 						apiv1.BackupList{},
 					))
@@ -168,12 +204,23 @@ var _ = Describe("Storage source", func() {
 					Expect(source).To(BeNil())
 				})
 			})
+
+			When("the bootstrap VolumeSnapshot has been deleted", func() {
+				It("should fall back to nil", func(ctx context.Context) {
+					cli := makeFakeClient()
+					source := GetCandidateStorageSourceForReplica(
+						ctx, cli, clusterWithBootstrapSnapshot, apiv1.BackupList{})
+					Expect(source).To(BeNil())
+				})
+			})
 		})
 
 		When("we have backups", func() {
 			It("should return the correct backup", func(ctx context.Context) {
+				cli := makeFakeClient(makeSnapshot("completed-backup"))
 				source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
 					ctx,
+					cli,
 					clusterWithBootstrapSnapshot,
 					backupList,
 				))
@@ -181,13 +228,28 @@ var _ = Describe("Storage source", func() {
 				Expect(source).ToNot(BeNil())
 				Expect(source.Name).To(Equal("completed-backup"))
 			})
+
+			It("should fall back to the bootstrap snapshot when the backup VolumeSnapshot has been deleted", func(ctx context.Context) {
+				cli := makeFakeClient(makeSnapshot(pgDataSnapshotVolumeName))
+				source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
+					ctx,
+					cli,
+					clusterWithBootstrapSnapshot,
+					backupList,
+				))
+				Expect(err).ToNot(HaveOccurred())
+				Expect(source).ToNot(BeNil())
+				Expect(source.Name).To(Equal(pgDataSnapshotVolumeName))
+			})
 		})
 	})
 
 	When("not bootstrapping from a VolumeSnapshot with no backups", func() {
 		It("should return an empty storage source", func(ctx context.Context) {
+			cli := makeFakeClient()
 			source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
 				ctx,
+				cli,
 				clusterWithBackupSection,
 				apiv1.BackupList{},
 			))
@@ -198,8 +260,10 @@ var _ = Describe("Storage source", func() {
 
 	When("not bootstrapping from a VolumeSnapshot with backups", func() {
 		It("should return the backup as storage source", func(ctx context.Context) {
+			cli := makeFakeClient(makeSnapshot("completed-backup"))
 			source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
 				ctx,
+				cli,
 				clusterWithBackupSection,
 				backupList,
 			))
@@ -209,8 +273,10 @@ var _ = Describe("Storage source", func() {
 		})
 
 		It("should return the backup as storage source when WAL archiving is via plugin only", func(ctx context.Context) {
+			cli := makeFakeClient(makeSnapshot("completed-backup"))
 			source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
 				ctx,
+				cli,
 				clusterWithPluginOnly,
 				backupList,
 			))
@@ -218,15 +284,27 @@ var _ = Describe("Storage source", func() {
 			Expect(source).ToNot(BeNil())
 			Expect(source.Name).To(Equal("completed-backup"))
 		})
+
+		It("should fall back to nil when the backup VolumeSnapshot has been deleted", func(ctx context.Context) {
+			cli := makeFakeClient()
+			source := GetCandidateStorageSourceForReplica(
+				ctx,
+				cli,
+				clusterWithBackupSection,
+				backupList,
+			)
+			Expect(source).To(BeNil())
+		})
 	})
 
 	When("there's no WAL archiving", func() {
 		It("should return an empty storage source", func(ctx context.Context) {
 			clusterNoWalArchiving := clusterWithBackupSection.DeepCopy()
 			clusterNoWalArchiving.Spec.Backup = nil
-
+			cli := makeFakeClient()
 			source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
 				ctx,
+				cli,
 				clusterNoWalArchiving,
 				backupList,
 			))
@@ -317,10 +395,12 @@ var _ = Describe("candidate backups", func() {
 
 		cluster := &apiv1.Cluster{
 			ObjectMeta: metav1.ObjectMeta{
+				Namespace:         testNamespace,
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
 		}
-		source := getCandidateSourceFromBackupList(ctx, cluster, backupList)
+		cli := makeFakeClient(makeSnapshot("completed-backup"))
+		source := getCandidateSourceFromBackupList(ctx, cli, cluster, backupList)
 		Expect(source).ToNot(BeNil())
 		Expect(source.DataSource.Name).To(Equal("completed-backup"))
 	})
@@ -338,11 +418,37 @@ var _ = Describe("candidate backups", func() {
 
 		cluster := &apiv1.Cluster{
 			ObjectMeta: metav1.ObjectMeta{
+				Namespace:         testNamespace,
 				CreationTimestamp: metav1.NewTime(time.Now().Add(1 * time.Hour)),
 			},
 		}
-		source := getCandidateSourceFromBackupList(ctx, cluster, backupList)
+		cli := makeFakeClient()
+		source := getCandidateSourceFromBackupList(ctx, cli, cluster, backupList)
 		Expect(source).To(BeNil())
+	})
+
+	It("falls back to the next backup when the most recent snapshot is deleted", func(ctx context.Context) {
+		backupList := apiv1.BackupList{
+			Items: []apiv1.Backup{
+				objectStoreBackup,
+				nonCompletedBackup,
+				oldCompletedBackup,
+				completedBackup,
+			},
+		}
+		backupList.SortByReverseCreationTime()
+
+		cluster := &apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:         testNamespace,
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-6 * time.Hour)),
+			},
+		}
+		// Only the old backup's snapshot exists; the newest one is deleted
+		cli := makeFakeClient(makeSnapshot("bad-name"))
+		source := getCandidateSourceFromBackupList(ctx, cli, cluster, backupList)
+		Expect(source).ToNot(BeNil())
+		Expect(source.DataSource.Name).To(Equal("bad-name"))
 	})
 })
 
@@ -377,6 +483,7 @@ var _ = Describe("major version filtering in candidate backup selection", func()
 
 		cluster := &apiv1.Cluster{
 			ObjectMeta: metav1.ObjectMeta{
+				Namespace:         testNamespace,
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
 			Spec: apiv1.ClusterSpec{
@@ -389,7 +496,8 @@ var _ = Describe("major version filtering in candidate backup selection", func()
 			// Status.PGDataImageInfo is nil here on purpose
 		}
 
-		source := getCandidateSourceFromBackupList(ctx, cluster, backupList)
+		cli := makeFakeClient(makeSnapshot("completed-backup"))
+		source := getCandidateSourceFromBackupList(ctx, cli, cluster, backupList)
 		Expect(source).ToNot(BeNil())
 		Expect(source.DataSource.Name).To(Equal("completed-backup"))
 	})
@@ -401,6 +509,7 @@ var _ = Describe("major version filtering in candidate backup selection", func()
 
 		cluster := &apiv1.Cluster{
 			ObjectMeta: metav1.ObjectMeta{
+				Namespace:         testNamespace,
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
 			Spec: apiv1.ClusterSpec{
@@ -415,7 +524,8 @@ var _ = Describe("major version filtering in candidate backup selection", func()
 			},
 		}
 
-		source := getCandidateSourceFromBackupList(ctx, cluster, backupList)
+		cli := makeFakeClient()
+		source := getCandidateSourceFromBackupList(ctx, cli, cluster, backupList)
 		Expect(source).To(BeNil())
 	})
 
@@ -426,6 +536,7 @@ var _ = Describe("major version filtering in candidate backup selection", func()
 
 		cluster := &apiv1.Cluster{
 			ObjectMeta: metav1.ObjectMeta{
+				Namespace:         testNamespace,
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
 			Spec: apiv1.ClusterSpec{
@@ -440,7 +551,8 @@ var _ = Describe("major version filtering in candidate backup selection", func()
 			},
 		}
 
-		source := getCandidateSourceFromBackupList(ctx, cluster, backupList)
+		cli := makeFakeClient()
+		source := getCandidateSourceFromBackupList(ctx, cli, cluster, backupList)
 		Expect(source).To(BeNil())
 	})
 })

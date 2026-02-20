@@ -26,6 +26,7 @@ import (
 	volumesnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/pkg/utils"
@@ -60,6 +61,7 @@ func GetCandidateStorageSourceForPrimary(
 // to be used to create a replica PVC
 func GetCandidateStorageSourceForReplica(
 	ctx context.Context,
+	c client.Client,
 	cluster *apiv1.Cluster,
 	backupList apiv1.BackupList,
 ) *StorageSource {
@@ -94,6 +96,7 @@ func GetCandidateStorageSourceForReplica(
 
 	if result := getCandidateSourceFromBackupList(
 		ctx,
+		c,
 		cluster,
 		backupList,
 	); result != nil {
@@ -108,14 +111,15 @@ func GetCandidateStorageSourceForReplica(
 		return nil
 	}
 
-	// Try using the backup the Cluster has been bootstrapped from
-	return getCandidateSourceFromClusterDefinition(cluster)
+	// Try using the backup the Cluster has been bootstrapped from, if it still exists
+	return checkDataSourceExists(ctx, c, cluster.Namespace, getCandidateSourceFromClusterDefinition(cluster))
 }
 
 // getCandidateSourceFromBackupList gets a candidate storage source
 // given a backup list
 func getCandidateSourceFromBackupList(
 	ctx context.Context,
+	c client.Client,
 	cluster *apiv1.Cluster,
 	backupList apiv1.BackupList,
 ) *StorageSource {
@@ -172,7 +176,9 @@ func getCandidateSourceFromBackupList(
 
 		contextLogger.Debug("found a backup that is a valid storage source candidate")
 
-		return getCandidateSourceFromBackup(backup)
+		if result := checkDataSourceExists(ctx, c, cluster.Namespace, getCandidateSourceFromBackup(backup)); result != nil {
+			return result
+		}
 	}
 
 	return nil
@@ -200,6 +206,41 @@ func getCandidateSourceFromBackup(backup *apiv1.Backup) *StorageSource {
 	}
 
 	return &result
+}
+
+// checkDataSourceExists verifies that the PGDATA VolumeSnapshot referenced
+// by a StorageSource still exists in the given namespace. Returns the source
+// unchanged if it exists, or nil if the snapshot is missing or on error.
+func checkDataSourceExists(
+	ctx context.Context,
+	c client.Client,
+	namespace string,
+	source *StorageSource,
+) *StorageSource {
+	if source == nil {
+		return nil
+	}
+
+	contextLogger := log.FromContext(ctx)
+
+	metadata, err := GetSourceMetadataOrNil(ctx, c, namespace, source.DataSource)
+	if err != nil {
+		contextLogger.Warning(
+			"error checking if VolumeSnapshot exists, skipping as storage source",
+			"error", err.Error(),
+			"snapshotName", source.DataSource.Name,
+		)
+		return nil
+	}
+	if metadata == nil {
+		contextLogger.Info(
+			"VolumeSnapshot no longer exists, skipping as storage source",
+			"snapshotName", source.DataSource.Name,
+		)
+		return nil
+	}
+
+	return source
 }
 
 // getCandidateSourceFromClusterDefinition gets a candidate storage source

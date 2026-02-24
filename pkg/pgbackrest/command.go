@@ -108,12 +108,16 @@ func runPgBackRest(ctx context.Context, args ...string) error {
 }
 
 // StanzaCreate initializes a pgbackrest stanza. This is idempotent — if the
-// stanza already exists and matches, it's a no-op.
+// stanza already exists and matches, it's a no-op. Uses --no-online so it
+// doesn't require PostgreSQL to be running (reads PG version from PG_VERSION
+// file in PGDATA instead). PGDATA is guaranteed to exist at this point because
+// the instance Pod is only created after the bootstrap Job (initdb/restore)
+// completes and writes PGDATA to the PVC.
 func StanzaCreate(ctx context.Context, stanzaName string) error {
 	contextLog := log.FromContext(ctx)
 	contextLog.Info("Creating pgbackrest stanza", "stanza", stanzaName)
 
-	return runPgBackRest(ctx, "stanza-create", "--stanza="+stanzaName)
+	return runPgBackRest(ctx, "stanza-create", "--no-online", "--stanza="+stanzaName)
 }
 
 // ArchivePush archives a WAL file to the pgbackrest repository.

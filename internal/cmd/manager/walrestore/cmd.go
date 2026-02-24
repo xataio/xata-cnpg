@@ -39,6 +39,7 @@ import (
 	"github.com/xataio/xata-cnpg/internal/cnpi/plugin/repository"
 	"github.com/xataio/xata-cnpg/internal/management/cache"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/local"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
 )
 
@@ -138,6 +139,11 @@ func run(ctx context.Context, pgData string, podName string, args []string) erro
 		// This happens only if a CNPG-i plugin was able to restore
 		// the requested WAL.
 		return nil
+	}
+
+	// Restore via pgbackrest if configured
+	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		return pgbackrest.ArchiveGet(ctx, cluster.Name, walName, destinationPath)
 	}
 
 	recoverClusterName, recoverEnv, barmanConfiguration, err := GetRecoverConfiguration(cluster, podName)

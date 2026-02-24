@@ -52,6 +52,11 @@ func (r *InstanceReconciler) updateCacheFromCluster(ctx context.Context, cluster
 func (r *InstanceReconciler) updateWALRestoreSettingsCache(ctx context.Context, cluster *apiv1.Cluster) {
 	contextLogger := log.FromContext(ctx)
 
+	// pgbackrest handles credentials via config file, no env caching needed
+	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		return
+	}
+
 	_, env, barmanConfiguration, err := walrestore.GetRecoverConfiguration(cluster, r.instance.GetPodName())
 	if errors.Is(err, walrestore.ErrNoBackupConfigured) {
 		cache.Delete(cache.WALRestoreKey)
@@ -85,6 +90,11 @@ func (r *InstanceReconciler) shouldUpdateWALArchiveSettingsCache(
 	cluster *apiv1.Cluster,
 ) (shouldRetry bool) {
 	contextLogger := log.FromContext(ctx)
+
+	// pgbackrest handles credentials via config file, no env caching needed
+	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		return false
+	}
 
 	if cluster.Spec.Backup == nil || cluster.Spec.Backup.BarmanObjectStore == nil {
 		cache.Delete(cache.WALArchiveKey)

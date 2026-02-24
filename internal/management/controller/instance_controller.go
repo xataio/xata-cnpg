@@ -57,6 +57,7 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/metrics"
 	postgresutils "github.com/xataio/xata-cnpg/pkg/management/postgres/utils"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/metricserver"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
 	"github.com/xataio/xata-cnpg/pkg/postgres/replication"
 	"github.com/xataio/xata-cnpg/pkg/promotiontoken"
@@ -145,6 +146,11 @@ func (r *InstanceReconciler) Reconcile(
 
 	// Takes care of the `.check-empty-wal-archive` file
 	if err := r.reconcileCheckWalArchiveFile(cluster); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	// Reconcile pgbackrest configuration if configured
+	if err := r.reconcilePgBackRestConfig(ctx, cluster); err != nil {
 		return reconcile.Result{}, err
 	}
 
@@ -1042,6 +1048,33 @@ func (r *InstanceReconciler) reconcileCheckWalArchiveFile(cluster *apiv1.Cluster
 		// If our current condition is archiving we can delete the file
 		if condition.Type == string(apiv1.ConditionContinuousArchiving) && condition.Status == metav1.ConditionTrue {
 			return fileutils.RemoveFile(filePath)
+		}
+	}
+
+	return nil
+}
+
+// reconcilePgBackRestConfig generates and writes the pgbackrest configuration
+// file when pgbackrest is configured. On first write (or config change), it
+// also creates the pgbackrest stanza.
+func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, cluster *apiv1.Cluster) error {
+	if cluster.Spec.Backup == nil || !cluster.Spec.Backup.IsPgBackRestConfigured() {
+		return nil
+	}
+
+	content, err := pgbackrest.GenerateConfig(ctx, r.GetClient(), cluster, r.instance.PgData)
+	if err != nil {
+		return fmt.Errorf("generating pgbackrest config: %w", err)
+	}
+
+	changed, err := pgbackrest.WriteConfigFile(content)
+	if err != nil {
+		return fmt.Errorf("writing pgbackrest config: %w", err)
+	}
+
+	if changed {
+		if err := pgbackrest.StanzaCreate(ctx, cluster.Name); err != nil {
+			return fmt.Errorf("creating pgbackrest stanza: %w", err)
 		}
 	}
 

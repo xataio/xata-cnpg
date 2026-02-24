@@ -40,6 +40,7 @@ import (
 	"github.com/xataio/xata-cnpg/internal/management/cache"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/constants"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/local"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 )
@@ -173,6 +174,12 @@ func internalRun(
 	// trigger the legacy archiving process.
 	if cluster.GetEnabledWALArchivePluginName() != "" {
 		return nil
+	}
+
+	// Archive via pgbackrest if configured
+	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		walPath := filepath.Join(pgData, "pg_wal", walName)
+		return pgbackrest.ArchivePush(ctx, cluster.Name, walPath)
 	}
 
 	// Request Barman Cloud to archive this WAL

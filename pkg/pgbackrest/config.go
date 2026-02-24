@@ -1,0 +1,222 @@
+/*
+Copyright © contributors to CloudNativePG, established as
+CloudNativePG a Series of LF Projects, LLC.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
+package pgbackrest
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+
+	"gopkg.in/ini.v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+)
+
+// GenerateConfig builds a pgbackrest.conf INI configuration from the cluster
+// spec. It resolves S3 credentials from Kubernetes secrets.
+func GenerateConfig(
+	ctx context.Context,
+	k8sClient client.Client,
+	cluster *apiv1.Cluster,
+	pgDataPath string,
+) (string, error) {
+	pgbackrestConfig := cluster.Spec.Backup.PgBackRest
+	dest := pgbackrestConfig.Destination
+
+	cfg := ini.Empty()
+	global := cfg.Section("global")
+
+	// S3 configuration
+	if dest.S3 != nil {
+		if err := configureS3(ctx, k8sClient, cluster.Namespace, dest.S3, global); err != nil {
+			return "", fmt.Errorf("configuring S3: %w", err)
+		}
+	}
+
+	// Repository path
+	global.Key("repo1-path").SetValue("/" + cluster.Name)
+
+	// Spool path (used when archive-async is enabled)
+	global.Key("spool-path").SetValue(SpoolPath)
+
+	// Options
+	if opts := pgbackrestConfig.Options; opts != nil {
+		configureOptions(opts, global)
+	}
+
+	// Retention
+	if ret := pgbackrestConfig.Retention; ret != nil {
+		configureRetention(ret, global)
+	}
+
+	// Stanza section
+	stanza := cfg.Section(cluster.Name)
+	stanza.Key("pg1-path").SetValue(pgDataPath)
+
+	// Render to string
+	var buf bytes.Buffer
+	if _, err := cfg.WriteTo(&buf); err != nil {
+		return "", fmt.Errorf("rendering pgbackrest config: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+// WriteConfigFile writes the pgbackrest configuration to ConfigFilePath.
+// It creates the parent directory if it doesn't exist.
+// Returns true if the file content changed, false if it was already up to date.
+func WriteConfigFile(content string) (bool, error) {
+	dir := filepath.Dir(ConfigFilePath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return false, fmt.Errorf("creating config directory %s: %w", dir, err)
+	}
+
+	existing, err := os.ReadFile(ConfigFilePath)
+	if err == nil && string(existing) == content {
+		return false, nil
+	}
+
+	if err := os.WriteFile(ConfigFilePath, []byte(content), 0o600); err != nil {
+		return false, fmt.Errorf("writing config file %s: %w", ConfigFilePath, err)
+	}
+
+	return true, nil
+}
+
+// configureS3 sets S3-specific keys in the [global] section.
+func configureS3(
+	ctx context.Context,
+	k8sClient client.Client,
+	namespace string,
+	s3 *apiv1.PgBackRestS3,
+	section *ini.Section,
+) error {
+	section.Key("repo1-type").SetValue("s3")
+	section.Key("repo1-s3-bucket").SetValue(s3.Bucket)
+	section.Key("repo1-s3-region").SetValue(s3.Region)
+
+	if s3.Endpoint != "" {
+		section.Key("repo1-s3-endpoint").SetValue(s3.Endpoint)
+		// Non-AWS endpoints (e.g. MinIO) typically need path-style URIs
+		section.Key("repo1-s3-uri-style").SetValue("path")
+	}
+
+	if s3.InheritFromIAMRole {
+		section.Key("repo1-s3-key-type").SetValue("auto")
+	} else {
+		accessKey, err := resolveSecretKeyRef(ctx, k8sClient, namespace, s3.AccessKeyID)
+		if err != nil {
+			return fmt.Errorf("resolving S3 access key: %w", err)
+		}
+		secretKey, err := resolveSecretKeyRef(ctx, k8sClient, namespace, s3.SecretAccessKey)
+		if err != nil {
+			return fmt.Errorf("resolving S3 secret key: %w", err)
+		}
+		section.Key("repo1-s3-key").SetValue(accessKey)
+		section.Key("repo1-s3-key-secret").SetValue(secretKey)
+	}
+
+	return nil
+}
+
+// configureOptions maps PgBackRestOptions fields to pgbackrest config keys.
+func configureOptions(opts *apiv1.PgBackRestOptions, section *ini.Section) {
+	if opts.CompressType != "" {
+		section.Key("compress-type").SetValue(opts.CompressType)
+	}
+	if opts.CompressLevel != nil {
+		section.Key("compress-level").SetValue(strconv.Itoa(*opts.CompressLevel))
+	}
+	if opts.ProcessMax != nil {
+		section.Key("process-max").SetValue(strconv.Itoa(*opts.ProcessMax))
+	}
+	if opts.StartFast != nil && *opts.StartFast {
+		section.Key("start-fast").SetValue("y")
+	}
+	if opts.Delta != nil && *opts.Delta {
+		section.Key("delta").SetValue("y")
+	}
+	if opts.ArchiveAsync != nil && *opts.ArchiveAsync {
+		section.Key("archive-async").SetValue("y")
+	}
+	if opts.ArchivePushQueueMax != "" {
+		section.Key("archive-push-queue-max").SetValue(opts.ArchivePushQueueMax)
+	}
+	if opts.ArchiveGetQueueMax != "" {
+		section.Key("archive-get-queue-max").SetValue(opts.ArchiveGetQueueMax)
+	}
+	if opts.Bundle != nil && *opts.Bundle {
+		section.Key("repo1-bundle").SetValue("y")
+	}
+	if opts.BlockIncremental != nil && *opts.BlockIncremental {
+		section.Key("repo1-block").SetValue("y")
+	}
+	if opts.BackupStandby != nil && *opts.BackupStandby {
+		section.Key("backup-standby").SetValue("y")
+	}
+}
+
+// configureRetention maps PgBackRestRetention fields to pgbackrest config keys.
+func configureRetention(ret *apiv1.PgBackRestRetention, section *ini.Section) {
+	if ret.Full > 0 {
+		section.Key("repo1-retention-full").SetValue(strconv.Itoa(ret.Full))
+	}
+	if ret.FullType != "" {
+		section.Key("repo1-retention-full-type").SetValue(ret.FullType)
+	}
+	if ret.Archive != nil {
+		section.Key("repo1-retention-archive").SetValue(strconv.Itoa(*ret.Archive))
+	}
+}
+
+// resolveSecretKeyRef fetches a Kubernetes secret and extracts the value
+// for the given key reference.
+func resolveSecretKeyRef(
+	ctx context.Context,
+	k8sClient client.Client,
+	namespace string,
+	selector *apiv1.SecretKeySelector,
+) (string, error) {
+	if selector == nil {
+		return "", fmt.Errorf("secret key selector is nil")
+	}
+
+	var secret corev1.Secret
+	err := k8sClient.Get(ctx, types.NamespacedName{
+		Name:      selector.Name,
+		Namespace: namespace,
+	}, &secret)
+	if err != nil {
+		return "", fmt.Errorf("fetching secret %s/%s: %w", namespace, selector.Name, err)
+	}
+
+	value, ok := secret.Data[selector.Key]
+	if !ok {
+		return "", fmt.Errorf("key %q not found in secret %s/%s", selector.Key, namespace, selector.Name)
+	}
+
+	return string(value), nil
+}

@@ -42,6 +42,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/term v0.37.0
 	google.golang.org/grpc v1.77.0
+	gopkg.in/ini.v1 v1.67.1
 	k8s.io/api v0.34.2
 	k8s.io/apiextensions-apiserver v0.34.2
 	k8s.io/apimachinery v0.34.2
@@ -125,7 +126,6 @@ require (
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	gopkg.in/ini.v1 v1.67.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250905212525-66792eed8611 // indirect

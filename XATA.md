@@ -27,9 +27,9 @@ This is Xata's fork of [CloudNativePG](https://github.com/cloudnative-pg/cloudna
 - Verifies CRDs are up to date (both `config/crd` and `charts/`)
 - Builds and pushes image + Helm chart
 
-**Creating a test PR in maki:**
+**Creating a test PR in infra-new:**
 
-Include `[create-pr]` in your commit message to automatically create a PR in the maki repo that updates the cloudnative-pg chart version. This is useful for testing changes in dev environments.
+Include `[create-pr]` in your commit message to automatically create a PR in the infra-new repo that updates the cloudnative-pg chart version. This is useful for testing changes in dev environments.
 
 ```bash
 git commit -m "My changes [create-pr]"

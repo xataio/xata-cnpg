@@ -178,7 +178,7 @@ func internalRun(
 
 	// Archive via pgbackrest if configured
 	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
-		walPath := filepath.Join(pgData, "pg_wal", walName)
+		walPath := filepath.Join(pgData, walName)
 		contextLog.Info("Archiving WAL via pgbackrest", "walName", walName, "walPath", walPath)
 		return pgbackrest.ArchivePush(ctx, cluster.Name, walPath)
 	}

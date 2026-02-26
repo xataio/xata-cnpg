@@ -62,6 +62,11 @@ func GenerateConfig(
 	// Spool path (used when archive-async is enabled)
 	global.Key("spool-path").SetValue(SpoolPath)
 
+	// Log and temp paths — container filesystem is read-only,
+	// redirect to the writable scratch-data volume.
+	global.Key("log-path").SetValue("/controller/pgbackrest/log")
+	global.Key("lock-path").SetValue("/controller/pgbackrest/lock")
+
 	// Options
 	if opts := pgbackrestConfig.Options; opts != nil {
 		configureOptions(opts, global)
@@ -90,8 +95,10 @@ func GenerateConfig(
 // Returns true if the file content changed, false if it was already up to date.
 func WriteConfigFile(content string) (bool, error) {
 	dir := filepath.Dir(ConfigFilePath)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return false, fmt.Errorf("creating config directory %s: %w", dir, err)
+	for _, subdir := range []string{"", "log", "lock", "tmp"} {
+		if err := os.MkdirAll(filepath.Join(dir, subdir), 0o700); err != nil {
+			return false, fmt.Errorf("creating directory %s: %w", filepath.Join(dir, subdir), err)
+		}
 	}
 
 	existing, err := os.ReadFile(ConfigFilePath)
@@ -122,6 +129,9 @@ func configureS3(
 		section.Key("repo1-s3-endpoint").SetValue(s3.Endpoint)
 		// Non-AWS endpoints (e.g. MinIO) typically need path-style URIs
 		section.Key("repo1-s3-uri-style").SetValue("path")
+	} else {
+		// pgbackrest requires an explicit endpoint even for AWS
+		section.Key("repo1-s3-endpoint").SetValue("s3." + s3.Region + ".amazonaws.com")
 	}
 
 	if s3.InheritFromIAMRole {

@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
@@ -75,8 +76,11 @@ func runPgBackRest(ctx context.Context, args ...string) error {
 	contextLog.Debug("Running pgbackrest command", "args", fullArgs)
 
 	cmd := exec.CommandContext(ctx, pgbackrestBinary, fullArgs...) // #nosec G204
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	// Redirect TMPDIR to a writable path — the container filesystem is read-only.
+	cmd.Env = append(os.Environ(), "TMPDIR=/controller/pgbackrest/tmp")
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
 
 	err := cmd.Run()
 	if err == nil {
@@ -102,7 +106,7 @@ func runPgBackRest(ctx context.Context, args ...string) error {
 	return &CommandError{
 		Command:  subcommand,
 		Args:     fullArgs,
-		Stderr:   stderr.String(),
+		Stderr:   output.String(),
 		ExitCode: exitCode,
 	}
 }
@@ -117,18 +121,18 @@ func StanzaCreate(ctx context.Context, stanzaName string) error {
 	contextLog := log.FromContext(ctx)
 	contextLog.Info("Creating pgbackrest stanza", "stanza", stanzaName)
 
-	return runPgBackRest(ctx, "stanza-create", "--no-online", "--stanza="+stanzaName)
+	return runPgBackRest(ctx, "--stanza="+stanzaName, "stanza-create", "--no-online")
 }
 
 // ArchivePush archives a WAL file to the pgbackrest repository.
 func ArchivePush(ctx context.Context, stanzaName string, walPath string) error {
-	return runPgBackRest(ctx, "archive-push", "--stanza="+stanzaName, walPath)
+	return runPgBackRest(ctx, "--stanza="+stanzaName, "archive-push", walPath)
 }
 
 // ArchiveGet retrieves a WAL file from the pgbackrest repository.
 // Returns ErrWALNotFound if the WAL segment does not exist in the repository.
 func ArchiveGet(ctx context.Context, stanzaName string, walName string, destPath string) error {
-	err := runPgBackRest(ctx, "archive-get", "--stanza="+stanzaName, walName, destPath)
+	err := runPgBackRest(ctx, "--stanza="+stanzaName, "archive-get", walName, destPath)
 	if err == nil {
 		return nil
 	}

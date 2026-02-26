@@ -2167,10 +2167,22 @@ func (v *ClusterCustomValidator) validateBackupConfiguration(r *apiv1.Cluster) f
 	if r.Spec.Backup == nil {
 		return nil
 	}
-	return barmanWebhooks.ValidateBackupConfiguration(
+
+	var errorList field.ErrorList
+
+	if r.Spec.Backup.BarmanObjectStore != nil && r.Spec.Backup.IsPgBackRestConfigured() {
+		errorList = append(errorList, field.Invalid(
+			field.NewPath("spec", "backup", "pgBackRest"),
+			r.Spec.Backup.PgBackRest,
+			"Cannot configure both barmanObjectStore and pgBackRest"))
+	}
+
+	errorList = append(errorList, barmanWebhooks.ValidateBackupConfiguration(
 		r.Spec.Backup.BarmanObjectStore,
 		field.NewPath("spec", "backup", "barmanObjectStore"),
-	)
+	)...)
+
+	return errorList
 }
 
 // validateRetentionPolicy validates the retention policy configuration
@@ -2744,6 +2756,7 @@ func (v *ClusterCustomValidator) validatePluginConfiguration(r *apiv1.Cluster) f
 		return nil
 	}
 	isBarmanObjectStoreConfigured := r.Spec.Backup != nil && r.Spec.Backup.BarmanObjectStore != nil
+	isPgBackRestConfigured := r.Spec.Backup != nil && r.Spec.Backup.IsPgBackRestConfigured()
 	var walArchiverEnabled []string
 
 	for _, plugin := range r.Spec.Plugins {
@@ -2756,13 +2769,18 @@ func (v *ClusterCustomValidator) validatePluginConfiguration(r *apiv1.Cluster) f
 	}
 
 	var errorList field.ErrorList
-	if isBarmanObjectStoreConfigured {
-		if len(walArchiverEnabled) > 0 {
-			errorList = append(errorList, field.Invalid(
-				field.NewPath("spec", "plugins"),
-				walArchiverEnabled,
-				"Cannot enable a WAL archiver plugin when barmanObjectStore is configured"))
-		}
+	if isBarmanObjectStoreConfigured && len(walArchiverEnabled) > 0 {
+		errorList = append(errorList, field.Invalid(
+			field.NewPath("spec", "plugins"),
+			walArchiverEnabled,
+			"Cannot enable a WAL archiver plugin when barmanObjectStore is configured"))
+	}
+
+	if isPgBackRestConfigured && len(walArchiverEnabled) > 0 {
+		errorList = append(errorList, field.Invalid(
+			field.NewPath("spec", "plugins"),
+			walArchiverEnabled,
+			"Cannot enable a WAL archiver plugin when pgBackRest is configured"))
 	}
 
 	if len(walArchiverEnabled) > 1 {

@@ -184,6 +184,21 @@ func (ws *localWebserverEndpoints) requestBackup(w http.ResponseWriter, r *http.
 		ws.startPluginBackup(ctx, cluster, &backup)
 		_, _ = fmt.Fprint(w, "OK")
 
+	case apiv1.BackupMethodPgBackRest:
+		if cluster.Spec.Backup == nil || !cluster.Spec.Backup.IsPgBackRestConfigured() {
+			http.Error(w, "pgBackRest backup not configured in the cluster", http.StatusConflict)
+			return
+		}
+
+		if err := ws.startPgBackRestBackup(ctx, cluster, &backup); err != nil {
+			http.Error(
+				w,
+				fmt.Sprintf("error while requesting backup: %v", err.Error()),
+				http.StatusInternalServerError)
+			return
+		}
+		_, _ = fmt.Fprint(w, "OK")
+
 	default:
 		http.Error(
 			w,
@@ -237,6 +252,31 @@ func (ws *localWebserverEndpoints) startPluginBackup(
 	backup *apiv1.Backup,
 ) {
 	NewPluginBackupCommand(cluster, backup, ws.typedClient, ws.eventRecorder).Start(ctx)
+}
+
+func (ws *localWebserverEndpoints) startPgBackRestBackup(
+	ctx context.Context,
+	cluster *apiv1.Cluster,
+	backup *apiv1.Backup,
+) error {
+	backupLog := log.WithValues(
+		"backupName", backup.Name,
+		"backupNamespace", backup.Namespace)
+
+	backupCommand := postgres.NewPgBackRestBackupCommand(
+		cluster,
+		backup,
+		ws.typedClient,
+		ws.eventRecorder,
+		ws.instance,
+		backupLog,
+	)
+
+	if err := backupCommand.Start(ctx); err != nil {
+		return fmt.Errorf("while starting backup: %w", err)
+	}
+
+	return nil
 }
 
 // ArchiveStatusRequest is the request body for the archive status endpoint

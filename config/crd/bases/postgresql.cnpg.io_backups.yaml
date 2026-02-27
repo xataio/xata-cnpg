@@ -68,14 +68,15 @@ spec:
                 - name
                 type: object
               method:
-                default: barmanObjectStore
+                default: pgBackRest
                 description: |-
                   The backup method to be used, possible options are `barmanObjectStore`,
-                  `volumeSnapshot` or `plugin`. Defaults to: `barmanObjectStore`.
+                  `volumeSnapshot`, `plugin` or `pgBackRest`. Defaults to: `pgBackRest`.
                 enum:
                 - barmanObjectStore
                 - volumeSnapshot
                 - plugin
+                - pgBackRest
                 type: string
               online:
                 description: |-

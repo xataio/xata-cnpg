@@ -258,10 +258,10 @@ type BackupSpec struct {
 	Target BackupTarget `json:"target,omitempty"`
 
 	// The backup method to be used, possible options are `barmanObjectStore`,
-	// `volumeSnapshot` or `plugin`. Defaults to: `barmanObjectStore`.
+	// `volumeSnapshot`, `plugin` or `pgBackRest`. Defaults to: `pgBackRest`.
 	// +optional
-	// +kubebuilder:validation:Enum=barmanObjectStore;volumeSnapshot;plugin
-	// +kubebuilder:default:=barmanObjectStore
+	// +kubebuilder:validation:Enum=barmanObjectStore;volumeSnapshot;plugin;pgBackRest
+	// +kubebuilder:default:=pgBackRest
 	Method BackupMethod `json:"method,omitempty"`
 
 	// Configuration parameters passed to the plugin managing this backup

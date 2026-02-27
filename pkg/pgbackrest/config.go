@@ -95,7 +95,7 @@ func GenerateConfig(
 // Returns true if the file content changed, false if it was already up to date.
 func WriteConfigFile(content string) (bool, error) {
 	dir := filepath.Dir(ConfigFilePath)
-	for _, subdir := range []string{"", "log", "lock", "tmp"} {
+	for _, subdir := range []string{"", "log", "lock"} {
 		if err := os.MkdirAll(filepath.Join(dir, subdir), 0o700); err != nil {
 			return false, fmt.Errorf("creating directory %s: %w", filepath.Join(dir, subdir), err)
 		}

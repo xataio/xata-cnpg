@@ -26,7 +26,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
@@ -76,8 +75,6 @@ func runPgBackRest(ctx context.Context, args ...string) error {
 	contextLog.Debug("Running pgbackrest command", "args", fullArgs)
 
 	cmd := exec.CommandContext(ctx, pgbackrestBinary, fullArgs...) // #nosec G204
-	// Redirect TMPDIR to a writable path — the container filesystem is read-only.
-	cmd.Env = append(os.Environ(), "TMPDIR=/controller/pgbackrest/tmp")
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output

@@ -380,6 +380,13 @@ func (r *BackupReconciler) checkPrerequisites(
 		}
 	}
 
+	if backup.Spec.Method == apiv1.BackupMethodPgBackRest {
+		if !cluster.Spec.Backup.IsPgBackRestConfigured() {
+			const message = "no pgBackRest section defined on the target cluster"
+			return flagMissingPrerequisite(message, "ClusterHasNoPgBackRestSection")
+		}
+	}
+
 	return nil, nil
 }
 

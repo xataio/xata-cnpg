@@ -98,6 +98,8 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues(
 		"backupName", b.Backup.Name,
 		"backupNamespace", b.Backup.Namespace,
+		"cluster", b.Cluster.Name,
+		"backupType", "full",
 	))
 
 	b.Recorder.Event(b.Backup, "Normal", "Starting", "Backup started")

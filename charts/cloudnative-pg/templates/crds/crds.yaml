@@ -112,6 +112,16 @@ spec:
                       an immediate segment switch.
                     type: boolean
                 type: object
+              pgBackRestBackupType:
+                default: full
+                description: |-
+                  The pgBackRest backup type. Possible values are `full`, `diff` (differential),
+                  or `incr` (incremental). Defaults to `full`. Only used when method is `pgBackRest`.
+                enum:
+                - full
+                - diff
+                - incr
+                type: string
               pluginConfiguration:
                 description: Configuration parameters passed to the plugin managing
                   this backup

@@ -101,7 +101,7 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 		"backupName", b.Backup.Name,
 		"backupNamespace", b.Backup.Namespace,
 		"cluster", b.Cluster.Name,
-		"backupType", "full",
+		"backupType", string(b.Backup.Spec.PgBackRestBackupType),
 	))
 
 	b.Recorder.Event(b.Backup, "Normal", "Starting", "Backup started")
@@ -113,7 +113,12 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 		b.Log.Error(err, "Error changing backup condition (backup started)")
 	}
 
-	if err := pgbackrest.Backup(ctx, b.Cluster.Name, "full"); err != nil {
+	backupType := b.Backup.Spec.PgBackRestBackupType
+	if backupType == "" {
+		backupType = apiv1.PgBackRestBackupTypeFull
+	}
+
+	if err := pgbackrest.Backup(ctx, b.Cluster.Name, string(backupType)); err != nil {
 		b.Log.Error(err, "Backup failed")
 		b.Recorder.Event(b.Backup, "Normal", "Failed", "Backup failed")
 		_ = status.FlagBackupAsFailed(ctx, b.Client, b.Backup, b.Cluster, err)

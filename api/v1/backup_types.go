@@ -121,6 +121,20 @@ const (
 	BackupMethodPgBackRest BackupMethod = "pgBackRest"
 )
 
+// PgBackRestBackupType defines the type of pgbackrest backup.
+type PgBackRestBackupType string
+
+const (
+	// PgBackRestBackupTypeFull is a complete backup of everything.
+	PgBackRestBackupTypeFull PgBackRestBackupType = "full"
+
+	// PgBackRestBackupTypeDiff is a differential backup — changes since the last full backup.
+	PgBackRestBackupTypeDiff PgBackRestBackupType = "diff"
+
+	// PgBackRestBackupTypeIncr is an incremental backup — changes since the last backup of any type.
+	PgBackRestBackupTypeIncr PgBackRestBackupType = "incr"
+)
+
 // PgBackRestConfiguration defines the backup configuration using pgbackrest.
 type PgBackRestConfiguration struct {
 	Destination *PgBackRestDestination `json:"destination"`
@@ -263,6 +277,13 @@ type BackupSpec struct {
 	// +kubebuilder:validation:Enum=barmanObjectStore;volumeSnapshot;plugin;pgBackRest
 	// +kubebuilder:default:=pgBackRest
 	Method BackupMethod `json:"method,omitempty"`
+
+	// The pgBackRest backup type. Possible values are `full`, `diff` (differential),
+	// or `incr` (incremental). Defaults to `full`. Only used when method is `pgBackRest`.
+	// +optional
+	// +kubebuilder:validation:Enum=full;diff;incr
+	// +kubebuilder:default:=full
+	PgBackRestBackupType PgBackRestBackupType `json:"pgBackRestBackupType,omitempty"`
 
 	// Configuration parameters passed to the plugin managing this backup
 	// +optional

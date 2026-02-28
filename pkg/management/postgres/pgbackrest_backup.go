@@ -22,8 +22,10 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -118,7 +120,32 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 		return
 	}
 
-	b.Log.Info("Backup completed")
+	b.Log.Info("Backup completed, fetching backup info")
+
+	// Fetch backup details from pgbackrest info
+	stanzas, err := pgbackrest.Info(ctx, b.Cluster.Name)
+	if err != nil {
+		b.Log.Error(err, "Failed to get pgbackrest info after backup")
+	} else if len(stanzas) > 0 {
+		if latest := stanzas[0].LatestBackup(); latest != nil {
+			b.Backup.Status.BackupID = latest.Label
+			b.Backup.Status.BackupName = latest.Label
+			b.Backup.Status.BeginWal = latest.Archive.Start
+			b.Backup.Status.EndWal = latest.Archive.Stop
+			b.Backup.Status.BeginLSN = latest.LSN.Start
+			b.Backup.Status.EndLSN = latest.LSN.Stop
+			b.Backup.Status.StartedAt = &metav1.Time{Time: time.Unix(latest.Timestamp.Start, 0)}
+			b.Backup.Status.StoppedAt = &metav1.Time{Time: time.Unix(latest.Timestamp.Stop, 0)}
+			b.Log.Info("Backup info populated",
+				"backupID", latest.Label,
+				"beginWal", latest.Archive.Start,
+				"endWal", latest.Archive.Stop,
+				"beginLSN", latest.LSN.Start,
+				"endLSN", latest.LSN.Stop,
+			)
+		}
+	}
+
 	b.Recorder.Event(b.Backup, "Normal", "Completed", "Backup completed")
 
 	b.Backup.Status.SetAsCompleted()

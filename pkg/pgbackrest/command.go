@@ -132,7 +132,7 @@ func Backup(ctx context.Context, stanzaName string, backupType string) error {
 	contextLog := log.FromContext(ctx)
 	contextLog.Info("Starting pgbackrest backup", "stanza", stanzaName, "type", backupType)
 
-	return runPgBackRest(ctx, "--stanza="+stanzaName, "backup", "--type="+backupType)
+	return runPgBackRest(ctx, "--stanza="+stanzaName, "backup", "--type="+backupType, "--no-archive-check")
 }
 
 // ArchiveGet retrieves a WAL file from the pgbackrest repository.

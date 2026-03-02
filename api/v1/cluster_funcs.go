@@ -1464,6 +1464,41 @@ func (cluster *Cluster) GetRecoverySourcePlugin() *PluginConfiguration {
 	return recoveryExternalCluster.PluginConfiguration
 }
 
+// PgBackRestRecoverySource holds the pgbackrest configuration needed to
+// restore from an external cluster's repository.
+type PgBackRestRecoverySource struct {
+	Repository *PgBackRestRepository
+	StanzaName string
+}
+
+// GetRecoverySourcePgBackRest returns the pgbackrest recovery source
+// configuration if the cluster is bootstrapping from a pgbackrest repository.
+// Returns nil if not configured for pgbackrest recovery.
+func (cluster *Cluster) GetRecoverySourcePgBackRest() *PgBackRestRecoverySource {
+	if cluster.Spec.Bootstrap == nil || cluster.Spec.Bootstrap.Recovery == nil {
+		return nil
+	}
+
+	recoveryConfig := cluster.Spec.Bootstrap.Recovery
+	if len(recoveryConfig.Source) == 0 {
+		return nil
+	}
+
+	recoveryExternalCluster, found := cluster.ExternalCluster(recoveryConfig.Source)
+	if !found {
+		return nil
+	}
+
+	if recoveryExternalCluster.PgBackRest == nil {
+		return nil
+	}
+
+	return &PgBackRestRecoverySource{
+		Repository: recoveryExternalCluster.PgBackRest,
+		StanzaName: recoveryExternalCluster.Name,
+	}
+}
+
 // EnsureGVKIsPresent ensures that the GroupVersionKind (GVK) metadata is present in the Backup object.
 // This is necessary because informers do not automatically include metadata inside the object.
 // By setting the GVK, we ensure that components such as the plugins have enough metadata to typecheck the object.

@@ -3727,6 +3727,78 @@ spec:
                       - key
                       type: object
                       x-kubernetes-map-type: atomic
+                    pgBackRest:
+                      description: The pgbackrest repository configuration for this
+                        external cluster
+                      properties:
+                        azure:
+                          description: PgBackRestAzure defines the Azure Blob Storage
+                            configuration for pgbackrest.
+                          type: object
+                        gcs:
+                          description: PgBackRestGCS defines the Google Cloud Storage
+                            configuration for pgbackrest.
+                          type: object
+                        s3:
+                          description: PgBackRestS3 defines the S3-compatible storage
+                            configuration for pgbackrest.
+                          properties:
+                            accessKeyId:
+                              description: The reference to the access key id
+                              properties:
+                                key:
+                                  description: The key to select
+                                  type: string
+                                name:
+                                  description: Name of the referent.
+                                  type: string
+                              required:
+                              - key
+                              - name
+                              type: object
+                            bucket:
+                              description: The S3 bucket name
+                              type: string
+                            endpoint:
+                              description: |-
+                                The S3 endpoint, overriding the automatic endpoint discovery.
+                                Required for non-AWS S3-compatible storage (e.g. MinIO).
+                              type: string
+                            inheritFromIAMRole:
+                              description: |-
+                                Use IAM role-based authentication (e.g. IRSA, instance profile).
+                                Sets pgbackrest repo1-s3-key-type=auto.
+                              type: boolean
+                            region:
+                              description: The S3 region
+                              type: string
+                            secretAccessKey:
+                              description: The reference to the secret access key
+                              properties:
+                                key:
+                                  description: The key to select
+                                  type: string
+                                name:
+                                  description: Name of the referent.
+                                  type: string
+                              required:
+                              - key
+                              - name
+                              type: object
+                          required:
+                          - bucket
+                          - region
+                          type: object
+                          x-kubernetes-validations:
+                          - message: either inheritFromIAMRole or both accessKeyId
+                              and secretAccessKey must be specified, but not both
+                            rule: (self.inheritFromIAMRole == true) != (has(self.accessKeyId)
+                              && has(self.secretAccessKey))
+                      type: object
+                      x-kubernetes-validations:
+                      - message: exactly one of s3, gcs, or azure must be specified
+                        rule: '[has(self.s3), has(self.gcs), has(self.azure)].filter(x,
+                          x).size() == 1'
                     plugin:
                       description: |-
                         The configuration of the plugin that is taking care

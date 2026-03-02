@@ -708,7 +708,9 @@ func (v *ClusterCustomValidator) validateBootstrapRecoverySource(r *apiv1.Cluste
 
 	// Ensure the external cluster definition has enough information
 	// to be used to recover a data directory
-	if externalCluster.BarmanObjectStore == nil && externalCluster.PluginConfiguration == nil && externalCluster.PgBackRest == nil {
+	if externalCluster.BarmanObjectStore == nil &&
+		externalCluster.PluginConfiguration == nil &&
+		externalCluster.PgBackRest == nil {
 		result = append(
 			result,
 			field.Invalid(

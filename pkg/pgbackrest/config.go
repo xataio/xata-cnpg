@@ -45,7 +45,10 @@ func GenerateConfig(
 ) (string, error) {
 	pgbackrestConfig := cluster.Spec.Backup.PgBackRest
 
-	cfg, err := generateBaseConfig(ctx, k8sClient, cluster.Namespace, pgbackrestConfig.Repository, cluster.Name, pgDataPath)
+	cfg, err := generateBaseConfig(
+		ctx, k8sClient, cluster.Namespace,
+		pgbackrestConfig.Repository, cluster.Name, pgDataPath,
+	)
 	if err != nil {
 		return "", err
 	}

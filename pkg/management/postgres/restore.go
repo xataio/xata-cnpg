@@ -58,6 +58,7 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/configfile"
 	"github.com/xataio/xata-cnpg/pkg/management/external"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/constants"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	postgresSpec "github.com/xataio/xata-cnpg/pkg/postgres"
 	"github.com/xataio/xata-cnpg/pkg/system"
 	"github.com/xataio/xata-cnpg/pkg/utils"
@@ -296,7 +297,14 @@ func (info InitInfo) Restore(ctx context.Context, cli client.Client) error {
 	var config string
 
 	// nolint:nestif
-	if pluginConfiguration := cluster.GetRecoverySourcePlugin(); pluginConfiguration != nil {
+	if recoverySource := cluster.GetRecoverySourcePgBackRest(); recoverySource != nil {
+		contextLogger.Info("Restore through pgbackrest detected", "stanza", recoverySource.StanzaName)
+		conf, err := info.restoreViaPgBackRest(ctx, cli, cluster, recoverySource)
+		if err != nil {
+			return err
+		}
+		config = conf
+	} else if pluginConfiguration := cluster.GetRecoverySourcePlugin(); pluginConfiguration != nil {
 		contextLogger.Info("Restore through plugin detected, proceeding...")
 		res, err := restoreViaPlugin(ctx, cluster, pluginConfiguration)
 		if err != nil {
@@ -353,6 +361,54 @@ func (info InitInfo) Restore(ctx context.Context, cli client.Client) error {
 	}
 
 	return info.concludeRestore(ctx, cli, cluster, config, envs)
+}
+
+// restoreViaPgBackRest restores PGDATA from a pgbackrest repository.
+// pgbackrest writes restore_command and recovery_target_action to
+// postgresql.auto.conf during restore, but concludeRestore() removes
+// these from postgresql.auto.conf via migratePostgresAutoConfFile()
+// and empties override.conf. So we must return them explicitly here
+// for writeCustomRestoreWalConfig() to write them to custom.conf,
+// matching the barman and plugin patterns.
+// PITR targets are appended by BuildPostgresOptions().
+func (info InitInfo) restoreViaPgBackRest(
+	ctx context.Context,
+	cli client.Client,
+	cluster *apiv1.Cluster,
+	recoverySource *apiv1.PgBackRestRecoverySource,
+) (string, error) {
+	configContent, err := pgbackrest.GenerateConfigFromRepository(
+		ctx, cli, cluster.Namespace,
+		recoverySource.Repository, recoverySource.StanzaName, info.PgData,
+	)
+	if err != nil {
+		return "", fmt.Errorf("generating pgbackrest config for restore: %w", err)
+	}
+
+	if _, err := pgbackrest.WriteConfigFile(configContent); err != nil {
+		return "", fmt.Errorf("writing pgbackrest config for restore: %w", err)
+	}
+
+	if err := pgbackrest.Restore(ctx, recoverySource.StanzaName, info.PgData); err != nil {
+		return "", fmt.Errorf("pgbackrest restore: %w", err)
+	}
+
+	// Build restore_command and recovery_target_action explicitly.
+	// pgbackrest writes these to postgresql.auto.conf during restore,
+	// but concludeRestore() strips them out (migratePostgresAutoConfFile
+	// removes restore_command from postgresql.auto.conf, and
+	// writeRecoveryConfiguration empties override.conf). We must return
+	// them here so they end up in custom.conf.
+	restoreCommand := fmt.Sprintf(
+		"pgbackrest --config=%s --stanza=%s archive-get %%f \"%%p\"",
+		pgbackrest.ConfigFilePath, recoverySource.StanzaName,
+	)
+	config := fmt.Sprintf(
+		"recovery_target_action = promote\nrestore_command = '%s'\n",
+		restoreCommand,
+	)
+
+	return config, nil
 }
 
 func (info InitInfo) ensureArchiveContainsLastCheckpointRedoWAL(

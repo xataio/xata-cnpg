@@ -44,20 +44,68 @@ func GenerateConfig(
 	pgDataPath string,
 ) (string, error) {
 	pgbackrestConfig := cluster.Spec.Backup.PgBackRest
-	dest := pgbackrestConfig.Repository
 
+	cfg, err := generateBaseConfig(ctx, k8sClient, cluster.Namespace, pgbackrestConfig.Repository, cluster.Name, pgDataPath)
+	if err != nil {
+		return "", err
+	}
+
+	global := cfg.Section("global")
+
+	// Options (backup-specific)
+	if opts := pgbackrestConfig.Options; opts != nil {
+		configureOptions(opts, global)
+	}
+
+	// Retention (backup-specific)
+	if ret := pgbackrestConfig.Retention; ret != nil {
+		configureRetention(ret, global)
+	}
+
+	return renderConfig(cfg)
+}
+
+// GenerateConfigFromRepository builds a minimal pgbackrest.conf from a repository
+// configuration. Used for restore where only the storage location is needed
+// (no options or retention).
+func GenerateConfigFromRepository(
+	ctx context.Context,
+	k8sClient client.Client,
+	namespace string,
+	repo *apiv1.PgBackRestRepository,
+	stanzaName string,
+	pgDataPath string,
+) (string, error) {
+	cfg, err := generateBaseConfig(ctx, k8sClient, namespace, repo, stanzaName, pgDataPath)
+	if err != nil {
+		return "", err
+	}
+
+	return renderConfig(cfg)
+}
+
+// generateBaseConfig builds the core pgbackrest INI config with repository
+// location, paths, and stanza section.
+func generateBaseConfig(
+	ctx context.Context,
+	k8sClient client.Client,
+	namespace string,
+	repo *apiv1.PgBackRestRepository,
+	stanzaName string,
+	pgDataPath string,
+) (*ini.File, error) {
 	cfg := ini.Empty()
 	global := cfg.Section("global")
 
 	// S3 configuration
-	if dest.S3 != nil {
-		if err := configureS3(ctx, k8sClient, cluster.Namespace, dest.S3, global); err != nil {
-			return "", fmt.Errorf("configuring S3: %w", err)
+	if repo.S3 != nil {
+		if err := configureS3(ctx, k8sClient, namespace, repo.S3, global); err != nil {
+			return nil, fmt.Errorf("configuring S3: %w", err)
 		}
 	}
 
 	// Repository path
-	global.Key("repo1-path").SetValue("/" + cluster.Name)
+	global.Key("repo1-path").SetValue("/" + stanzaName)
 
 	// Spool path (used when archive-async is enabled)
 	global.Key("spool-path").SetValue(SpoolPath)
@@ -67,26 +115,19 @@ func GenerateConfig(
 	global.Key("log-path").SetValue("/controller/pgbackrest/log")
 	global.Key("lock-path").SetValue("/controller/pgbackrest/lock")
 
-	// Options
-	if opts := pgbackrestConfig.Options; opts != nil {
-		configureOptions(opts, global)
-	}
-
-	// Retention
-	if ret := pgbackrestConfig.Retention; ret != nil {
-		configureRetention(ret, global)
-	}
-
 	// Stanza section
-	stanza := cfg.Section(cluster.Name)
+	stanza := cfg.Section(stanzaName)
 	stanza.Key("pg1-path").SetValue(pgDataPath)
 
-	// Render to string
+	return cfg, nil
+}
+
+// renderConfig serializes an INI config to a string.
+func renderConfig(cfg *ini.File) (string, error) {
 	var buf bytes.Buffer
 	if _, err := cfg.WriteTo(&buf); err != nil {
 		return "", fmt.Errorf("rendering pgbackrest config: %w", err)
 	}
-
 	return buf.String(), nil
 }
 

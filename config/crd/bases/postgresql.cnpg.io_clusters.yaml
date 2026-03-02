@@ -1525,8 +1525,8 @@ spec:
                         type: object
                         x-kubernetes-validations:
                         - message: exactly one of s3, gcs, or azure must be specified
-                          rule: '[has(self.s3), has(self.gcs), has(self.azure)].filter(x,
-                            x).size() == 1'
+                          rule: '(has(self.s3) ? 1 : 0) + (has(self.gcs) ? 1 : 0)
+                            + (has(self.azure) ? 1 : 0) == 1'
                       retention:
                         description: PgBackRestRetention defines the backup retention
                           policy for pgbackrest.
@@ -3252,8 +3252,8 @@ spec:
                       type: object
                       x-kubernetes-validations:
                       - message: exactly one of s3, gcs, or azure must be specified
-                        rule: '[has(self.s3), has(self.gcs), has(self.azure)].filter(x,
-                          x).size() == 1'
+                        rule: '(has(self.s3) ? 1 : 0) + (has(self.gcs) ? 1 : 0) +
+                          (has(self.azure) ? 1 : 0) == 1'
                     plugin:
                       description: |-
                         The configuration of the plugin that is taking care

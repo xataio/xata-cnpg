@@ -144,7 +144,7 @@ type PgBackRestConfiguration struct {
 
 // PgBackRestRepository defines the storage repository for pgbackrest.
 // Exactly one of s3, gcs, or azure must be specified.
-// +kubebuilder:validation:XValidation:rule="[has(self.s3), has(self.gcs), has(self.azure)].filter(x, x).size() == 1",message="exactly one of s3, gcs, or azure must be specified"
+// +kubebuilder:validation:XValidation:rule="(has(self.s3) ? 1 : 0) + (has(self.gcs) ? 1 : 0) + (has(self.azure) ? 1 : 0) == 1",message="exactly one of s3, gcs, or azure must be specified"
 type PgBackRestRepository struct {
 	S3    *PgBackRestS3    `json:"s3,omitempty"`
 	GCS   *PgBackRestGCS   `json:"gcs,omitempty"`

@@ -394,7 +394,7 @@ func pgbackrestSecrets(cluster apiv1.Cluster) []string {
 	}
 
 	var result []string
-	s3 := cluster.Spec.Backup.PgBackRest.Destination.S3
+	s3 := cluster.Spec.Backup.PgBackRest.Repository.S3
 	if s3 == nil {
 		return nil
 	}

@@ -137,15 +137,15 @@ const (
 
 // PgBackRestConfiguration defines the backup configuration using pgbackrest.
 type PgBackRestConfiguration struct {
-	Destination *PgBackRestDestination `json:"destination"`
-	Retention   *PgBackRestRetention   `json:"retention,omitempty"`
-	Options     *PgBackRestOptions     `json:"options,omitempty"`
+	Repository *PgBackRestRepository `json:"repository"`
+	Retention  *PgBackRestRetention  `json:"retention,omitempty"`
+	Options    *PgBackRestOptions    `json:"options,omitempty"`
 }
 
-// PgBackRestDestination defines the storage destination for pgbackrest backups.
+// PgBackRestRepository defines the storage repository for pgbackrest.
 // Exactly one of s3, gcs, or azure must be specified.
 // +kubebuilder:validation:XValidation:rule="[has(self.s3), has(self.gcs), has(self.azure)].filter(x, x).size() == 1",message="exactly one of s3, gcs, or azure must be specified"
-type PgBackRestDestination struct {
+type PgBackRestRepository struct {
 	S3    *PgBackRestS3    `json:"s3,omitempty"`
 	GCS   *PgBackRestGCS   `json:"gcs,omitempty"`
 	Azure *PgBackRestAzure `json:"azure,omitempty"`

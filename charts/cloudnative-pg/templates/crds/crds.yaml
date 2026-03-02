@@ -1937,9 +1937,71 @@ spec:
                   pgBackRest:
                     description: The configuration for pgbackrest
                     properties:
-                      destination:
+                      options:
+                        description: PgBackRestOptions defines process-level settings
+                          for pgbackrest.
+                        properties:
+                          archiveAsync:
+                            description: Enable async WAL archiving for better throughput.
+                            type: boolean
+                          archiveGetQueueMax:
+                            description: |-
+                              Max size of the WAL restore queue when archiveAsync is enabled.
+                              Uses pgbackrest size format (e.g. "1GiB", "256MiB").
+                            type: string
+                          archivePushQueueMax:
+                            description: |-
+                              Max size of the WAL archive push queue when archiveAsync is enabled.
+                              Uses pgbackrest size format (e.g. "1GiB", "256MiB").
+                            type: string
+                          backupStandby:
+                            description: |-
+                              Take backups from a standby instance instead of the primary,
+                              reducing load on the primary.
+                            type: boolean
+                          blockIncremental:
+                            description: |-
+                              Enable block-level incremental backup. Only changed blocks within files
+                              are backed up instead of entire files. Requires pgbackrest 2.46+.
+                            type: boolean
+                          bundle:
+                            description: Bundle small files together for more efficient
+                              object storage operations.
+                            type: boolean
+                          compressLevel:
+                            description: Compression level (0-9). The meaning depends
+                              on the algorithm.
+                            maximum: 9
+                            minimum: 0
+                            type: integer
+                          compressType:
+                            default: lz4
+                            description: Compression algorithm. Defaults to "lz4".
+                            enum:
+                            - none
+                            - gz
+                            - bz2
+                            - lz4
+                            - zst
+                            type: string
+                          delta:
+                            description: Only restore files that have changed. Speeds
+                              up restores.
+                            type: boolean
+                          processMax:
+                            description: Maximum number of parallel processes for
+                              backup/restore.
+                            minimum: 1
+                            type: integer
+                          startFast:
+                            description: |-
+                              Force an immediate checkpoint at backup start instead of
+                              waiting for the next scheduled checkpoint.
+                            type: boolean
+                        type: object
+                      repository:
                         description: |-
-                          PgBackRestDestination defines the storage destination for pgbackrest backups.
+                          PgBackRestRepository defines the storage repository for pgbackrest.
                           Exactly one of s3, gcs, or azure must be specified.
                         properties:
                           azure:
@@ -2010,68 +2072,6 @@ spec:
                         - message: exactly one of s3, gcs, or azure must be specified
                           rule: '[has(self.s3), has(self.gcs), has(self.azure)].filter(x,
                             x).size() == 1'
-                      options:
-                        description: PgBackRestOptions defines process-level settings
-                          for pgbackrest.
-                        properties:
-                          archiveAsync:
-                            description: Enable async WAL archiving for better throughput.
-                            type: boolean
-                          archiveGetQueueMax:
-                            description: |-
-                              Max size of the WAL restore queue when archiveAsync is enabled.
-                              Uses pgbackrest size format (e.g. "1GiB", "256MiB").
-                            type: string
-                          archivePushQueueMax:
-                            description: |-
-                              Max size of the WAL archive push queue when archiveAsync is enabled.
-                              Uses pgbackrest size format (e.g. "1GiB", "256MiB").
-                            type: string
-                          backupStandby:
-                            description: |-
-                              Take backups from a standby instance instead of the primary,
-                              reducing load on the primary.
-                            type: boolean
-                          blockIncremental:
-                            description: |-
-                              Enable block-level incremental backup. Only changed blocks within files
-                              are backed up instead of entire files. Requires pgbackrest 2.46+.
-                            type: boolean
-                          bundle:
-                            description: Bundle small files together for more efficient
-                              object storage operations.
-                            type: boolean
-                          compressLevel:
-                            description: Compression level (0-9). The meaning depends
-                              on the algorithm.
-                            maximum: 9
-                            minimum: 0
-                            type: integer
-                          compressType:
-                            default: lz4
-                            description: Compression algorithm. Defaults to "lz4".
-                            enum:
-                            - none
-                            - gz
-                            - bz2
-                            - lz4
-                            - zst
-                            type: string
-                          delta:
-                            description: Only restore files that have changed. Speeds
-                              up restores.
-                            type: boolean
-                          processMax:
-                            description: Maximum number of parallel processes for
-                              backup/restore.
-                            minimum: 1
-                            type: integer
-                          startFast:
-                            description: |-
-                              Force an immediate checkpoint at backup start instead of
-                              waiting for the next scheduled checkpoint.
-                            type: boolean
-                        type: object
                       retention:
                         description: PgBackRestRetention defines the backup retention
                           policy for pgbackrest.
@@ -2099,7 +2099,7 @@ spec:
                         - full
                         type: object
                     required:
-                    - destination
+                    - repository
                     type: object
                   retentionPolicy:
                     description: |-

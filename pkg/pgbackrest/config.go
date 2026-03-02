@@ -44,7 +44,7 @@ func GenerateConfig(
 	pgDataPath string,
 ) (string, error) {
 	pgbackrestConfig := cluster.Spec.Backup.PgBackRest
-	dest := pgbackrestConfig.Destination
+	dest := pgbackrestConfig.Repository
 
 	cfg := ini.Empty()
 	global := cfg.Section("global")

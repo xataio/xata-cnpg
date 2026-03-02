@@ -1338,7 +1338,7 @@ func (backupConfiguration *BackupConfiguration) IsBarmanBackupConfigured() bool 
 // is configured, false otherwise
 func (backupConfiguration *BackupConfiguration) IsPgBackRestConfigured() bool {
 	return backupConfiguration != nil && backupConfiguration.PgBackRest != nil &&
-		backupConfiguration.PgBackRest.Destination != nil
+		backupConfiguration.PgBackRest.Repository != nil
 }
 
 // IsBarmanEndpointCASet returns true if we have a CA bundle for the endpoint

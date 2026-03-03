@@ -93,6 +93,7 @@ func (r *InstanceReconciler) shouldUpdateWALArchiveSettingsCache(
 
 	// pgbackrest handles credentials via config file, no env caching needed
 	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		cache.Delete(cache.WALArchiveKey)
 		return false
 	}
 

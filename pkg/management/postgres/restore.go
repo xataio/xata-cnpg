@@ -299,7 +299,7 @@ func (info InitInfo) Restore(ctx context.Context, cli client.Client) error {
 	// nolint:nestif
 	if recoverySource := cluster.GetRecoverySourcePgBackRest(); recoverySource != nil {
 		contextLogger.Info("Restore through pgbackrest detected", "stanza", recoverySource.StanzaName)
-		conf, err := info.restoreViaPgBackRest(ctx, cli, cluster, recoverySource)
+		conf, err := info.restoreViaPgBackRest(ctx, cli, cluster)
 		if err != nil {
 			return err
 		}
@@ -375,8 +375,12 @@ func (info InitInfo) restoreViaPgBackRest(
 	ctx context.Context,
 	cli client.Client,
 	cluster *apiv1.Cluster,
-	recoverySource *apiv1.PgBackRestRecoverySource,
 ) (string, error) {
+	recoverySource := cluster.GetRecoverySourcePgBackRest()
+	if recoverySource == nil {
+		return "", fmt.Errorf("pgbackrest recovery source not found in cluster spec")
+	}
+
 	configContent, err := pgbackrest.GenerateConfigFromRepository(
 		ctx, cli, cluster.Namespace,
 		recoverySource.Repository, recoverySource.StanzaName, info.PgData,

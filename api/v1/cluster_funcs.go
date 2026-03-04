@@ -1469,7 +1469,7 @@ func (cluster *Cluster) GetRecoverySourcePlugin() *PluginConfiguration {
 type PgBackRestRecoverySource struct {
 	Repository *PgBackRestRepository
 	StanzaName string
-	BackupName string //empty for restore to latest
+	BackupName string // empty for restore to latest
 }
 
 // GetRecoverySourcePgBackRest returns the pgbackrest recovery source

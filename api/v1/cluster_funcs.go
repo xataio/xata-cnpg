@@ -1469,6 +1469,7 @@ func (cluster *Cluster) GetRecoverySourcePlugin() *PluginConfiguration {
 type PgBackRestRecoverySource struct {
 	Repository *PgBackRestRepository
 	StanzaName string
+	BackupName string //empty for restore to latest
 }
 
 // GetRecoverySourcePgBackRest returns the pgbackrest recovery source
@@ -1484,6 +1485,11 @@ func (cluster *Cluster) GetRecoverySourcePgBackRest() *PgBackRestRecoverySource 
 		return nil
 	}
 
+	backupName := ""
+	if recoveryConfig.Backup != nil {
+		backupName = recoveryConfig.Backup.Name
+	}
+
 	recoveryExternalCluster, found := cluster.ExternalCluster(recoveryConfig.Source)
 	if !found {
 		return nil
@@ -1496,6 +1502,7 @@ func (cluster *Cluster) GetRecoverySourcePgBackRest() *PgBackRestRecoverySource 
 	return &PgBackRestRecoverySource{
 		Repository: recoveryExternalCluster.PgBackRest,
 		StanzaName: recoveryExternalCluster.Name,
+		BackupName: backupName,
 	}
 }
 

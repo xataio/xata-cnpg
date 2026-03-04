@@ -393,7 +393,19 @@ func (info InitInfo) restoreViaPgBackRest(
 		return "", fmt.Errorf("writing pgbackrest config for restore: %w", err)
 	}
 
-	if err := pgbackrest.Restore(ctx, recoverySource.StanzaName, info.PgData); err != nil {
+	backupLabel := ""
+	if recoverySource.BackupName != "" {
+		backup, err := info.getBackup(ctx, cli, recoverySource.BackupName)
+		if err != nil {
+			return "", fmt.Errorf("get pgbackrest backup: %w", err)
+		}
+		backupLabel = backup.Status.BackupID
+		if backupLabel == "" {
+			return "", fmt.Errorf("backup label not found in pgbackrest backup")
+		}
+	}
+
+	if err := pgbackrest.Restore(ctx, recoverySource.StanzaName, info.PgData, backupLabel); err != nil {
 		return "", fmt.Errorf("pgbackrest restore: %w", err)
 	}
 
@@ -644,6 +656,23 @@ func (info InitInfo) loadBackupObjectFromExternalCluster(
 			CommandError:      "",
 		},
 	}, env, nil
+}
+
+// getBackup returns the info about a backup done with pgbackrest
+func (info InitInfo) getBackup(
+	ctx context.Context,
+	typedClient client.Client,
+	backupName string,
+) (*apiv1.Backup, error) {
+	var backup apiv1.Backup
+	err := typedClient.Get(
+		ctx,
+		client.ObjectKey{Namespace: info.Namespace, Name: backupName},
+		&backup)
+	if err != nil {
+		return nil, err
+	}
+	return &backup, nil
 }
 
 // loadBackupFromReference loads a backup object and the required credentials given the backup object resource

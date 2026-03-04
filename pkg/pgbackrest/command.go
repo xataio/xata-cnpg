@@ -136,11 +136,17 @@ func Backup(ctx context.Context, stanzaName string, backupType string) error {
 }
 
 // Restore restores a PostgreSQL data directory from the pgbackrest repository.
-func Restore(ctx context.Context, stanzaName string, pgDataPath string) error {
+func Restore(ctx context.Context, stanzaName string, pgDataPath string, backupLabel string) error {
 	contextLog := log.FromContext(ctx)
-	contextLog.Info("Starting pgbackrest restore", "stanza", stanzaName, "pgDataPath", pgDataPath)
+	contextLog.Info("Starting pgbackrest restore",
+		"stanza", stanzaName, "pgDataPath", pgDataPath, "backupLabel", backupLabel)
 
-	return runPgBackRest(ctx, "--stanza="+stanzaName, "restore", "--pg1-path="+pgDataPath)
+	args := []string{"--stanza=" + stanzaName, "restore", "--pg1-path=" + pgDataPath}
+	if backupLabel != "" {
+		args = append(args, "--set="+backupLabel)
+	}
+
+	return runPgBackRest(ctx, args...)
 }
 
 // ArchiveGet retrieves a WAL file from the pgbackrest repository.

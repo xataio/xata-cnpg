@@ -70,6 +70,7 @@ func NewTLSConfigFromCertPool(
 		MinVersion:         tls.VersionTLS13,
 		RootCAs:            certPool,
 		InsecureSkipVerify: true, //#nosec G402 -- we are verifying the certificate ourselves
+		//nolint:gosec // G123: TLS 1.3 doesn't resume without re-verification
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			// Code adapted from https://go.dev/src/crypto/tls/handshake_client.go#L986
 			if len(rawCerts) == 0 {

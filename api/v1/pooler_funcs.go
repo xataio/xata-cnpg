@@ -132,3 +132,11 @@ func (in *PgBouncerSpec) GetPauseDuringSwitchoverTimeout() time.Duration {
 	}
 	return 120 * time.Second
 }
+
+// GetServiceAccountName returns the name of the ServiceAccount for this pooler.
+func (in *Pooler) GetServiceAccountName() string {
+	if in.Spec.ServiceAccountName != "" {
+		return in.Spec.ServiceAccountName
+	}
+	return in.Name
+}

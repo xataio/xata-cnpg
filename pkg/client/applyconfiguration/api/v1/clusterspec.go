@@ -75,6 +75,13 @@ type ClusterSpecApplyConfiguration struct {
 	StorageConfiguration *StorageConfigurationApplyConfiguration `json:"storage,omitempty"`
 	// Configure the generation of the service account
 	ServiceAccountTemplate *ServiceAccountTemplateApplyConfiguration `json:"serviceAccountTemplate,omitempty"`
+	// Name of an existing ServiceAccount in the same namespace to use for the cluster.
+	// When specified, the operator will not create a new ServiceAccount
+	// but will use the provided one. This is useful for sharing a single
+	// ServiceAccount across multiple clusters (e.g., for cloud IAM configurations).
+	// If not specified, a ServiceAccount will be created with the cluster name.
+	// Mutually exclusive with ServiceAccountTemplate.
+	ServiceAccountName *string `json:"serviceAccountName,omitempty"`
 	// Configuration of the storage for PostgreSQL WAL (Write-Ahead Log)
 	WalStorage *StorageConfigurationApplyConfiguration `json:"walStorage,omitempty"`
 	// EphemeralVolumeSource allows the user to configure the source of ephemeral volumes.
@@ -361,6 +368,14 @@ func (b *ClusterSpecApplyConfiguration) WithStorageConfiguration(value *StorageC
 // If called multiple times, the ServiceAccountTemplate field is set to the value of the last call.
 func (b *ClusterSpecApplyConfiguration) WithServiceAccountTemplate(value *ServiceAccountTemplateApplyConfiguration) *ClusterSpecApplyConfiguration {
 	b.ServiceAccountTemplate = value
+	return b
+}
+
+// WithServiceAccountName sets the ServiceAccountName field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ServiceAccountName field is set to the value of the last call.
+func (b *ClusterSpecApplyConfiguration) WithServiceAccountName(value string) *ClusterSpecApplyConfiguration {
+	b.ServiceAccountName = &value
 	return b
 }
 

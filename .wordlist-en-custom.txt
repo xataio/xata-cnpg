@@ -196,9 +196,9 @@ GeoSpatial
 Gi
 GitOps
 GoArch
+GoReleaser
 Golang
 GolangCI
-GoReleaser
 GoogleCredentials
 Grafana
 HH
@@ -272,6 +272,8 @@ ManagedRoles
 ManagedRolesStatus
 ManagedService
 ManagedServices
+MaxItems
+MaxLength
 MetricDescription
 MetricName
 MetricType
@@ -1356,6 +1358,7 @@ serverName
 serverSecretVersion
 serverTLS
 serverTLSSecret
+serviceAccountName
 serviceAccountTemplate
 serviceTemplate
 serviceaccount
@@ -1539,8 +1542,8 @@ webhook
 webhooks
 webserver
 webtest
-wikipedia
 whitespace
+wikipedia
 wp
 writeService
 wsl

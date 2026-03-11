@@ -33,6 +33,12 @@ type PoolerSpecApplyConfiguration struct {
 	Monitoring *PoolerMonitoringConfigurationApplyConfiguration `json:"monitoring,omitempty"`
 	// Template for the Service to be created
 	ServiceTemplate *ServiceTemplateSpecApplyConfiguration `json:"serviceTemplate,omitempty"`
+	// Name of an existing ServiceAccount in the same namespace to use for the pooler.
+	// When specified, the operator will not create a new ServiceAccount
+	// but will use the provided one. This is useful for sharing a single
+	// ServiceAccount across multiple poolers (e.g., for cloud IAM configurations).
+	// If not specified, a ServiceAccount will be created with the pooler name.
+	ServiceAccountName *string `json:"serviceAccountName,omitempty"`
 }
 
 // PoolerSpecApplyConfiguration constructs a declarative configuration of the PoolerSpec type for use with
@@ -102,5 +108,13 @@ func (b *PoolerSpecApplyConfiguration) WithMonitoring(value *PoolerMonitoringCon
 // If called multiple times, the ServiceTemplate field is set to the value of the last call.
 func (b *PoolerSpecApplyConfiguration) WithServiceTemplate(value *ServiceTemplateSpecApplyConfiguration) *PoolerSpecApplyConfiguration {
 	b.ServiceTemplate = value
+	return b
+}
+
+// WithServiceAccountName sets the ServiceAccountName field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ServiceAccountName field is set to the value of the last call.
+func (b *PoolerSpecApplyConfiguration) WithServiceAccountName(value string) *PoolerSpecApplyConfiguration {
+	b.ServiceAccountName = &value
 	return b
 }

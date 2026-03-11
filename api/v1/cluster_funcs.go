@@ -1657,3 +1657,11 @@ func (cluster *Cluster) IsFailoverQuorumActive() bool {
 
 	return cluster.Spec.PostgresConfiguration.Synchronous.FailoverQuorum
 }
+
+// GetServiceAccountName returns the name of the ServiceAccount for this cluster.
+func (cluster *Cluster) GetServiceAccountName() string {
+	if cluster.Spec.ServiceAccountName != "" {
+		return cluster.Spec.ServiceAccountName
+	}
+	return cluster.Name
+}

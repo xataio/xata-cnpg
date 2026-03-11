@@ -1745,6 +1745,18 @@ user by setting it to <code>NULL</code>. Disabled by default.</p>
    <p>Configure the generation of the service account</p>
 </td>
 </tr>
+<tr><td><code>serviceAccountName</code><br/>
+<i>string</i>
+</td>
+<td>
+   <p>Name of an existing ServiceAccount in the same namespace to use for the cluster.
+When specified, the operator will not create a new ServiceAccount
+but will use the provided one. This is useful for sharing a single
+ServiceAccount across multiple clusters (e.g., for cloud IAM configurations).
+If not specified, a ServiceAccount will be created with the cluster name.
+Mutually exclusive with ServiceAccountTemplate.</p>
+</td>
+</tr>
 <tr><td><code>walStorage</code><br/>
 <a href="#postgresql-cnpg-io-v1-StorageConfiguration"><i>StorageConfiguration</i></a>
 </td>
@@ -4752,6 +4764,17 @@ you need this functionality, you can create a PodMonitor manually.</p>
 </td>
 <td>
    <p>Template for the Service to be created</p>
+</td>
+</tr>
+<tr><td><code>serviceAccountName</code><br/>
+<i>string</i>
+</td>
+<td>
+   <p>Name of an existing ServiceAccount in the same namespace to use for the pooler.
+When specified, the operator will not create a new ServiceAccount
+but will use the provided one. This is useful for sharing a single
+ServiceAccount across multiple poolers (e.g., for cloud IAM configurations).
+If not specified, a ServiceAccount will be created with the pooler name.</p>
 </td>
 </tr>
 </tbody>

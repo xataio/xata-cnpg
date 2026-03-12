@@ -231,8 +231,9 @@ func createVolumesAndVolumeMountsForSQLRefs(
 func CreatePostgresVolumeMounts(cluster apiv1.Cluster) []corev1.VolumeMount {
 	volumeMounts := []corev1.VolumeMount{
 		{
-			Name:      "pgdata",
-			MountPath: "/var/lib/postgresql/data",
+			Name:             "pgdata",
+			MountPath:        "/var/lib/postgresql/data",
+			MountPropagation: cluster.Spec.StorageConfiguration.MountPropagation,
 		},
 		{
 			Name:      "scratch-data",
@@ -251,8 +252,9 @@ func CreatePostgresVolumeMounts(cluster apiv1.Cluster) []corev1.VolumeMount {
 	if cluster.ShouldCreateWalArchiveVolume() {
 		volumeMounts = append(volumeMounts,
 			corev1.VolumeMount{
-				Name:      "pg-wal",
-				MountPath: PgWalVolumePath,
+				Name:             "pg-wal",
+				MountPath:        PgWalVolumePath,
+				MountPropagation: cluster.Spec.WalStorage.MountPropagation,
 			},
 		)
 	}
@@ -270,11 +272,16 @@ func CreatePostgresVolumeMounts(cluster apiv1.Cluster) []corev1.VolumeMount {
 	// later it will be  retrieved to do deepEquals
 	if cluster.ContainsTablespaces() {
 		tbsNames := getSortedTablespaceList(&cluster)
+		tbsMap := make(map[string]*apiv1.TablespaceConfiguration, len(cluster.Spec.Tablespaces))
+		for i := range cluster.Spec.Tablespaces {
+			tbsMap[cluster.Spec.Tablespaces[i].Name] = &cluster.Spec.Tablespaces[i]
+		}
 		for i := range tbsNames {
 			volumeMounts = append(volumeMounts,
 				corev1.VolumeMount{
-					Name:      VolumeMountNameForTablespace(tbsNames[i]),
-					MountPath: MountForTablespace(tbsNames[i]),
+					Name:             VolumeMountNameForTablespace(tbsNames[i]),
+					MountPath:        MountForTablespace(tbsNames[i]),
+					MountPropagation: tbsMap[tbsNames[i]].Storage.MountPropagation,
 				},
 			)
 		}

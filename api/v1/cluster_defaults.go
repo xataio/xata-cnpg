@@ -75,6 +75,8 @@ func (r *Cluster) setDefaults(preserveUserSettings bool) {
 		r.defaultRecovery()
 	case r.Spec.Bootstrap.PgBaseBackup != nil:
 		r.defaultPgBaseBackup()
+	case r.Spec.Bootstrap.Noop != nil:
+		// No defaults needed for noop bootstrap
 	default:
 		r.defaultInitDB()
 	}

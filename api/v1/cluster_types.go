@@ -1512,7 +1512,16 @@ type BootstrapConfiguration struct {
 	// PostgreSQL instance
 	// +optional
 	PgBaseBackup *BootstrapPgBaseBackup `json:"pg_basebackup,omitempty"`
+
+	// Skip bootstrap entirely. The instance manager will wait for PGDATA
+	// to appear from an external source (e.g. NVMe-oF mount).
+	// +optional
+	Noop *BootstrapNoop `json:"noop,omitempty"`
 }
+
+// BootstrapNoop skips bootstrap entirely. The instance manager will
+// wait for PGDATA to appear from an external source (e.g. NVMe-oF mount).
+type BootstrapNoop struct{}
 
 // LDAPScheme defines the possible schemes for LDAP
 type LDAPScheme string

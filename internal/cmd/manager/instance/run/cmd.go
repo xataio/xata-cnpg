@@ -180,6 +180,7 @@ func runSubCommand( //nolint:gocognit,gocyclo
 		"skipNameValidation", skipNameValidation)
 
 	if err := waitForPGData(ctx, instance.PgData); err != nil {
+		contextLogger.Error(err, "Error while waiting for PGDATA directory to be available")
 		return err
 	}
 

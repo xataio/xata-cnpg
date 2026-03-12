@@ -2399,6 +2399,11 @@ spec:
                     - message: icuRules is only available when localeProvider is set
                         to `icu`
                       rule: '!has(self.icuRules) || self.localeProvider == ''icu'''
+                  noop:
+                    description: |-
+                      Skip bootstrap entirely. The instance manager will wait for PGDATA
+                      to appear from an external source (e.g. NVMe-oF mount).
+                    type: object
                   pg_basebackup:
                     description: |-
                       Bootstrap the cluster taking a physical backup of another compatible

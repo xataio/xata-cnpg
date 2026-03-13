@@ -1089,6 +1089,12 @@ func (r *ClusterReconciler) createPrimaryInstance(
 		return ctrl.Result{}, nil
 	}
 
+	// Noop bootstrap: create PVCs and Pod but skip the bootstrap Job.
+	// The instance manager's waitForPGData() will wait for external storage.
+	if cluster.Spec.Bootstrap != nil && cluster.Spec.Bootstrap.Noop != nil {
+		return r.createPrimaryInstanceNoop(ctx, cluster)
+	}
+
 	var (
 		backup           *apiv1.Backup
 		recoverySnapshot *persistentvolumeclaim.StorageSource
@@ -1343,18 +1349,43 @@ func (r *ClusterReconciler) ensureInstancesAreCreated(
 	}
 
 	// TODO: this logic eventually should be moved elsewhere
+	isNoopBootstrap := cluster.Spec.Bootstrap != nil && cluster.Spec.Bootstrap.Noop != nil
 	instancePVCs := persistentvolumeclaim.FilterByPodSpec(resources.pvcs.Items, instanceToCreate.Spec)
-	for _, instancePVC := range instancePVCs {
-		// This should not happen. However, we put this guard here
-		// as an assertion to catch unexpected events.
+	for i, instancePVC := range instancePVCs {
 		pvcStatus := instancePVC.Annotations[utils.PVCStatusAnnotationName]
 		if pvcStatus != persistentvolumeclaim.StatusReady {
+			// For noop bootstrap, mark PGDATA PVCs as ready immediately.
+			// The noop path may have created PVCs but failed to mark them
+			// ready due to informer cache lag, causing a deadlock.
+			if isNoopBootstrap {
+				contextLogger.Info("Noop bootstrap: marking PVC as ready",
+					"pvc", instancePVC.Name,
+				)
+				if err := persistentvolumeclaim.SetPVCStatusReady(ctx, r.Client, &instancePVCs[i]); err != nil {
+					return ctrl.Result{}, err
+				}
+				continue
+			}
+
 			contextLogger.Info("Selected PVC is not ready yet, waiting for 1 second",
 				"pvc", instancePVC.Name,
 				"status", pvcStatus,
 				"instance", instanceToCreate.Name,
 			)
 			return ctrl.Result{RequeueAfter: 1 * time.Second}, ErrNextLoop
+		}
+	}
+
+	// If noop bootstrap recovered a dangling PVC but createPrimaryInstanceNoop
+	// failed before calling setPrimaryInstance (e.g. due to informer cache lag),
+	// TargetPrimary will be empty. Set it now before creating the pod, otherwise
+	// the instance manager will enter the switchover path and get stuck.
+	if isNoopBootstrap && cluster.Status.TargetPrimary == "" {
+		contextLogger.Info("Noop bootstrap: setting target primary",
+			"instance", instanceToCreate.Name,
+		)
+		if err := r.setPrimaryInstance(ctx, cluster, instanceToCreate.Name); err != nil {
+			return ctrl.Result{}, err
 		}
 	}
 
@@ -1499,4 +1530,56 @@ func (r *ClusterReconciler) checkReadyForRecovery(
 		}
 	}
 	return ctrl.Result{}, nil
+}
+
+// createPrimaryInstanceNoop handles the noop bootstrap path: creates PVCs,
+// marks PGDATA as ready, and sets up the primary instance without running
+// a bootstrap Job.
+func (r *ClusterReconciler) createPrimaryInstanceNoop(
+	ctx context.Context,
+	cluster *apiv1.Cluster,
+) (ctrl.Result, error) {
+	contextLogger := log.FromContext(ctx)
+	contextLogger.Info("Noop bootstrap: skipping bootstrap Job")
+
+	nodeSerial, err := r.generateNodeSerial(ctx, cluster)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("cannot generate node serial: %w", err)
+	}
+
+	if err := persistentvolumeclaim.CreateInstancePVCs(ctx, r.Client, cluster, nil, nodeSerial); err != nil {
+		return ctrl.Result{}, fmt.Errorf("cannot create primary instance PVCs: %w", err)
+	}
+
+	// Set the primary instance immediately after PVC creation, before any
+	// operations that depend on the informer cache (like r.Get). This ensures
+	// TargetPrimary is set even if subsequent steps fail due to cache lag.
+	podName := fmt.Sprintf("%v-%v", cluster.Name, nodeSerial)
+	if err = r.setPrimaryInstance(ctx, cluster, podName); err != nil {
+		return ctrl.Result{}, err
+	}
+	r.Recorder.Event(cluster, "Normal", "CreatingInstance", "Primary instance (noop bootstrap)")
+	if err = r.RegisterPhase(ctx, cluster, apiv1.PhaseFirstPrimary,
+		fmt.Sprintf("Creating primary instance %v (noop bootstrap)", podName)); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Mark PGDATA PVC as "ready" immediately (it was created as "initializing").
+	// ensureInstancesAreCreated() requires "ready" status to create the Pod.
+	// If the informer cache hasn't synced yet and r.Get fails, the PVC will be
+	// marked ready by ensureInstancesAreCreated on the next reconcile.
+	pgDataPVC := &corev1.PersistentVolumeClaim{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: cluster.Namespace,
+		Name:      podName,
+	}, pgDataPVC); err != nil {
+		contextLogger.Info("Cannot get PGDATA PVC from cache, will be marked ready on next reconcile",
+			"pvc", podName, "err", err)
+		return ctrl.Result{RequeueAfter: 1 * time.Second}, ErrNextLoop
+	}
+	if err := persistentvolumeclaim.SetPVCStatusReady(ctx, r.Client, pgDataPVC); err != nil {
+		return ctrl.Result{}, fmt.Errorf("cannot mark PGDATA PVC as ready: %w", err)
+	}
+
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, ErrNextLoop
 }

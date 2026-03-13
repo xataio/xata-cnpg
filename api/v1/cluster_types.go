@@ -1512,7 +1512,16 @@ type BootstrapConfiguration struct {
 	// PostgreSQL instance
 	// +optional
 	PgBaseBackup *BootstrapPgBaseBackup `json:"pg_basebackup,omitempty"`
+
+	// Skip bootstrap entirely. The instance manager will wait for PGDATA
+	// to appear from an external source (e.g. NVMe-oF mount).
+	// +optional
+	Noop *BootstrapNoop `json:"noop,omitempty"`
 }
+
+// BootstrapNoop skips bootstrap entirely. The instance manager will
+// wait for PGDATA to appear from an external source (e.g. NVMe-oF mount).
+type BootstrapNoop struct{}
 
 // LDAPScheme defines the possible schemes for LDAP
 type LDAPScheme string
@@ -2058,6 +2067,13 @@ type StorageConfiguration struct {
 	// Template to be used to generate the Persistent Volume Claim
 	// +optional
 	PersistentVolumeClaimTemplate *corev1.PersistentVolumeClaimSpec `json:"pvcTemplate,omitempty"`
+
+	// MountPropagation allows configuring the mount propagation mode for the volume.
+	// When set to "HostToContainer", mounts made on the host after the container
+	// starts will be visible inside the container (e.g. for NVMe-oF external mounts).
+	// If not set, Kubernetes defaults to "None".
+	// +optional
+	MountPropagation *corev1.MountPropagationMode `json:"mountPropagation,omitempty"`
 }
 
 // TablespaceConfiguration is the configuration of a tablespace, and includes

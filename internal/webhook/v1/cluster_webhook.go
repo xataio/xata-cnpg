@@ -648,6 +648,9 @@ func (v *ClusterCustomValidator) validateBootstrapMethod(r *apiv1.Cluster) field
 	if r.Spec.Bootstrap.PgBaseBackup != nil {
 		bootstrapMethods++
 	}
+	if r.Spec.Bootstrap.Noop != nil {
+		bootstrapMethods++
+	}
 
 	if bootstrapMethods > 1 {
 		result = append(

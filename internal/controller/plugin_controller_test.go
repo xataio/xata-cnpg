@@ -110,8 +110,8 @@ var _ = Describe("PluginReconciler", func() {
 		testNamespace    = "test-namespace"
 		pluginName       = "test-plugin"
 		serviceName      = "test-plugin-service"
-		serverSecretName = "plugin-server-secret"
-		clientSecretName = "plugin-client-secret"
+		serverSecretName = "plugin-server-secret" //nolint:gosec // not a credential
+		clientSecretName = "plugin-client-secret" //nolint:gosec // not a credential
 		pluginPort       = "9090"
 	)
 

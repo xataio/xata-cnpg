@@ -31,9 +31,9 @@ import (
 // DisableSuperuserPassword disables the password for the `postgres` user
 func DisableSuperuserPassword(db *sql.DB) error {
 	var hasPassword bool
-	passwordCheck := `SELECT rolpassword IS NOT NULL
-		FROM pg_catalog.pg_authid
-		WHERE rolname='postgres'`
+	passwordCheck := `SELECT rolpassword IS NOT NULL` + //nolint:gosec // SQL query, not a credential
+		` FROM pg_catalog.pg_authid` +
+		` WHERE rolname='postgres'`
 	err := db.QueryRow(passwordCheck).Scan(&hasPassword)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err

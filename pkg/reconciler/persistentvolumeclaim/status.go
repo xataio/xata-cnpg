@@ -339,6 +339,15 @@ func hasUnknownStatus(ctx context.Context, pvc corev1.PersistentVolumeClaim) boo
 	return true
 }
 
+// SetPVCStatusReady sets the PVC status annotation to Ready.
+func SetPVCStatusReady(
+	ctx context.Context,
+	cli client.Client,
+	pvc *corev1.PersistentVolumeClaim,
+) error {
+	return setPVCStatusReady(ctx, cli, pvc)
+}
+
 // setPVCStatusReady annotation to Ready for a PVC
 func setPVCStatusReady(
 	ctx context.Context,

@@ -322,6 +322,25 @@ var _ = DescribeTable("test creation of volume mounts",
 				SubPathExpr:      "",
 			},
 		}),
+	Entry("creates pgdata mount with explicit mount propagation",
+		apiv1.Cluster{
+			Spec: apiv1.ClusterSpec{
+				Instances: 1,
+				StorageConfiguration: apiv1.StorageConfiguration{
+					MountPropagation: ptr.To(corev1.MountPropagationHostToContainer),
+				},
+			},
+		},
+		[]corev1.VolumeMount{
+			{
+				Name:             "pgdata",
+				ReadOnly:         false,
+				MountPath:        "/var/lib/postgresql/data",
+				SubPath:          "",
+				MountPropagation: ptr.To(corev1.MountPropagationHostToContainer),
+				SubPathExpr:      "",
+			},
+		}),
 	Entry("creates pgdata and pg-wal mounts for a cluster with walStorage configured",
 		apiv1.Cluster{
 			Spec: apiv1.ClusterSpec{

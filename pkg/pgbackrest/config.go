@@ -231,6 +231,9 @@ func configureOptions(opts *apiv1.PgBackRestOptions, section *ini.Section) {
 	if opts.BackupStandby != nil && *opts.BackupStandby {
 		section.Key("backup-standby").SetValue("y")
 	}
+	if opts.Priority != nil {
+		section.Key("priority").SetValue(strconv.Itoa(*opts.Priority))
+	}
 }
 
 // configureRetention maps PgBackRestRetention fields to pgbackrest config keys.

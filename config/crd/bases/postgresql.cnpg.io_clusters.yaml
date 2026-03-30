@@ -1443,6 +1443,14 @@ spec:
                             description: Only restore files that have changed. Speeds
                               up restores.
                             type: boolean
+                          priority:
+                            description: |-
+                              Allow for deprioritization when taking CPU (nice value), making sure we are
+                              not impacting postgres TPS. If not set defaults to 0 - which means no
+                              deprioritization. Do not go below 0 because that would make it more important than postgres
+                            maximum: 19
+                            minimum: 0
+                            type: integer
                           processMax:
                             description: Maximum number of parallel processes for
                               backup/restore.

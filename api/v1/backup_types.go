@@ -239,6 +239,13 @@ type PgBackRestOptions struct {
 	// reducing load on the primary.
 	// +optional
 	BackupStandby *bool `json:"backupStandby,omitempty"`
+	// Allow for deprioritization when taking CPU (nice value), making sure we are
+	// not impacting postgres TPS. If not set defaults to 0 - which means no
+	// deprioritization. Do not go below 0 because that would make it more important than postgres
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=19
+	Priority *int `json:"priority,omitempty"`
 	// TODO: add in future iterations:
 	// - encryption: cipherType, cipherPass
 	// - backup behavior: stopAuto, manifestSaveThreshold, resumeOff

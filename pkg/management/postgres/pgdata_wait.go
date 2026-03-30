@@ -17,7 +17,7 @@ limitations under the License.
 SPDX-License-Identifier: Apache-2.0
 */
 
-package run
+package postgres
 
 import (
 	"context"
@@ -30,16 +30,19 @@ import (
 )
 
 const (
-	pgdataWaitInterval = 30 * time.Millisecond
-	xataReadyMarker    = ".xata-ready"
+	// PGDataWaitInterval is the polling interval when waiting for PGDATA
+	PGDataWaitInterval = 30 * time.Millisecond
+
+	// XataReadyMarker is the marker file name used to signal readiness
+	XataReadyMarker = ".xata-ready"
 )
 
-// waitForPGData waits for the PGDATA directory or a ready marker file to
+// WaitForPGData waits for the PGDATA directory or a ready marker file to
 // appear. In standard PVC setups, PGDATA already exists and this returns
 // immediately. For NVMe-oF fast-wake scenarios, the storage may be mounted
 // after the pod starts; this function polls until PGDATA or the marker file
 // appears, waiting indefinitely until the context is cancelled.
-func waitForPGData(ctx context.Context, pgData string) error {
+func WaitForPGData(ctx context.Context, pgData string) error {
 	// Fast path: PGDATA already exists
 	if _, err := os.Stat(pgData); err == nil {
 		return nil
@@ -50,9 +53,9 @@ func waitForPGData(ctx context.Context, pgData string) error {
 		"pgData", pgData)
 
 	volumeRoot := filepath.Dir(pgData)
-	markerPath := filepath.Join(volumeRoot, xataReadyMarker)
+	markerPath := filepath.Join(volumeRoot, XataReadyMarker)
 
-	ticker := time.NewTicker(pgdataWaitInterval)
+	ticker := time.NewTicker(PGDataWaitInterval)
 	defer ticker.Stop()
 
 	for {

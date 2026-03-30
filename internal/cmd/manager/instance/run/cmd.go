@@ -68,10 +68,6 @@ import (
 var (
 	scheme = runtime.NewScheme()
 
-	// errNoFreeWALSpace is returned when there isn't enough disk space
-	// available to store at least two WAL files.
-	errNoFreeWALSpace = fmt.Errorf("no free disk space for WALs")
-
 	// errWALArchivePluginNotAvailable is returned when the configured
 	// WAL archiving plugin is not available or cannot be found.
 	errWALArchivePluginNotAvailable = fmt.Errorf("WAL archive plugin not available")
@@ -127,7 +123,7 @@ func NewCmd() *cobra.Command {
 				return runSubCommand(ctx, instance, pprofHTTPServer, skipNameValidation)
 			})
 
-			if errors.Is(err, errNoFreeWALSpace) {
+			if errors.Is(err, postgres.ErrNoFreeWALSpace) {
 				os.Exit(apiv1.MissingWALDiskSpaceExitCode)
 			}
 			if errors.Is(err, errWALArchivePluginNotAvailable) {
@@ -179,18 +175,18 @@ func runSubCommand( //nolint:gocognit,gocyclo
 		"build", versions.Info,
 		"skipNameValidation", skipNameValidation)
 
-	if err := waitForPGData(ctx, instance.PgData); err != nil {
-		contextLogger.Error(err, "Error while waiting for PGDATA directory to be available")
-		return err
-	}
-
-	contextLogger.Info("Checking for free disk space for WALs before starting PostgreSQL")
-	hasDiskSpaceForWals, err := instance.CheckHasDiskSpaceForWAL(ctx)
-	if err != nil {
-		contextLogger.Error(err, "Error while checking if there is enough disk space for WALs, skipping")
-	} else if !hasDiskSpaceForWals {
-		contextLogger.Info("Detected low-disk space condition, avoid starting the instance")
-		return errNoFreeWALSpace
+	// Only check disk space for WALs if PGDATA already exists.
+	// When PGDATA doesn't exist yet (noop bootstrap / warm pool), these checks
+	// will be performed in the lifecycle before starting PostgreSQL.
+	if _, statErr := os.Stat(instance.PgData); statErr == nil {
+		contextLogger.Info("Checking for free disk space for WALs before starting PostgreSQL")
+		hasDiskSpaceForWals, err := instance.CheckHasDiskSpaceForWAL(ctx)
+		if err != nil {
+			contextLogger.Error(err, "Error while checking if there is enough disk space for WALs, skipping")
+		} else if !hasDiskSpaceForWals {
+			contextLogger.Info("Detected low-disk space condition, avoid starting the instance")
+			return postgres.ErrNoFreeWALSpace
+		}
 	}
 
 	mgr, err := ctrl.NewManager(config.GetConfigOrDie(), ctrl.Options{
@@ -326,9 +322,13 @@ func runSubCommand( //nolint:gocognit,gocyclo
 	postgresStartConditions = append(postgresStartConditions, jsonPipe.GetExecutedCondition())
 	exitedConditions = append(exitedConditions, jsonPipe.GetExitedCondition())
 
-	if err := instancestorage.ReconcileWalDirectory(ctx); err != nil {
-		contextLogger.Error(err, "unable to move `pg_wal` directory to the attached volume")
-		return err
+	// Only reconcile WAL directory if PGDATA already exists.
+	// When PGDATA doesn't exist yet, this will be done in the lifecycle.
+	if _, statErr := os.Stat(instance.PgData); statErr == nil {
+		if err := instancestorage.ReconcileWalDirectory(ctx); err != nil {
+			contextLogger.Error(err, "unable to move `pg_wal` directory to the attached volume")
+			return err
+		}
 	}
 
 	postgresLifecycleManager := lifecycle.NewPostgres(ctx, instance, postgresStartConditions)
@@ -417,12 +417,12 @@ func runSubCommand( //nolint:gocognit,gocyclo
 	}
 
 	contextLogger.Info("Checking for free disk space for WALs after PostgreSQL finished")
-	hasDiskSpaceForWals, err = instance.CheckHasDiskSpaceForWAL(ctx)
-	if err != nil {
-		contextLogger.Error(err, "Error while checking if there is enough disk space for WALs, skipping")
+	hasDiskSpaceForWals, diskErr := instance.CheckHasDiskSpaceForWAL(ctx)
+	if diskErr != nil {
+		contextLogger.Error(diskErr, "Error while checking if there is enough disk space for WALs, skipping")
 	} else if !hasDiskSpaceForWals {
 		contextLogger.Info("Detected low-disk space condition")
-		return makeUnretryableError(errNoFreeWALSpace)
+		return makeUnretryableError(postgres.ErrNoFreeWALSpace)
 	}
 
 	if instance.Cluster != nil {

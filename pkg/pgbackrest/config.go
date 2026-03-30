@@ -215,12 +215,16 @@ func configureOptions(opts *apiv1.PgBackRestOptions, section *ini.Section) {
 	}
 	if opts.ArchiveAsync != nil && *opts.ArchiveAsync {
 		section.Key("archive-async").SetValue("y")
-	}
-	if opts.ArchivePushQueueMax != "" {
-		section.Key("archive-push-queue-max").SetValue(opts.ArchivePushQueueMax)
-	}
-	if opts.ArchiveGetQueueMax != "" {
-		section.Key("archive-get-queue-max").SetValue(opts.ArchiveGetQueueMax)
+		if opts.ArchivePushQueueMax != "" {
+			section.Key("archive-push-queue-max").SetValue(opts.ArchivePushQueueMax)
+		} else {
+			section.Key("archive-push-queue-max").SetValue("2GiB")
+		}
+		if opts.ArchiveGetQueueMax != "" {
+			section.Key("archive-get-queue-max").SetValue(opts.ArchiveGetQueueMax)
+		} else {
+			section.Key("archive-get-queue-max").SetValue("2GiB")
+		}
 	}
 	if opts.Bundle != nil && *opts.Bundle {
 		section.Key("repo1-bundle").SetValue("y")

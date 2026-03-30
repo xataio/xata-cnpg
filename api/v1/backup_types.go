@@ -195,9 +195,7 @@ type PgBackRestRetention struct {
 }
 
 // PgBackRestOptions defines process-level settings for pgbackrest.
-// +kubebuilder:validation:XValidation:rule="!has(self.blockIncremental) || !self.blockIncremental || (has(self.bundle) && self.bundle)",message="blockIncremental requires bundle to be true"
-// +kubebuilder:validation:XValidation:rule="!has(self.archivePushQueueMax) || self.archivePushQueueMax == '' || (has(self.archiveAsync) && self.archiveAsync)",message="archivePushQueueMax requires archiveAsync to be true"
-// +kubebuilder:validation:XValidation:rule="!has(self.archiveGetQueueMax) || self.archiveGetQueueMax == '' || (has(self.archiveAsync) && self.archiveAsync)",message="archiveGetQueueMax requires archiveAsync to be true"
+// +kubebuilder:validation:XValidation:rule=”!has(self.blockIncremental) || !self.blockIncremental || (has(self.bundle) && self.bundle)”,message=”blockIncremental requires bundle to be true”
 type PgBackRestOptions struct {
 	// Compression algorithm. Defaults to "lz4".
 	// +optional

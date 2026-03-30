@@ -1467,17 +1467,9 @@ spec:
                             type: boolean
                         type: object
                         x-kubernetes-validations:
-                        - message: blockIncremental requires bundle to be true
-                          rule: '!has(self.blockIncremental) || !self.blockIncremental
-                            || (has(self.bundle) && self.bundle)'
-                        - message: archivePushQueueMax requires archiveAsync to be
-                            true
-                          rule: '!has(self.archivePushQueueMax) || self.archivePushQueueMax
-                            == '''' || (has(self.archiveAsync) && self.archiveAsync)'
-                        - message: archiveGetQueueMax requires archiveAsync to be
-                            true
-                          rule: '!has(self.archiveGetQueueMax) || self.archiveGetQueueMax
-                            == '''' || (has(self.archiveAsync) && self.archiveAsync)'
+                        - message: ”blockIncremental requires bundle to be true”
+                          rule: ”!has(self.blockIncremental) || !self.blockIncremental
+                            || (has(self.bundle) && self.bundle)”
                       repository:
                         description: |-
                           PgBackRestRepository defines the storage repository for pgbackrest.

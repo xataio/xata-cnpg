@@ -113,12 +113,28 @@ func NewCmd() *cobra.Command {
 			instance.StatusPortTLS = statusPortTLS
 			instance.MetricsPortTLS = metricsPortTLS
 
+			// Detect noop bootstrap mode from the cluster spec
+			cli, err := management.NewControllerRuntimeClient()
+			if err != nil {
+				return fmt.Errorf("creating kubernetes client: %w", err)
+			}
+			var cluster apiv1.Cluster
+			if err := cli.Get(ctx, client.ObjectKey{
+				Name:      clusterName,
+				Namespace: namespace,
+			}, &cluster); err != nil {
+				return fmt.Errorf("fetching cluster: %w", err)
+			}
+			if cluster.Spec.Bootstrap != nil && cluster.Spec.Bootstrap.Noop != nil {
+				instance.SetNoopBootstrap(true)
+			}
+
 			// Since version 0.19.0 of controller-runtime, it is not allowed to create multiple controllers with the
 			// same name. As this part of the code is run inside a retry block, we need to allow SkipNameValidation
 			// only on retries, because a previous run may have already created a controller
 			// Reference https://github.com/kubernetes-sigs/controller-runtime/releases/tag/v0.19.0
 			var skipNameValidation bool
-			err := retry.OnError(retry.DefaultRetry, isRunSubCommandRetryable, func() error {
+			err = retry.OnError(retry.DefaultRetry, isRunSubCommandRetryable, func() error {
 				defer func() { skipNameValidation = true }()
 				return runSubCommand(ctx, instance, pprofHTTPServer, skipNameValidation)
 			})
@@ -175,10 +191,10 @@ func runSubCommand( //nolint:gocognit,gocyclo
 		"build", versions.Info,
 		"skipNameValidation", skipNameValidation)
 
-	// Only check disk space for WALs if PGDATA already exists.
-	// When PGDATA doesn't exist yet (noop bootstrap / warm pool), these checks
-	// will be performed in the lifecycle before starting PostgreSQL.
-	if _, statErr := os.Stat(instance.PgData); statErr == nil {
+	// In noop bootstrap mode, skip pre-flight checks only while PGDATA hasn't arrived yet.
+	// Once PGDATA exists (e.g. after a restart), run them normally.
+	pgdataExists := pgDataExists(instance.PgData)
+	if !instance.IsNoopBootstrap() || pgdataExists {
 		contextLogger.Info("Checking for free disk space for WALs before starting PostgreSQL")
 		hasDiskSpaceForWals, err := instance.CheckHasDiskSpaceForWAL(ctx)
 		if err != nil {
@@ -322,9 +338,9 @@ func runSubCommand( //nolint:gocognit,gocyclo
 	postgresStartConditions = append(postgresStartConditions, jsonPipe.GetExecutedCondition())
 	exitedConditions = append(exitedConditions, jsonPipe.GetExitedCondition())
 
-	// Only reconcile WAL directory if PGDATA already exists.
-	// When PGDATA doesn't exist yet, this will be done in the lifecycle.
-	if _, statErr := os.Stat(instance.PgData); statErr == nil {
+	// In noop bootstrap mode, skip WAL directory reconciliation only while PGDATA
+	// hasn't arrived yet. The lifecycle will handle it after PGDATA appears.
+	if !instance.IsNoopBootstrap() || pgdataExists {
 		if err := instancestorage.ReconcileWalDirectory(ctx); err != nil {
 			contextLogger.Error(err, "unable to move `pg_wal` directory to the attached volume")
 			return err
@@ -437,6 +453,12 @@ func runSubCommand( //nolint:gocognit,gocyclo
 	}
 
 	return nil
+}
+
+// pgDataExists checks whether the PGDATA directory exists
+func pgDataExists(pgData string) bool {
+	_, err := os.Stat(pgData)
+	return err == nil
 }
 
 func getPprofServerAddress(enabled bool) string {

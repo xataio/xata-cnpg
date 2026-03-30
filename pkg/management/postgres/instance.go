@@ -197,6 +197,10 @@ type Instance struct {
 	// a designatedPrimary
 	RequiresDesignatedPrimaryTransition bool
 
+	// noopBootstrap indicates the instance was started with bootstrap: noop (warm pool / slot mode).
+	// PGDATA is expected to arrive from an external source after the pod starts.
+	noopBootstrap atomic.Bool
+
 	// waitingForPGData indicates the instance is waiting for PGDATA to appear (noop bootstrap / warm pool)
 	waitingForPGData atomic.Bool
 
@@ -276,6 +280,16 @@ func (instance *Instance) IsReady() error {
 // IsFenced checks whether the instance is marked as fenced
 func (instance *Instance) IsFenced() bool {
 	return instance.fenced.Load()
+}
+
+// IsNoopBootstrap checks whether the instance is in noop bootstrap mode
+func (instance *Instance) IsNoopBootstrap() bool {
+	return instance.noopBootstrap.Load()
+}
+
+// SetNoopBootstrap marks whether the instance is in noop bootstrap mode
+func (instance *Instance) SetNoopBootstrap(enabled bool) {
+	instance.noopBootstrap.Store(enabled)
 }
 
 // WaitingForPGData checks whether the instance is waiting for PGDATA to appear

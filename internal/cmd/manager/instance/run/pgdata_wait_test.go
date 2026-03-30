@@ -25,10 +25,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
-	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 )
 
 var _ = Describe("WaitForPGData", func() {

@@ -195,6 +195,9 @@ type PgBackRestRetention struct {
 }
 
 // PgBackRestOptions defines process-level settings for pgbackrest.
+// +kubebuilder:validation:XValidation:rule="!has(self.blockIncremental) || !self.blockIncremental || (has(self.bundle) && self.bundle)",message="blockIncremental requires bundle to be true"
+// +kubebuilder:validation:XValidation:rule="!has(self.archivePushQueueMax) || self.archivePushQueueMax == '' || (has(self.archiveAsync) && self.archiveAsync)",message="archivePushQueueMax requires archiveAsync to be true"
+// +kubebuilder:validation:XValidation:rule="!has(self.archiveGetQueueMax) || self.archiveGetQueueMax == '' || (has(self.archiveAsync) && self.archiveAsync)",message="archiveGetQueueMax requires archiveAsync to be true"
 type PgBackRestOptions struct {
 	// Compression algorithm. Defaults to "lz4".
 	// +optional
@@ -229,10 +232,15 @@ type PgBackRestOptions struct {
 	// +optional
 	ArchiveGetQueueMax string `json:"archiveGetQueueMax,omitempty"`
 	// Bundle small files together for more efficient object storage operations.
+	// pgbackrest defaults: bundle-limit=2MiB (max file size eligible for bundling),
+	// bundle-size=20MiB (target size per bundle). Files larger than bundle-limit
+	// are stored individually.
+	// TODO: consider exposing bundleLimit and bundleSize as tunable options
 	// +optional
 	Bundle *bool `json:"bundle,omitempty"`
 	// Enable block-level incremental backup. Only changed blocks within files
-	// are backed up instead of entire files. Requires pgbackrest 2.46+.
+	// are backed up instead of entire files. Requires Bundle to be true.
+	// Requires pgbackrest 2.46+.
 	// +optional
 	BlockIncremental *bool `json:"blockIncremental,omitempty"`
 	// Take backups from a standby instance instead of the primary,

@@ -1962,11 +1962,15 @@ spec:
                           blockIncremental:
                             description: |-
                               Enable block-level incremental backup. Only changed blocks within files
-                              are backed up instead of entire files. Requires pgbackrest 2.46+.
+                              are backed up instead of entire files. Requires Bundle to be true.
+                              Requires pgbackrest 2.46+.
                             type: boolean
                           bundle:
-                            description: Bundle small files together for more efficient
-                              object storage operations.
+                            description: |-
+                              Bundle small files together for more efficient object storage operations.
+                              pgbackrest defaults: bundle-limit=2MiB (max file size eligible for bundling),
+                              bundle-size=20MiB (target size per bundle). Files larger than bundle-limit
+                              are stored individually.
                             type: boolean
                           compressLevel:
                             description: Compression level (0-9). The meaning depends
@@ -2007,6 +2011,18 @@ spec:
                               waiting for the next scheduled checkpoint.
                             type: boolean
                         type: object
+                        x-kubernetes-validations:
+                        - message: blockIncremental requires bundle to be true
+                          rule: '!has(self.blockIncremental) || !self.blockIncremental
+                            || (has(self.bundle) && self.bundle)'
+                        - message: archivePushQueueMax requires archiveAsync to be
+                            true
+                          rule: '!has(self.archivePushQueueMax) || self.archivePushQueueMax
+                            == '''' || (has(self.archiveAsync) && self.archiveAsync)'
+                        - message: archiveGetQueueMax requires archiveAsync to be
+                            true
+                          rule: '!has(self.archiveGetQueueMax) || self.archiveGetQueueMax
+                            == '''' || (has(self.archiveAsync) && self.archiveAsync)'
                       repository:
                         description: |-
                           PgBackRestRepository defines the storage repository for pgbackrest.

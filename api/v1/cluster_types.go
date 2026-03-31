@@ -962,6 +962,10 @@ type ClusterStatus struct {
 	// +optional
 	LastFailedBackup string `json:"lastFailedBackup,omitempty"`
 
+	// Backup status summary including PITR recovery window.
+	// +optional
+	BackupStatus *ClusterBackupStatus `json:"backupStatus,omitempty"`
+
 	// The commit hash number of which this operator running
 	// +optional
 	CommitHash string `json:"cloudNativePGCommitHash,omitempty"`
@@ -1635,6 +1639,19 @@ type CertificatesStatus struct {
 	// Expiration dates for all certificates.
 	// +optional
 	Expirations map[string]string `json:"expirations,omitempty"`
+}
+
+// ClusterBackupStatus contains backup-related status information for the cluster,
+// including the PITR recovery window.
+type ClusterBackupStatus struct {
+	// The earliest point in time to which the cluster can be restored.
+	// Corresponds to the start time of the oldest available full backup.
+	// +optional
+	EarliestRestorableTime *metav1.Time `json:"earliestRestorableTime,omitempty"`
+	// The latest point in time to which the cluster can be restored.
+	// Corresponds to the most recently archived WAL segment.
+	// +optional
+	LatestRestorableTime *metav1.Time `json:"latestRestorableTime,omitempty"`
 }
 
 // BootstrapInitDB is the configuration of the bootstrap process when

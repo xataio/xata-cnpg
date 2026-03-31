@@ -7559,6 +7559,22 @@ spec:
                   - hash
                   type: object
                 type: array
+              backupStatus:
+                description: Backup status summary including PITR recovery window.
+                properties:
+                  earliestRestorableTime:
+                    description: |-
+                      The earliest point in time to which the cluster can be restored.
+                      Corresponds to the start time of the oldest available full backup.
+                    format: date-time
+                    type: string
+                  latestRestorableTime:
+                    description: |-
+                      The latest point in time to which the cluster can be restored.
+                      Corresponds to the most recently archived WAL segment.
+                    format: date-time
+                    type: string
+                type: object
               certificates:
                 description: The configuration for the CA and related certificates,
                   initialized with defaults.

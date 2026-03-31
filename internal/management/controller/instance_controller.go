@@ -106,6 +106,13 @@ func (r *InstanceReconciler) Reconcile(
 		return ctrl.Result{}, nil
 	}
 
+	// In noop bootstrap mode, skip reconciliation while waiting for PGDATA.
+	// Most reconciliation steps need PGDATA to exist (HBA rules, certificates, etc).
+	if r.instance.WaitingForPGData() {
+		contextLogger.Debug("Waiting for PGDATA, skipping reconciliation")
+		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
+	}
+
 	// Fetch the Cluster from the cache
 	cluster, err := r.GetCluster(ctx)
 	if err != nil {

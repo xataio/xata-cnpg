@@ -274,6 +274,14 @@ func (ws *remoteWebserverEndpoints) isServerReady(w http.ResponseWriter, req *ht
 
 // This probe is for the instance status, including replication
 func (ws *remoteWebserverEndpoints) pgStatus(w http.ResponseWriter, _ *http.Request) {
+	// While waiting for PGDATA, return a minimal status without attempting PG connections.
+	// Setting mightBeUnavailable tells the operator not to treat connection errors as failures.
+	if ws.instance.WaitingForPGData() {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"mightBeUnavailable":true}`)
+		return
+	}
+
 	// Extract the status of the current instance
 	status, err := ws.instance.GetStatus()
 	if err != nil {

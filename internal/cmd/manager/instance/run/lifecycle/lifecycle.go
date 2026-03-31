@@ -77,9 +77,24 @@ func (i *PostgresLifecycle) Start(ctx context.Context) error {
 	// Wait for PGDATA to appear before starting PostgreSQL.
 	// The webserver is already running at this point, so probes will respond healthy.
 	i.instance.SetWaitingForPGData(true)
-	if err := postgres.WaitForPGData(ctx, i.instance.PgData); err != nil {
-		return err
+
+	// Run WaitForPGData in a goroutine so we can also handle termination signals.
+	// Without this, SIGTERM during the wait would be ignored (the signal loop hasn't started yet).
+	pgdataErrChan := make(chan error, 1)
+	go func() {
+		pgdataErrChan <- postgres.WaitForPGData(ctx, i.instance.PgData)
+	}()
+
+	select {
+	case err := <-pgdataErrChan:
+		if err != nil {
+			return err
+		}
+	case sig := <-signals:
+		contextLogger.Info("Received termination signal while waiting for PGDATA", "signal", sig)
+		return nil
 	}
+
 	i.instance.SetWaitingForPGData(false)
 
 	// Pre-checks that need PGDATA

@@ -54,9 +54,12 @@ func GenerateConfig(
 	}
 
 	// Options and retention (scoped to appropriate command sections)
-	if opts := pgbackrestConfig.Options; opts != nil {
-		configureOptions(opts, cfg)
+	opts := pgbackrestConfig.Options
+	if opts == nil {
+		opts = &apiv1.PgBackRestOptions{}
 	}
+	applyOptionDefaults(opts, cluster)
+	configureOptions(opts, cfg)
 
 	return renderConfig(cfg)
 }
@@ -194,80 +197,120 @@ func configureS3(
 	return nil
 }
 
+// applyOptionDefaults sets sensible defaults for options that the user hasn't
+// explicitly configured.
+//
+// processMax is derived from the pod's CPU request (1 process per 1000m CPU,
+// minimum 1). This uses request (not limit) because request is the guaranteed
+// CPU under node contention:
+//
+//	| Instance     | Request | processMax |
+//	|--------------|---------|------------|
+//	| xata.micro   |   250m  |     1      |
+//	| xata.small   |   500m  |     1      |
+//	| xata.medium  |  1000m  |     1      |
+//	| xata.large   |  2000m  |     2      |
+//	| xata.xlarge  |  4000m  |     4      |
+//	| xata.2xlarge |  8000m  |     8      |
+//	| xata.4xlarge | 16000m  |    16      |
+//	| xata.8xlarge | 32000m  |    32      |
+//
+// priority defaults to 19 (lowest nice value) so pgbackrest never competes
+// with PostgreSQL for CPU.
+func applyOptionDefaults(opts *apiv1.PgBackRestOptions, cluster *apiv1.Cluster) {
+	if opts.Priority == nil {
+		defaultPriority := 19
+		opts.Priority = &defaultPriority
+	}
+	if opts.ProcessMax == nil {
+		cpuRequest := cluster.Spec.Resources.Requests.Cpu()
+		if cpuRequest != nil && !cpuRequest.IsZero() {
+			processMax := int(cpuRequest.MilliValue() / 1000)
+			if processMax < 1 {
+				processMax = 1
+			}
+			opts.ProcessMax = &processMax
+		}
+	}
+}
+
 // configureOptions maps PgBackRestOptions fields to command-scoped pgbackrest
 // config sections. Options are placed in [global], [global:backup],
 // [global:restore], [global:archive-push], or [global:archive-get] depending
 // on which commands they apply to.
 func configureOptions(opts *apiv1.PgBackRestOptions, cfg *ini.File) {
-	global := cfg.Section("global")
-	backupSection := cfg.Section("global:backup")
-	restoreSection := cfg.Section("global:restore")
-	archivePushSection := cfg.Section("global:archive-push")
-	archiveGetSection := cfg.Section("global:archive-get")
+	configureGlobalOptions(opts, cfg.Section("global"))
+	configureBackupOptions(opts, cfg.Section("global:backup"))
+	configureRestoreOptions(opts, cfg.Section("global:restore"))
+	configureArchiveOptions(opts, cfg.Section("global:archive-push"), cfg.Section("global:archive-get"))
+}
 
-	// Options that apply to all commands
+// configureGlobalOptions sets options that apply to all pgbackrest commands.
+func configureGlobalOptions(opts *apiv1.PgBackRestOptions, section *ini.Section) {
 	if opts.CompressType != "" {
-		global.Key("compress-type").SetValue(opts.CompressType)
+		section.Key("compress-type").SetValue(opts.CompressType)
 	}
 	if opts.CompressLevel != nil {
-		global.Key("compress-level").SetValue(strconv.Itoa(*opts.CompressLevel))
+		section.Key("compress-level").SetValue(strconv.Itoa(*opts.CompressLevel))
 	}
 	if opts.ProcessMax != nil {
-		global.Key("process-max").SetValue(strconv.Itoa(*opts.ProcessMax))
+		section.Key("process-max").SetValue(strconv.Itoa(*opts.ProcessMax))
 	}
 	if opts.Priority != nil {
-		global.Key("priority").SetValue(strconv.Itoa(*opts.Priority))
+		section.Key("priority").SetValue(strconv.Itoa(*opts.Priority))
 	}
+}
 
-	// Backup-only options
+// configureBackupOptions sets options scoped to the backup command,
+// including retention settings.
+func configureBackupOptions(opts *apiv1.PgBackRestOptions, section *ini.Section) {
 	if opts.StartFast != nil && *opts.StartFast {
-		backupSection.Key("start-fast").SetValue("y")
+		section.Key("start-fast").SetValue("y")
 	}
 	if opts.BackupStandby != nil && *opts.BackupStandby {
-		backupSection.Key("backup-standby").SetValue("y")
+		section.Key("backup-standby").SetValue("y")
 	}
 	if opts.Bundle != nil && *opts.Bundle {
-		backupSection.Key("repo1-bundle").SetValue("y")
+		section.Key("repo1-bundle").SetValue("y")
 	}
 	if opts.BlockIncremental != nil && *opts.BlockIncremental {
-		backupSection.Key("repo1-block").SetValue("y")
+		section.Key("repo1-block").SetValue("y")
 	}
-
-	// Restore-only options
-	if opts.Delta != nil && *opts.Delta {
-		restoreSection.Key("delta").SetValue("y")
-	}
-
-	// Archive-push options
-	if opts.ArchiveAsync != nil && *opts.ArchiveAsync {
-		archivePushSection.Key("archive-async").SetValue("y")
-		if opts.ArchivePushQueueMax != "" {
-			archivePushSection.Key("archive-push-queue-max").SetValue(opts.ArchivePushQueueMax)
-		} else {
-			archivePushSection.Key("archive-push-queue-max").SetValue("2GiB")
-		}
-	}
-
-	// Archive-get options
-	if opts.ArchiveAsync != nil && *opts.ArchiveAsync {
-		archiveGetSection.Key("archive-async").SetValue("y")
-		if opts.ArchiveGetQueueMax != "" {
-			archiveGetSection.Key("archive-get-queue-max").SetValue(opts.ArchiveGetQueueMax)
-		} else {
-			archiveGetSection.Key("archive-get-queue-max").SetValue("2GiB")
-		}
-	}
-
-	// Retention (backup/expire only)
 	if ret := opts.Retention; ret != nil {
 		if ret.Full > 0 {
-			backupSection.Key("repo1-retention-full").SetValue(strconv.Itoa(ret.Full))
+			section.Key("repo1-retention-full").SetValue(strconv.Itoa(ret.Full))
 		}
 		if ret.FullType != "" {
-			backupSection.Key("repo1-retention-full-type").SetValue(ret.FullType)
+			section.Key("repo1-retention-full-type").SetValue(ret.FullType)
 		}
 		if ret.Archive != nil {
-			backupSection.Key("repo1-retention-archive").SetValue(strconv.Itoa(*ret.Archive))
+			section.Key("repo1-retention-archive").SetValue(strconv.Itoa(*ret.Archive))
+		}
+	}
+}
+
+// configureRestoreOptions sets options scoped to the restore command.
+func configureRestoreOptions(opts *apiv1.PgBackRestOptions, section *ini.Section) {
+	if opts.Delta != nil && *opts.Delta {
+		section.Key("delta").SetValue("y")
+	}
+}
+
+// configureArchiveOptions sets options for archive-push and archive-get commands.
+func configureArchiveOptions(opts *apiv1.PgBackRestOptions, pushSection *ini.Section, getSection *ini.Section) {
+	if opts.ArchiveAsync != nil && *opts.ArchiveAsync {
+		pushSection.Key("archive-async").SetValue("y")
+		if opts.ArchivePushQueueMax != "" {
+			pushSection.Key("archive-push-queue-max").SetValue(opts.ArchivePushQueueMax)
+		} else {
+			pushSection.Key("archive-push-queue-max").SetValue("2GiB")
+		}
+
+		getSection.Key("archive-async").SetValue("y")
+		if opts.ArchiveGetQueueMax != "" {
+			getSection.Key("archive-get-queue-max").SetValue(opts.ArchiveGetQueueMax)
+		} else {
+			getSection.Key("archive-get-queue-max").SetValue("2GiB")
 		}
 	}
 }

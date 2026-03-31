@@ -138,8 +138,16 @@ const (
 // PgBackRestConfiguration defines the backup configuration using pgbackrest.
 type PgBackRestConfiguration struct {
 	Repository *PgBackRestRepository `json:"repository"`
-	Retention  *PgBackRestRetention  `json:"retention,omitempty"`
 	Options    *PgBackRestOptions    `json:"options,omitempty"`
+}
+
+// PgBackRestExternalCluster defines the pgbackrest configuration for an external cluster,
+// used for restore operations. Contains the repository location and optional process-level
+// settings (e.g. processMax, delta, priority).
+type PgBackRestExternalCluster struct {
+	Repository PgBackRestRepository `json:"repository"`
+	// +optional
+	Options *PgBackRestOptions `json:"options,omitempty"`
 }
 
 // PgBackRestRepository defines the storage repository for pgbackrest.
@@ -252,6 +260,9 @@ type PgBackRestOptions struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=19
 	Priority *int `json:"priority,omitempty"`
+	// Backup retention policy.
+	// +optional
+	Retention *PgBackRestRetention `json:"retention,omitempty"`
 	// TODO: add in future iterations:
 	// - encryption: cipherType, cipherPass
 	// - backup behavior: stopAuto, manifestSaveThreshold, resumeOff

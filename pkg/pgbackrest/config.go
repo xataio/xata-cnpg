@@ -53,16 +53,9 @@ func GenerateConfig(
 		return "", err
 	}
 
-	global := cfg.Section("global")
-
-	// Options (backup-specific)
+	// Options and retention (scoped to appropriate command sections)
 	if opts := pgbackrestConfig.Options; opts != nil {
-		configureOptions(opts, global)
-	}
-
-	// Retention (backup-specific)
-	if ret := pgbackrestConfig.Retention; ret != nil {
-		configureRetention(ret, global)
+		configureOptions(opts, cfg)
 	}
 
 	return renderConfig(cfg)
@@ -76,12 +69,17 @@ func GenerateConfigFromRepository(
 	k8sClient client.Client,
 	namespace string,
 	repo *apiv1.PgBackRestRepository,
+	opts *apiv1.PgBackRestOptions,
 	stanzaName string,
 	pgDataPath string,
 ) (string, error) {
 	cfg, err := generateBaseConfig(ctx, k8sClient, namespace, repo, stanzaName, pgDataPath)
 	if err != nil {
 		return "", err
+	}
+
+	if opts != nil {
+		configureOptions(opts, cfg)
 	}
 
 	return renderConfig(cfg)
@@ -196,60 +194,81 @@ func configureS3(
 	return nil
 }
 
-// configureOptions maps PgBackRestOptions fields to pgbackrest config keys.
-func configureOptions(opts *apiv1.PgBackRestOptions, section *ini.Section) {
+// configureOptions maps PgBackRestOptions fields to command-scoped pgbackrest
+// config sections. Options are placed in [global], [global:backup],
+// [global:restore], [global:archive-push], or [global:archive-get] depending
+// on which commands they apply to.
+func configureOptions(opts *apiv1.PgBackRestOptions, cfg *ini.File) {
+	global := cfg.Section("global")
+	backupSection := cfg.Section("global:backup")
+	restoreSection := cfg.Section("global:restore")
+	archivePushSection := cfg.Section("global:archive-push")
+	archiveGetSection := cfg.Section("global:archive-get")
+
+	// Options that apply to all commands
 	if opts.CompressType != "" {
-		section.Key("compress-type").SetValue(opts.CompressType)
+		global.Key("compress-type").SetValue(opts.CompressType)
 	}
 	if opts.CompressLevel != nil {
-		section.Key("compress-level").SetValue(strconv.Itoa(*opts.CompressLevel))
+		global.Key("compress-level").SetValue(strconv.Itoa(*opts.CompressLevel))
 	}
 	if opts.ProcessMax != nil {
-		section.Key("process-max").SetValue(strconv.Itoa(*opts.ProcessMax))
-	}
-	if opts.StartFast != nil && *opts.StartFast {
-		section.Key("start-fast").SetValue("y")
-	}
-	if opts.Delta != nil && *opts.Delta {
-		section.Key("delta").SetValue("y")
-	}
-	if opts.ArchiveAsync != nil && *opts.ArchiveAsync {
-		section.Key("archive-async").SetValue("y")
-		if opts.ArchivePushQueueMax != "" {
-			section.Key("archive-push-queue-max").SetValue(opts.ArchivePushQueueMax)
-		} else {
-			section.Key("archive-push-queue-max").SetValue("2GiB")
-		}
-		if opts.ArchiveGetQueueMax != "" {
-			section.Key("archive-get-queue-max").SetValue(opts.ArchiveGetQueueMax)
-		} else {
-			section.Key("archive-get-queue-max").SetValue("2GiB")
-		}
-	}
-	if opts.Bundle != nil && *opts.Bundle {
-		section.Key("repo1-bundle").SetValue("y")
-	}
-	if opts.BlockIncremental != nil && *opts.BlockIncremental {
-		section.Key("repo1-block").SetValue("y")
-	}
-	if opts.BackupStandby != nil && *opts.BackupStandby {
-		section.Key("backup-standby").SetValue("y")
+		global.Key("process-max").SetValue(strconv.Itoa(*opts.ProcessMax))
 	}
 	if opts.Priority != nil {
-		section.Key("priority").SetValue(strconv.Itoa(*opts.Priority))
+		global.Key("priority").SetValue(strconv.Itoa(*opts.Priority))
 	}
-}
 
-// configureRetention maps PgBackRestRetention fields to pgbackrest config keys.
-func configureRetention(ret *apiv1.PgBackRestRetention, section *ini.Section) {
-	if ret.Full > 0 {
-		section.Key("repo1-retention-full").SetValue(strconv.Itoa(ret.Full))
+	// Backup-only options
+	if opts.StartFast != nil && *opts.StartFast {
+		backupSection.Key("start-fast").SetValue("y")
 	}
-	if ret.FullType != "" {
-		section.Key("repo1-retention-full-type").SetValue(ret.FullType)
+	if opts.BackupStandby != nil && *opts.BackupStandby {
+		backupSection.Key("backup-standby").SetValue("y")
 	}
-	if ret.Archive != nil {
-		section.Key("repo1-retention-archive").SetValue(strconv.Itoa(*ret.Archive))
+	if opts.Bundle != nil && *opts.Bundle {
+		backupSection.Key("repo1-bundle").SetValue("y")
+	}
+	if opts.BlockIncremental != nil && *opts.BlockIncremental {
+		backupSection.Key("repo1-block").SetValue("y")
+	}
+
+	// Restore-only options
+	if opts.Delta != nil && *opts.Delta {
+		restoreSection.Key("delta").SetValue("y")
+	}
+
+	// Archive-push options
+	if opts.ArchiveAsync != nil && *opts.ArchiveAsync {
+		archivePushSection.Key("archive-async").SetValue("y")
+		if opts.ArchivePushQueueMax != "" {
+			archivePushSection.Key("archive-push-queue-max").SetValue(opts.ArchivePushQueueMax)
+		} else {
+			archivePushSection.Key("archive-push-queue-max").SetValue("2GiB")
+		}
+	}
+
+	// Archive-get options
+	if opts.ArchiveAsync != nil && *opts.ArchiveAsync {
+		archiveGetSection.Key("archive-async").SetValue("y")
+		if opts.ArchiveGetQueueMax != "" {
+			archiveGetSection.Key("archive-get-queue-max").SetValue(opts.ArchiveGetQueueMax)
+		} else {
+			archiveGetSection.Key("archive-get-queue-max").SetValue("2GiB")
+		}
+	}
+
+	// Retention (backup/expire only)
+	if ret := opts.Retention; ret != nil {
+		if ret.Full > 0 {
+			backupSection.Key("repo1-retention-full").SetValue(strconv.Itoa(ret.Full))
+		}
+		if ret.FullType != "" {
+			backupSection.Key("repo1-retention-full-type").SetValue(ret.FullType)
+		}
+		if ret.Archive != nil {
+			backupSection.Key("repo1-retention-archive").SetValue(strconv.Itoa(*ret.Archive))
+		}
 	}
 }
 

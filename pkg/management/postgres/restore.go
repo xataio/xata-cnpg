@@ -383,7 +383,7 @@ func (info InitInfo) restoreViaPgBackRest(
 
 	configContent, err := pgbackrest.GenerateConfigFromRepository(
 		ctx, cli, cluster.Namespace,
-		recoverySource.Repository, recoverySource.StanzaName, info.PgData,
+		recoverySource.Repository, recoverySource.Options, recoverySource.StanzaName, info.PgData,
 	)
 	if err != nil {
 		return "", fmt.Errorf("generating pgbackrest config for restore: %w", err)

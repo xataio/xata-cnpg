@@ -278,7 +278,7 @@ kustomize: ## Download kustomize locally if necessary.
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
-	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.22
 
 GENREF = $(LOCALBIN)/genref
 genref: ## Download kubernetes-sigs/reference-docs/genref locally if necessary.

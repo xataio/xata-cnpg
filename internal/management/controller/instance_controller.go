@@ -140,8 +140,22 @@ func (r *InstanceReconciler) Reconcile(
 	ctx = cnpgiclient.SetPluginClientInContext(ctx, pluginClient)
 	ctx = cluster.SetInContext(ctx)
 
-	// Reconcile PostgreSQL instance parameters
+	// Reconcile PostgreSQL instance parameters (in-memory only, no PGDATA needed)
 	r.reconcileInstance(cluster)
+
+	// Reconcile secrets and cryptographic material
+	// This doesn't need the PG connection or PGDATA, but it needs to reload PG in case of changes
+	reloadNeeded, err := r.certificateReconciler.RefreshSecrets(ctx, cluster)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("while refreshing secrets: %w", err)
+	}
+
+	// While waiting for PGDATA, skip all remaining reconciliation steps that
+	// depend on PGDATA existing (HBA rules, WAL archive file, config files, etc).
+	if r.instance.WaitingForPGData() {
+		contextLogger.Debug("Waiting for PGDATA, skipping PGDATA-dependent reconciliation")
+		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
+	}
 
 	// Takes care of the `.check-empty-wal-archive` file
 	if err := r.reconcileCheckWalArchiveFile(cluster); err != nil {
@@ -174,13 +188,6 @@ func (r *InstanceReconciler) Reconcile(
 				return reconcile.Result{}, err
 			}
 		}
-	}
-
-	// Reconcile secrets and cryptographic material
-	// This doesn't need the PG connection, but it needs to reload it in case of changes
-	reloadNeeded, err := r.certificateReconciler.RefreshSecrets(ctx, cluster)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("while refreshing secrets: %w", err)
 	}
 
 	reloadConfigNeeded, err := r.refreshConfigurationFiles(ctx, cluster)

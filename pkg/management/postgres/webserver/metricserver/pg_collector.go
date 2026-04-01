@@ -318,6 +318,12 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 // Collect implements prometheus.Collector, collecting the Metrics values to
 // export.
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
+	// Skip metrics collection while waiting for PGDATA — PostgreSQL isn't running yet
+	if e.instance.WaitingForPGData() {
+		log.Debug("waiting for PGDATA, skipping metrics collection")
+		return
+	}
+
 	log.Debug("collecting Postgres instance metrics")
 	e.updateInstanceMetrics()
 	e.collectInstanceMetrics(ch)

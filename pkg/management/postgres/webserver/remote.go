@@ -224,6 +224,14 @@ func (ws *remoteWebserverEndpoints) cleanupStaleCollections(ctx context.Context)
 
 // isServerStartedUp evaluates the startup probe
 func (ws *remoteWebserverEndpoints) isServerStartedUp(w http.ResponseWriter, req *http.Request) {
+	// If waiting for PGDATA (noop bootstrap / warm pool), report healthy
+	// so the pod isn't killed before storage is attached.
+	if ws.instance.WaitingForPGData() {
+		log.Trace("Startup probe skipped - waiting for PGDATA")
+		_, _ = fmt.Fprint(w, "Skipped")
+		return
+	}
+
 	// If `pg_rewind` is running, it means that the Pod is starting up.
 	// We need to report it healthy to avoid being killed by the kubelet.
 	if ws.instance.PgRewindIsRunning || ws.instance.MightBeUnavailable() {
@@ -242,11 +250,20 @@ func (ws *remoteWebserverEndpoints) failSafe(w http.ResponseWriter, _ *http.Requ
 
 // This is the liveness probe
 func (ws *remoteWebserverEndpoints) isServerHealthy(w http.ResponseWriter, req *http.Request) {
+	if ws.instance.WaitingForPGData() {
+		_, _ = fmt.Fprint(w, "waiting for pgdata")
+		return
+	}
 	ws.livenessChecker.IsHealthy(req.Context(), w)
 }
 
 // This is the readiness probe
 func (ws *remoteWebserverEndpoints) isServerReady(w http.ResponseWriter, req *http.Request) {
+	if ws.instance.WaitingForPGData() {
+		_, _ = fmt.Fprint(w, "waiting for pgdata")
+		return
+	}
+
 	if !ws.instance.CanCheckReadiness() {
 		http.Error(w, "instance is not ready yet", http.StatusInternalServerError)
 		return
@@ -257,6 +274,14 @@ func (ws *remoteWebserverEndpoints) isServerReady(w http.ResponseWriter, req *ht
 
 // This probe is for the instance status, including replication
 func (ws *remoteWebserverEndpoints) pgStatus(w http.ResponseWriter, _ *http.Request) {
+	// While waiting for PGDATA, return a minimal status without attempting PG connections.
+	// Setting mightBeUnavailable tells the operator not to treat connection errors as failures.
+	if ws.instance.WaitingForPGData() {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"mightBeUnavailable":true}`)
+		return
+	}
+
 	// Extract the status of the current instance
 	status, err := ws.instance.GetStatus()
 	if err != nil {

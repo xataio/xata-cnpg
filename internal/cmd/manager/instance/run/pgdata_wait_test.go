@@ -25,18 +25,20 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("waitForPGData", func() {
+var _ = Describe("WaitForPGData", func() {
 	It("returns immediately when PGDATA already exists", func() {
 		tmpDir := GinkgoT().TempDir()
 		pgData := filepath.Join(tmpDir, "pgdata")
 		Expect(os.Mkdir(pgData, 0o750)).To(Succeed())
 
 		ctx := context.Background()
-		err := waitForPGData(ctx, pgData)
+		err := postgres.WaitForPGData(ctx, pgData)
 		Expect(err).ToNot(HaveOccurred())
 	})
 
@@ -51,14 +53,14 @@ var _ = Describe("waitForPGData", func() {
 		}()
 
 		ctx := context.Background()
-		err := waitForPGData(ctx, pgData)
+		err := postgres.WaitForPGData(ctx, pgData)
 		Expect(err).ToNot(HaveOccurred())
 	})
 
 	It("waits and returns when marker file appears after a delay", func() {
 		tmpDir := GinkgoT().TempDir()
 		pgData := filepath.Join(tmpDir, "pgdata")
-		markerPath := filepath.Join(tmpDir, xataReadyMarker)
+		markerPath := filepath.Join(tmpDir, postgres.XataReadyMarker)
 
 		// Create marker file after a short delay
 		go func() {
@@ -69,7 +71,7 @@ var _ = Describe("waitForPGData", func() {
 		}()
 
 		ctx := context.Background()
-		err := waitForPGData(ctx, pgData)
+		err := postgres.WaitForPGData(ctx, pgData)
 		Expect(err).ToNot(HaveOccurred())
 	})
 
@@ -83,7 +85,7 @@ var _ = Describe("waitForPGData", func() {
 			cancel()
 		}()
 
-		err := waitForPGData(ctx, pgData)
+		err := postgres.WaitForPGData(ctx, pgData)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("context cancelled"))
 	})

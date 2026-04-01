@@ -197,6 +197,13 @@ type Instance struct {
 	// a designatedPrimary
 	RequiresDesignatedPrimaryTransition bool
 
+	// noopBootstrap indicates the instance was started with bootstrap: noop (warm pool / slot mode).
+	// PGDATA is expected to arrive from an external source after the pod starts.
+	noopBootstrap atomic.Bool
+
+	// waitingForPGData indicates the instance is waiting for PGDATA to appear (noop bootstrap / warm pool)
+	waitingForPGData atomic.Bool
+
 	// canCheckReadiness specifies whether the instance can start being checked for readiness
 	// Is set to true before the instance is run and to false once it exits,
 	// it's used by the readiness probe to know whether it should be short-circuited
@@ -273,6 +280,26 @@ func (instance *Instance) IsReady() error {
 // IsFenced checks whether the instance is marked as fenced
 func (instance *Instance) IsFenced() bool {
 	return instance.fenced.Load()
+}
+
+// IsNoopBootstrap checks whether the instance is in noop bootstrap mode
+func (instance *Instance) IsNoopBootstrap() bool {
+	return instance.noopBootstrap.Load()
+}
+
+// SetNoopBootstrap marks whether the instance is in noop bootstrap mode
+func (instance *Instance) SetNoopBootstrap(enabled bool) {
+	instance.noopBootstrap.Store(enabled)
+}
+
+// WaitingForPGData checks whether the instance is waiting for PGDATA to appear
+func (instance *Instance) WaitingForPGData() bool {
+	return instance.waitingForPGData.Load()
+}
+
+// SetWaitingForPGData marks whether the instance is waiting for PGDATA to appear
+func (instance *Instance) SetWaitingForPGData(enabled bool) {
+	instance.waitingForPGData.Store(enabled)
 }
 
 // CanCheckReadiness checks whether the instance should be checked for readiness

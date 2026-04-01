@@ -31,6 +31,7 @@ import (
 
 	"github.com/xataio/xata-cnpg/pkg/concurrency"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+	instancestorage "github.com/xataio/xata-cnpg/pkg/reconciler/instance/storage"
 )
 
 // PostgresLifecycle implements the manager.Runnable interface for a postgres.Instance
@@ -72,6 +73,43 @@ func (i *PostgresLifecycle) Start(ctx context.Context) error {
 	// Ensure that at the end of this runnable the instance
 	// manager will shut down
 	defer i.globalCancel()
+
+	// Wait for PGDATA to appear before starting PostgreSQL.
+	// The webserver is already running at this point, so probes will respond healthy.
+	i.instance.SetWaitingForPGData(true)
+
+	// Run WaitForPGData in a goroutine so we can also handle termination signals.
+	// Without this, SIGTERM during the wait would be ignored (the signal loop hasn't started yet).
+	pgdataErrChan := make(chan error, 1)
+	go func() {
+		pgdataErrChan <- postgres.WaitForPGData(ctx, i.instance.PgData)
+	}()
+
+	select {
+	case err := <-pgdataErrChan:
+		if err != nil {
+			return err
+		}
+	case sig := <-signals:
+		contextLogger.Info("Received termination signal while waiting for PGDATA", "signal", sig)
+		return nil
+	}
+
+	i.instance.SetWaitingForPGData(false)
+
+	// Pre-checks that need PGDATA
+	contextLogger.Info("Checking for free disk space for WALs before starting PostgreSQL")
+	hasDiskSpace, err := i.instance.CheckHasDiskSpaceForWAL(ctx)
+	if err != nil {
+		contextLogger.Warning("Error while checking if there is enough disk space for WALs, skipping", "err", err)
+	} else if !hasDiskSpace {
+		return postgres.ErrNoFreeWALSpace
+	}
+
+	if err := instancestorage.ReconcileWalDirectory(ctx); err != nil {
+		contextLogger.Error(err, "unable to move `pg_wal` directory to the attached volume")
+		return err
+	}
 
 	// Every cycle correspond to the lifespan of a postmaster process
 	for {

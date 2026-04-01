@@ -68,10 +68,6 @@ import (
 var (
 	scheme = runtime.NewScheme()
 
-	// errNoFreeWALSpace is returned when there isn't enough disk space
-	// available to store at least two WAL files.
-	errNoFreeWALSpace = fmt.Errorf("no free disk space for WALs")
-
 	// errWALArchivePluginNotAvailable is returned when the configured
 	// WAL archiving plugin is not available or cannot be found.
 	errWALArchivePluginNotAvailable = fmt.Errorf("WAL archive plugin not available")
@@ -117,17 +113,33 @@ func NewCmd() *cobra.Command {
 			instance.StatusPortTLS = statusPortTLS
 			instance.MetricsPortTLS = metricsPortTLS
 
+			// Detect noop bootstrap mode from the cluster spec
+			cli, err := management.NewControllerRuntimeClient()
+			if err != nil {
+				return fmt.Errorf("creating kubernetes client: %w", err)
+			}
+			var cluster apiv1.Cluster
+			if err := cli.Get(ctx, client.ObjectKey{
+				Name:      clusterName,
+				Namespace: namespace,
+			}, &cluster); err != nil {
+				return fmt.Errorf("fetching cluster: %w", err)
+			}
+			if cluster.Spec.Bootstrap != nil && cluster.Spec.Bootstrap.Noop != nil {
+				instance.SetNoopBootstrap(true)
+			}
+
 			// Since version 0.19.0 of controller-runtime, it is not allowed to create multiple controllers with the
 			// same name. As this part of the code is run inside a retry block, we need to allow SkipNameValidation
 			// only on retries, because a previous run may have already created a controller
 			// Reference https://github.com/kubernetes-sigs/controller-runtime/releases/tag/v0.19.0
 			var skipNameValidation bool
-			err := retry.OnError(retry.DefaultRetry, isRunSubCommandRetryable, func() error {
+			err = retry.OnError(retry.DefaultRetry, isRunSubCommandRetryable, func() error {
 				defer func() { skipNameValidation = true }()
 				return runSubCommand(ctx, instance, pprofHTTPServer, skipNameValidation)
 			})
 
-			if errors.Is(err, errNoFreeWALSpace) {
+			if errors.Is(err, postgres.ErrNoFreeWALSpace) {
 				os.Exit(apiv1.MissingWALDiskSpaceExitCode)
 			}
 			if errors.Is(err, errWALArchivePluginNotAvailable) {
@@ -179,18 +191,18 @@ func runSubCommand( //nolint:gocognit,gocyclo
 		"build", versions.Info,
 		"skipNameValidation", skipNameValidation)
 
-	if err := waitForPGData(ctx, instance.PgData); err != nil {
-		contextLogger.Error(err, "Error while waiting for PGDATA directory to be available")
-		return err
-	}
-
-	contextLogger.Info("Checking for free disk space for WALs before starting PostgreSQL")
-	hasDiskSpaceForWals, err := instance.CheckHasDiskSpaceForWAL(ctx)
-	if err != nil {
-		contextLogger.Error(err, "Error while checking if there is enough disk space for WALs, skipping")
-	} else if !hasDiskSpaceForWals {
-		contextLogger.Info("Detected low-disk space condition, avoid starting the instance")
-		return errNoFreeWALSpace
+	// In noop bootstrap mode, skip pre-flight checks only while PGDATA hasn't arrived yet.
+	// Once PGDATA exists (e.g. after a restart), run them normally.
+	pgdataExists := pgDataExists(instance.PgData)
+	if !instance.IsNoopBootstrap() || pgdataExists {
+		contextLogger.Info("Checking for free disk space for WALs before starting PostgreSQL")
+		hasDiskSpaceForWals, err := instance.CheckHasDiskSpaceForWAL(ctx)
+		if err != nil {
+			contextLogger.Error(err, "Error while checking if there is enough disk space for WALs, skipping")
+		} else if !hasDiskSpaceForWals {
+			contextLogger.Info("Detected low-disk space condition, avoid starting the instance")
+			return postgres.ErrNoFreeWALSpace
+		}
 	}
 
 	mgr, err := ctrl.NewManager(config.GetConfigOrDie(), ctrl.Options{
@@ -326,9 +338,13 @@ func runSubCommand( //nolint:gocognit,gocyclo
 	postgresStartConditions = append(postgresStartConditions, jsonPipe.GetExecutedCondition())
 	exitedConditions = append(exitedConditions, jsonPipe.GetExitedCondition())
 
-	if err := instancestorage.ReconcileWalDirectory(ctx); err != nil {
-		contextLogger.Error(err, "unable to move `pg_wal` directory to the attached volume")
-		return err
+	// In noop bootstrap mode, skip WAL directory reconciliation only while PGDATA
+	// hasn't arrived yet. The lifecycle will handle it after PGDATA appears.
+	if !instance.IsNoopBootstrap() || pgdataExists {
+		if err := instancestorage.ReconcileWalDirectory(ctx); err != nil {
+			contextLogger.Error(err, "unable to move `pg_wal` directory to the attached volume")
+			return err
+		}
 	}
 
 	postgresLifecycleManager := lifecycle.NewPostgres(ctx, instance, postgresStartConditions)
@@ -417,12 +433,12 @@ func runSubCommand( //nolint:gocognit,gocyclo
 	}
 
 	contextLogger.Info("Checking for free disk space for WALs after PostgreSQL finished")
-	hasDiskSpaceForWals, err = instance.CheckHasDiskSpaceForWAL(ctx)
-	if err != nil {
-		contextLogger.Error(err, "Error while checking if there is enough disk space for WALs, skipping")
+	hasDiskSpaceForWals, diskErr := instance.CheckHasDiskSpaceForWAL(ctx)
+	if diskErr != nil {
+		contextLogger.Error(diskErr, "Error while checking if there is enough disk space for WALs, skipping")
 	} else if !hasDiskSpaceForWals {
 		contextLogger.Info("Detected low-disk space condition")
-		return makeUnretryableError(errNoFreeWALSpace)
+		return makeUnretryableError(postgres.ErrNoFreeWALSpace)
 	}
 
 	if instance.Cluster != nil {
@@ -437,6 +453,12 @@ func runSubCommand( //nolint:gocognit,gocyclo
 	}
 
 	return nil
+}
+
+// pgDataExists checks whether the PGDATA directory exists
+func pgDataExists(pgData string) bool {
+	_, err := os.Stat(pgData)
+	return err == nil
 }
 
 func getPprofServerAddress(enabled bool) string {

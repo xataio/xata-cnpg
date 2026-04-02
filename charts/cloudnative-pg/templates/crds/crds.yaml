@@ -1934,6 +1934,189 @@ spec:
                     required:
                     - destinationPath
                     type: object
+                  pgBackRest:
+                    description: The configuration for pgbackrest
+                    properties:
+                      options:
+                        description: PgBackRestOptions defines process-level settings
+                          for pgbackrest.
+                        properties:
+                          archiveAsync:
+                            description: Enable async WAL archiving for better throughput.
+                            type: boolean
+                          archiveGetQueueMax:
+                            description: |-
+                              Max size of the WAL restore queue when archiveAsync is enabled.
+                              Uses pgbackrest size format (e.g. "1GiB", "256MiB").
+                            type: string
+                          archivePushQueueMax:
+                            description: |-
+                              Max size of the WAL archive push queue when archiveAsync is enabled.
+                              Uses pgbackrest size format (e.g. "1GiB", "256MiB").
+                            type: string
+                          backupStandby:
+                            description: |-
+                              Take backups from a standby instance instead of the primary,
+                              reducing load on the primary.
+                            type: boolean
+                          blockIncremental:
+                            description: |-
+                              Enable block-level incremental backup. Only changed blocks within files
+                              are backed up instead of entire files. Requires Bundle to be true.
+                              Requires pgbackrest 2.46+.
+                            type: boolean
+                          bundle:
+                            description: |-
+                              Bundle small files together for more efficient object storage operations.
+                              pgbackrest defaults: bundle-limit=2MiB (max file size eligible for bundling),
+                              bundle-size=20MiB (target size per bundle). Files larger than bundle-limit
+                              are stored individually.
+                            type: boolean
+                          compressLevel:
+                            description: Compression level (0-9). The meaning depends
+                              on the algorithm.
+                            maximum: 9
+                            minimum: 0
+                            type: integer
+                          compressType:
+                            default: lz4
+                            description: Compression algorithm. Defaults to "lz4".
+                            enum:
+                            - none
+                            - gz
+                            - bz2
+                            - lz4
+                            - zst
+                            type: string
+                          delta:
+                            description: Only restore files that have changed. Speeds
+                              up restores.
+                            type: boolean
+                          priority:
+                            description: |-
+                              Allow for deprioritization when taking CPU (nice value), making sure we are
+                              not impacting postgres TPS. If not set defaults to 0 - which means no
+                              deprioritization. Do not go below 0 because that would make it more important than postgres
+                            maximum: 19
+                            minimum: 0
+                            type: integer
+                          processMax:
+                            description: Maximum number of parallel processes for
+                              backup/restore.
+                            minimum: 1
+                            type: integer
+                          retention:
+                            description: Backup retention policy.
+                            properties:
+                              archive:
+                                description: |-
+                                  Number of WAL archive sets to retain. If not set, pgbackrest will
+                                  use the full backup retention to determine WAL expiration.
+                                minimum: 1
+                                type: integer
+                              full:
+                                description: Number of full backups to retain. Required.
+                                minimum: 1
+                                type: integer
+                              fullType:
+                                default: count
+                                description: |-
+                                  Type of full backup retention: "count" (number of backups) or "time" (days).
+                                  Defaults to "count".
+                                enum:
+                                - count
+                                - time
+                                type: string
+                            required:
+                            - full
+                            type: object
+                          startFast:
+                            description: |-
+                              Force an immediate checkpoint at backup start instead of
+                              waiting for the next scheduled checkpoint.
+                            type: boolean
+                        type: object
+                        x-kubernetes-validations:
+                        - message: ”blockIncremental requires bundle to be true”
+                          rule: ”!has(self.blockIncremental) || !self.blockIncremental
+                            || (has(self.bundle) && self.bundle)”
+                      repository:
+                        description: |-
+                          PgBackRestRepository defines the storage repository for pgbackrest.
+                          Exactly one of s3, gcs, or azure must be specified.
+                        properties:
+                          azure:
+                            description: PgBackRestAzure defines the Azure Blob Storage
+                              configuration for pgbackrest.
+                            type: object
+                          gcs:
+                            description: PgBackRestGCS defines the Google Cloud Storage
+                              configuration for pgbackrest.
+                            type: object
+                          s3:
+                            description: PgBackRestS3 defines the S3-compatible storage
+                              configuration for pgbackrest.
+                            properties:
+                              accessKeyId:
+                                description: The reference to the access key id
+                                properties:
+                                  key:
+                                    description: The key to select
+                                    type: string
+                                  name:
+                                    description: Name of the referent.
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              bucket:
+                                description: The S3 bucket name
+                                type: string
+                              endpoint:
+                                description: |-
+                                  The S3 endpoint, overriding the automatic endpoint discovery.
+                                  Required for non-AWS S3-compatible storage (e.g. MinIO).
+                                type: string
+                              inheritFromIAMRole:
+                                description: |-
+                                  Use IAM role-based authentication (e.g. IRSA, instance profile).
+                                  Sets pgbackrest repo1-s3-key-type=auto.
+                                type: boolean
+                              region:
+                                description: The S3 region
+                                type: string
+                              secretAccessKey:
+                                description: The reference to the secret access key
+                                properties:
+                                  key:
+                                    description: The key to select
+                                    type: string
+                                  name:
+                                    description: Name of the referent.
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                            required:
+                            - bucket
+                            - region
+                            type: object
+                            x-kubernetes-validations:
+                            - message: either inheritFromIAMRole or both accessKeyId
+                                and secretAccessKey must be specified, but not both
+                              rule: (self.inheritFromIAMRole == true) != (has(self.accessKeyId)
+                                && has(self.secretAccessKey))
+                        type: object
+                        x-kubernetes-validations:
+                        - message: exactly one of s3, gcs, or azure must be specified
+                          rule: '(has(self.s3) ? 1 : 0) + (has(self.gcs) ? 1 : 0)
+                            + (has(self.azure) ? 1 : 0) == 1'
+                    required:
+                    - options
+                    - repository
+                    type: object
                   retentionPolicy:
                     description: |-
                       RetentionPolicy is the retention policy to be used for backups

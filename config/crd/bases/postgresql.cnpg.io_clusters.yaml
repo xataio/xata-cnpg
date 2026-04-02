@@ -7029,6 +7029,11 @@ spec:
                       Corresponds to the most recently archived WAL segment.
                     format: date-time
                     type: string
+                  runningBackupProgress:
+                    description: |-
+                      Progress of a currently running backup, e.g. "56.73%".
+                      Empty when no backup is running.
+                    type: string
                 type: object
               certificates:
                 description: The configuration for the CA and related certificates,

@@ -1652,6 +1652,10 @@ type ClusterBackupStatus struct {
 	// Corresponds to the most recently archived WAL segment.
 	// +optional
 	LatestRestorableTime *metav1.Time `json:"latestRestorableTime,omitempty"`
+	// Progress of a currently running backup, e.g. "56.73%".
+	// Empty when no backup is running.
+	// +optional
+	RunningBackupProgress string `json:"runningBackupProgress,omitempty"`
 }
 
 // BootstrapInitDB is the configuration of the bootstrap process when

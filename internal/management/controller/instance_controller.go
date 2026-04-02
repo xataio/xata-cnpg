@@ -28,6 +28,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	postgresClient "github.com/cloudnative-pg/cnpg-i/pkg/postgres"
@@ -1129,6 +1130,7 @@ func (r *InstanceReconciler) reconcilePgBackRestStatus(ctx context.Context, clus
 		}
 		updatedCluster.Status.BackupStatus.EarliestRestorableTime = &earliestTime
 		updatedCluster.Status.BackupStatus.LatestRestorableTime = &latestTime
+		updatedCluster.Status.BackupStatus.RunningBackupProgress = parseBackupProgress(stanza.Status.Message)
 
 		return r.client.Status().Update(ctx, updatedCluster)
 	})
@@ -1138,6 +1140,26 @@ func (r *InstanceReconciler) reconcilePgBackRestStatus(ctx context.Context, clus
 
 	r.lastPgBackRestInfoTime = time.Now()
 	return nil
+}
+
+// parseBackupProgress extracts the backup progress percentage from the
+// pgbackrest info status message. Returns a string like "56.73%" if a
+// backup is running, or empty string if not.
+// Example input: "ok (backup/expire running - 56.73% complete)"
+func parseBackupProgress(message string) string {
+	idx := strings.Index(message, "% complete")
+	if idx < 0 {
+		return ""
+	}
+	// Walk backwards to find the start of the number
+	start := idx
+	for start > 0 && (message[start-1] == '.' || (message[start-1] >= '0' && message[start-1] <= '9')) {
+		start--
+	}
+	if start == idx {
+		return ""
+	}
+	return message[start:idx] + "%"
 }
 
 // processConfigReloadAndManageRestart waits for the db to be up and

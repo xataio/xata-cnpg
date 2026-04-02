@@ -234,18 +234,19 @@ func applyOptionDefaults(opts *apiv1.PgBackRestOptions, cluster *apiv1.Cluster) 
 	}
 }
 
-// configureOptions maps PgBackRestOptions fields to command-scoped pgbackrest
-// config sections. Options are placed in [global], [global:backup],
-// [global:restore], [global:archive-push], or [global:archive-get] depending
-// on which commands they apply to.
+// configureOptions maps PgBackRestOptions fields to pgbackrest config sections.
+// Most options go in [global]. Backup-only options (start-fast, backup-standby,
+// bundle, block-incremental, retention) go in [global:backup] to prevent
+// pgbackrest from rejecting them during other commands. Restore-only options
+// (delta) go in [global:restore].
 func configureOptions(opts *apiv1.PgBackRestOptions, cfg *ini.File) {
 	configureGlobalOptions(opts, cfg.Section("global"))
 	configureBackupOptions(opts, cfg.Section("global:backup"))
 	configureRestoreOptions(opts, cfg.Section("global:restore"))
-	configureArchiveOptions(opts, cfg.Section("global:archive-push"), cfg.Section("global:archive-get"))
 }
 
-// configureGlobalOptions sets options that apply to all pgbackrest commands.
+// configureGlobalOptions sets options in [global] that apply to all commands
+// or are safely ignored by commands that don't use them.
 func configureGlobalOptions(opts *apiv1.PgBackRestOptions, section *ini.Section) {
 	if opts.CompressType != "" {
 		section.Key("compress-type").SetValue(opts.CompressType)
@@ -258,6 +259,19 @@ func configureGlobalOptions(opts *apiv1.PgBackRestOptions, section *ini.Section)
 	}
 	if opts.Priority != nil {
 		section.Key("priority").SetValue(strconv.Itoa(*opts.Priority))
+	}
+	if opts.ArchiveAsync != nil && *opts.ArchiveAsync {
+		section.Key("archive-async").SetValue("y")
+		if opts.ArchivePushQueueMax != "" {
+			section.Key("archive-push-queue-max").SetValue(opts.ArchivePushQueueMax)
+		} else {
+			section.Key("archive-push-queue-max").SetValue("2GiB")
+		}
+		if opts.ArchiveGetQueueMax != "" {
+			section.Key("archive-get-queue-max").SetValue(opts.ArchiveGetQueueMax)
+		} else {
+			section.Key("archive-get-queue-max").SetValue("2GiB")
+		}
 	}
 }
 
@@ -296,24 +310,6 @@ func configureRestoreOptions(opts *apiv1.PgBackRestOptions, section *ini.Section
 	}
 }
 
-// configureArchiveOptions sets options for archive-push and archive-get commands.
-func configureArchiveOptions(opts *apiv1.PgBackRestOptions, pushSection *ini.Section, getSection *ini.Section) {
-	if opts.ArchiveAsync != nil && *opts.ArchiveAsync {
-		pushSection.Key("archive-async").SetValue("y")
-		if opts.ArchivePushQueueMax != "" {
-			pushSection.Key("archive-push-queue-max").SetValue(opts.ArchivePushQueueMax)
-		} else {
-			pushSection.Key("archive-push-queue-max").SetValue("2GiB")
-		}
-
-		getSection.Key("archive-async").SetValue("y")
-		if opts.ArchiveGetQueueMax != "" {
-			getSection.Key("archive-get-queue-max").SetValue(opts.ArchiveGetQueueMax)
-		} else {
-			getSection.Key("archive-get-queue-max").SetValue("2GiB")
-		}
-	}
-}
 
 // resolveSecretKeyRef fetches a Kubernetes secret and extracts the value
 // for the given key reference.

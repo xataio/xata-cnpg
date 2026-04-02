@@ -128,11 +128,11 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	b.Log.Info("Backup completed, fetching backup info")
 
 	// Fetch backup details from pgbackrest info
-	stanzas, err := pgbackrest.Info(ctx, b.Cluster.Name)
+	stanza, err := pgbackrest.Info(ctx, b.Cluster.Name)
 	if err != nil {
 		b.Log.Error(err, "Failed to get pgbackrest info after backup")
-	} else if len(stanzas) > 0 {
-		if latest := stanzas[0].LatestBackup(); latest != nil {
+	} else {
+		if latest := stanza.LatestBackup(); latest != nil {
 			b.Backup.Status.BackupID = latest.Label
 			b.Backup.Status.BackupName = latest.Label
 			b.Backup.Status.BeginWal = latest.Archive.Start

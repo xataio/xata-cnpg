@@ -74,8 +74,9 @@ func (s *StanzaInfo) LatestBackup() *BackupInfo {
 	return &s.Backup[len(s.Backup)-1]
 }
 
-// Info runs pgbackrest info and returns the parsed JSON output.
-func Info(ctx context.Context, stanzaName string) ([]StanzaInfo, error) {
+// Info runs pgbackrest info and returns the parsed stanza info.
+// pgbackrest always returns an array but with --stanza it contains exactly one element.
+func Info(ctx context.Context, stanzaName string) (*StanzaInfo, error) {
 	contextLog := log.FromContext(ctx)
 
 	fullArgs := []string{
@@ -108,5 +109,9 @@ func Info(ctx context.Context, stanzaName string) ([]StanzaInfo, error) {
 		return nil, fmt.Errorf("parsing pgbackrest info JSON: %w", err)
 	}
 
-	return result, nil
+	if len(result) == 0 {
+		return nil, fmt.Errorf("pgbackrest info returned no stanzas for %s", stanzaName)
+	}
+
+	return &result[0], nil
 }

@@ -154,6 +154,11 @@ func (r *InstanceReconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
+	// Update pgbackrest backup status (PITR window) periodically
+	if err := r.reconcilePgBackRestStatus(ctx, cluster); err != nil {
+		contextLogger.Error(err, "while reconciling pgbackrest backup status")
+	}
+
 	// Refresh the cache
 	requeueOnMissingPermissions := r.updateCacheFromCluster(ctx, cluster)
 
@@ -1067,17 +1072,71 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		return fmt.Errorf("generating pgbackrest config: %w", err)
 	}
 
-	changed, err := pgbackrest.WriteConfigFile(content)
-	if err != nil {
+	if _, err := pgbackrest.WriteConfigFile(content); err != nil {
 		return fmt.Errorf("writing pgbackrest config: %w", err)
 	}
 
-	if changed {
+	if !r.pgBackRestStanzaCreated.Load() {
 		if err := pgbackrest.StanzaCreate(ctx, cluster.Name); err != nil {
 			return fmt.Errorf("creating pgbackrest stanza: %w", err)
 		}
+		r.pgBackRestStanzaCreated.Store(true)
 	}
 
+	return nil
+}
+
+// reconcilePgBackRestStatus periodically runs pgbackrest info to update the
+// cluster's backup status with the PITR recovery window. Only runs on the
+// primary, every 5 minutes.
+func (r *InstanceReconciler) reconcilePgBackRestStatus(ctx context.Context, cluster *apiv1.Cluster) error {
+	if cluster.Spec.Backup == nil || !cluster.Spec.Backup.IsPgBackRestConfigured() {
+		return nil
+	}
+
+	isPrimary, _ := r.instance.IsPrimary()
+	if !isPrimary {
+		return nil
+	}
+
+	if time.Since(r.lastPgBackRestInfoTime) < 5*time.Minute {
+		return nil
+	}
+
+	stanza, err := pgbackrest.Info(ctx, cluster.Name)
+	if err != nil {
+		return fmt.Errorf("getting pgbackrest info: %w", err)
+	}
+
+	if len(stanza.Backup) == 0 {
+		return nil
+	}
+
+	earliest := stanza.Backup[0]
+	latest := stanza.Backup[len(stanza.Backup)-1]
+	earliestTime := metav1.NewTime(time.Unix(earliest.Timestamp.Start, 0))
+	latestTime := metav1.NewTime(time.Unix(latest.Timestamp.Stop, 0))
+
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		var livingCluster apiv1.Cluster
+		if err := r.client.Get(ctx, client.ObjectKeyFromObject(cluster), &livingCluster); err != nil {
+			return err
+		}
+
+		updatedCluster := livingCluster.DeepCopy()
+		if updatedCluster.Status.BackupStatus == nil {
+			updatedCluster.Status.BackupStatus = &apiv1.ClusterBackupStatus{}
+		}
+		updatedCluster.Status.BackupStatus.EarliestRestorableTime = &earliestTime
+		updatedCluster.Status.BackupStatus.LatestRestorableTime = &latestTime
+
+		return r.client.Status().Update(ctx, updatedCluster)
+	})
+	if err != nil {
+		return fmt.Errorf("updating cluster backup status: %w", err)
+	}
+
+	r.lastPgBackRestInfoTime = time.Now()
 	return nil
 }
 

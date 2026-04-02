@@ -24,6 +24,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/stringset"
 	"go.uber.org/atomic"
@@ -56,6 +57,9 @@ type InstanceReconciler struct {
 
 	certificateReconciler *instancecertificate.Reconciler
 	pluginRepository      repository.Interface
+
+	pgBackRestStanzaCreated atomic.Bool
+	lastPgBackRestInfoTime  time.Time
 }
 
 // NewInstanceReconciler creates a new instance reconciler

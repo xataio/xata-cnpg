@@ -310,7 +310,6 @@ func configureRestoreOptions(opts *apiv1.PgBackRestOptions, section *ini.Section
 	}
 }
 
-
 // resolveSecretKeyRef fetches a Kubernetes secret and extracts the value
 // for the given key reference.
 func resolveSecretKeyRef(

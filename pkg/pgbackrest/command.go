@@ -42,7 +42,9 @@ const (
 	pgbackrestBinary = "pgbackrest"
 )
 
-// IsAvailable checks if the pgbackrest binary is present in the container.
+// IsAvailable checks if the pgbackrest binary is present in the container. This
+// is needed so the reconciler does not keep retrying to create a stanza in an
+// image without pgbackrest.
 func IsAvailable() bool {
 	_, err := exec.LookPath(pgbackrestBinary)
 	return err == nil

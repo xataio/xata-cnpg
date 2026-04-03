@@ -1068,6 +1068,15 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		return nil
 	}
 
+	if !pgbackrest.IsAvailable() {
+		return clusterstatus.PatchConditionsWithOptimisticLock(ctx, r.client, cluster, metav1.Condition{
+			Type:    string(apiv1.ConditionContinuousArchiving),
+			Status:  metav1.ConditionFalse,
+			Reason:  "PgBackRestBinaryNotFound",
+			Message: "pgbackrest is configured but the binary is not available in the container image",
+		})
+	}
+
 	content, err := pgbackrest.GenerateConfig(ctx, r.GetClient(), cluster, r.instance.PgData)
 	if err != nil {
 		return fmt.Errorf("generating pgbackrest config: %w", err)

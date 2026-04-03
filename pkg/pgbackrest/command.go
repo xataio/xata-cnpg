@@ -42,6 +42,12 @@ const (
 	pgbackrestBinary = "pgbackrest"
 )
 
+// IsAvailable checks if the pgbackrest binary is present in the container.
+func IsAvailable() bool {
+	_, err := exec.LookPath(pgbackrestBinary)
+	return err == nil
+}
+
 // ErrWALNotFound is returned by ArchiveGet when the requested WAL segment
 // does not exist in the repository. This is a normal condition — PostgreSQL
 // uses it to stop recovery or fall back to streaming replication.

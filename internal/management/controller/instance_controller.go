@@ -35,6 +35,7 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	pgTime "github.com/cloudnative-pg/machinery/pkg/postgres/time"
 	"github.com/cloudnative-pg/machinery/pkg/stringset"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -159,6 +160,11 @@ func (r *InstanceReconciler) Reconcile(
 
 	// Takes care of the `.check-empty-wal-archive` file
 	if err := r.reconcileCheckWalArchiveFile(cluster); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	// Reconcile pgbackrest configuration if configured
+	if err := r.reconcilePgBackRestConfig(ctx, cluster); err != nil {
 		return reconcile.Result{}, err
 	}
 
@@ -1050,6 +1056,42 @@ func (r *InstanceReconciler) reconcileCheckWalArchiveFile(cluster *apiv1.Cluster
 		if condition.Type == string(apiv1.ConditionContinuousArchiving) && condition.Status == metav1.ConditionTrue {
 			return fileutils.RemoveFile(filePath)
 		}
+	}
+
+	return nil
+}
+
+// reconcilePgBackRestConfig generates and writes the pgbackrest configuration
+// file when pgbackrest is configured. On first write (or config change), it
+// also creates the pgbackrest stanza.
+func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, cluster *apiv1.Cluster) error {
+	if cluster.Spec.Backup == nil || !cluster.Spec.Backup.IsPgBackRestConfigured() {
+		return nil
+	}
+
+	if !pgbackrest.IsAvailable() {
+		return clusterstatus.PatchConditionsWithOptimisticLock(ctx, r.client, cluster, metav1.Condition{
+			Type:    string(apiv1.ConditionContinuousArchiving),
+			Status:  metav1.ConditionFalse,
+			Reason:  "PgBackRestBinaryNotFound",
+			Message: "pgbackrest is configured but the binary is not available in the container image",
+		})
+	}
+
+	content, err := pgbackrest.GenerateConfig(ctx, r.GetClient(), cluster, r.instance.PgData)
+	if err != nil {
+		return fmt.Errorf("generating pgbackrest config: %w", err)
+	}
+
+	if _, err := pgbackrest.WriteConfigFile(content); err != nil {
+		return fmt.Errorf("writing pgbackrest config: %w", err)
+	}
+
+	if !r.pgBackRestStanzaCreated.Load() {
+		if err := pgbackrest.StanzaCreate(ctx, cluster.Name); err != nil {
+			return fmt.Errorf("creating pgbackrest stanza: %w", err)
+		}
+		r.pgBackRestStanzaCreated.Store(true)
 	}
 
 	return nil

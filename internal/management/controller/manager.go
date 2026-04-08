@@ -56,6 +56,8 @@ type InstanceReconciler struct {
 
 	certificateReconciler *instancecertificate.Reconciler
 	pluginRepository      repository.Interface
+
+	pgBackRestStanzaCreated atomic.Bool
 }
 
 // NewInstanceReconciler creates a new instance reconciler

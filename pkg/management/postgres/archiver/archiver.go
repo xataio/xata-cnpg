@@ -33,6 +33,7 @@ import (
 	walUtils "github.com/cloudnative-pg/machinery/pkg/fileutils/wals"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/cloudnative-pg/machinery/pkg/stringset"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	pluginClient "github.com/xataio/xata-cnpg/internal/cnpi/plugin/client"
@@ -173,6 +174,13 @@ func internalRun(
 	// trigger the legacy archiving process.
 	if cluster.GetEnabledWALArchivePluginName() != "" {
 		return nil
+	}
+
+	// Archive via pgbackrest if configured
+	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		walPath := filepath.Join(pgData, walName)
+		contextLog.Info("Archiving WAL via pgbackrest", "walName", walName, "walPath", walPath)
+		return pgbackrest.ArchivePush(ctx, cluster.Name, walPath)
 	}
 
 	// Request Barman Cloud to archive this WAL

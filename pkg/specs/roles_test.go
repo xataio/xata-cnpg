@@ -358,3 +358,94 @@ var _ = Describe("Managed Roles", func() {
 		Expect(secretsPolicy.ResourceNames).To(ContainElements("my_secret1", "my_secret3"))
 	})
 })
+
+var _ = Describe("pgbackrest secrets", func() {
+	It("returns nil when backup is not configured", func() {
+		cluster := apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+		}
+		Expect(pgbackrestSecrets(cluster)).To(BeNil())
+	})
+
+	It("returns nil when pgbackrest is not configured", func() {
+		cluster := apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+			Spec: apiv1.ClusterSpec{
+				Backup: &apiv1.BackupConfiguration{},
+			},
+		}
+		Expect(pgbackrestSecrets(cluster)).To(BeNil())
+	})
+
+	It("returns nil when using IAM role (no secrets needed)", func() {
+		cluster := apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+			Spec: apiv1.ClusterSpec{
+				Backup: &apiv1.BackupConfiguration{
+					PgBackRest: &apiv1.PgBackRestConfiguration{
+						Repository: &apiv1.PgBackRestRepository{
+							S3: &apiv1.PgBackRestS3{
+								Bucket:             "test-bucket",
+								Region:             "us-east-1",
+								InheritFromIAMRole: true,
+							},
+						},
+					},
+				},
+			},
+		}
+		Expect(pgbackrestSecrets(cluster)).To(BeEmpty())
+	})
+
+	It("returns secret names when using explicit S3 credentials", func() {
+		cluster := apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+			Spec: apiv1.ClusterSpec{
+				Backup: &apiv1.BackupConfiguration{
+					PgBackRest: &apiv1.PgBackRestConfiguration{
+						Repository: &apiv1.PgBackRestRepository{
+							S3: &apiv1.PgBackRestS3{
+								Bucket: "test-bucket",
+								Region: "us-east-1",
+								AccessKeyID: &apiv1.SecretKeySelector{
+									LocalObjectReference: apiv1.LocalObjectReference{Name: "s3-access-key"},
+									Key:                  "ACCESS_KEY_ID",
+								},
+								SecretAccessKey: &apiv1.SecretKeySelector{
+									LocalObjectReference: apiv1.LocalObjectReference{Name: "s3-secret-key"},
+									Key:                  "SECRET_ACCESS_KEY",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		secrets := pgbackrestSecrets(cluster)
+		Expect(secrets).To(ContainElements("s3-access-key", "s3-secret-key"))
+	})
+
+	It("includes pgbackrest secrets in backup secrets list", func() {
+		cluster := apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+			Spec: apiv1.ClusterSpec{
+				Backup: &apiv1.BackupConfiguration{
+					PgBackRest: &apiv1.PgBackRestConfiguration{
+						Repository: &apiv1.PgBackRestRepository{
+							S3: &apiv1.PgBackRestS3{
+								Bucket: "test-bucket",
+								Region: "us-east-1",
+								AccessKeyID: &apiv1.SecretKeySelector{
+									LocalObjectReference: apiv1.LocalObjectReference{Name: "pgbr-key"},
+									Key:                  "key",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		secrets := backupSecrets(cluster, nil)
+		Expect(secrets).To(ContainElement("pgbr-key"))
+	})
+})

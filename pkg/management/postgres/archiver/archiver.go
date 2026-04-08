@@ -33,7 +33,6 @@ import (
 	walUtils "github.com/cloudnative-pg/machinery/pkg/fileutils/wals"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/cloudnative-pg/machinery/pkg/stringset"
-	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	pluginClient "github.com/xataio/xata-cnpg/internal/cnpi/plugin/client"
@@ -41,6 +40,7 @@ import (
 	"github.com/xataio/xata-cnpg/internal/management/cache"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/constants"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/local"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 )

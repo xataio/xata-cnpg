@@ -181,7 +181,7 @@ func TestConfigureGlobalOptions_AsyncArchivingCustomQueues(t *testing.T) {
 	section := cfg.Section("global")
 
 	opts := &apiv1.PgBackRestOptions{
-		ArchiveAsync:       ptr.To(true),
+		ArchiveAsync:        ptr.To(true),
 		ArchivePushQueueMax: "4GiB",
 		ArchiveGetQueueMax:  "1GiB",
 	}

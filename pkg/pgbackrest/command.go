@@ -133,3 +133,26 @@ func StanzaCreate(ctx context.Context, stanzaName string) error {
 func ArchivePush(ctx context.Context, stanzaName string, walPath string) error {
 	return runPgBackRest(ctx, "--stanza="+stanzaName, "archive-push", walPath)
 }
+
+// Backup takes a backup of the PostgreSQL cluster.
+// backupType should be "full", "diff", or "incr".
+func Backup(ctx context.Context, stanzaName string, backupType string) error {
+	contextLog := log.FromContext(ctx)
+	contextLog.Info("Starting pgbackrest backup", "stanza", stanzaName, "type", backupType)
+
+	return runPgBackRest(ctx, "--stanza="+stanzaName, "backup", "--type="+backupType, "--no-archive-check")
+}
+
+// Restore restores a PostgreSQL data directory from the pgbackrest repository.
+func Restore(ctx context.Context, stanzaName string, pgDataPath string, backupLabel string) error {
+	contextLog := log.FromContext(ctx)
+	contextLog.Info("Starting pgbackrest restore",
+		"stanza", stanzaName, "pgDataPath", pgDataPath, "backupLabel", backupLabel)
+
+	args := []string{"--stanza=" + stanzaName, "restore", "--pg1-path=" + pgDataPath}
+	if backupLabel != "" {
+		args = append(args, "--set="+backupLabel)
+	}
+
+	return runPgBackRest(ctx, args...)
+}

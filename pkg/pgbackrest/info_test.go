@@ -1,0 +1,255 @@
+/*
+Copyright © contributors to CloudNativePG, established as
+CloudNativePG a Series of LF Projects, LLC.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
+package pgbackrest
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+const sampleInfoJSON = `[
+  {
+    "name": "test-cluster",
+    "backup": [
+      {
+        "label": "20260325-191631F",
+        "type": "full",
+        "archive": {
+          "start": "000000010000003400000076",
+          "stop": "000000010000003400000078"
+        },
+        "lsn": {
+          "start": "34/76000028",
+          "stop": "34/78000080"
+        },
+        "timestamp": {
+          "start": 1742929591,
+          "stop": 1742931337
+        },
+        "info": {
+          "size": 274463129600,
+          "delta": 274463129600,
+          "repository": {
+            "size": 30064771072,
+            "delta": 30064771072
+          }
+        },
+        "error": false
+      },
+      {
+        "label": "20260325-200017F_20260326-085844D",
+        "type": "diff",
+        "archive": {
+          "start": "0000000100000035000000ED",
+          "stop": "0000000100000035000000EE"
+        },
+        "lsn": {
+          "start": "35/ED000028",
+          "stop": "35/EE000080"
+        },
+        "timestamp": {
+          "start": 1742975924,
+          "stop": 1742977316
+        },
+        "info": {
+          "size": 274580570112,
+          "delta": 274463129600,
+          "repository": {
+            "size": 30064771072,
+            "delta": 30064771072
+          }
+        },
+        "error": false
+      }
+    ],
+    "status": {
+      "code": 0,
+      "message": "ok"
+    }
+  }
+]`
+
+const sampleInfoRunningJSON = `[
+  {
+    "name": "test-cluster",
+    "backup": [
+      {
+        "label": "20260325-191631F",
+        "type": "full",
+        "archive": {
+          "start": "000000010000003400000076",
+          "stop": "000000010000003400000078"
+        },
+        "lsn": {
+          "start": "34/76000028",
+          "stop": "34/78000080"
+        },
+        "timestamp": {
+          "start": 1742929591,
+          "stop": 1742931337
+        },
+        "info": {
+          "size": 274463129600,
+          "delta": 274463129600,
+          "repository": {
+            "size": 30064771072,
+            "delta": 30064771072
+          }
+        },
+        "error": false
+      }
+    ],
+    "status": {
+      "code": 0,
+      "message": "ok (backup/expire running - 56.73% complete)"
+    }
+  }
+]`
+
+const sampleInfoEmptyJSON = `[
+  {
+    "name": "test-cluster",
+    "backup": [],
+    "status": {
+      "code": 2,
+      "message": "error (no valid backups)"
+    }
+  }
+]`
+
+func TestStanzaInfoParsing(t *testing.T) {
+	var stanzas []StanzaInfo
+	if err := json.Unmarshal([]byte(sampleInfoJSON), &stanzas); err != nil {
+		t.Fatalf("failed to parse sample JSON: %v", err)
+	}
+
+	if len(stanzas) != 1 {
+		t.Fatalf("expected 1 stanza, got %d", len(stanzas))
+	}
+
+	stanza := stanzas[0]
+	if stanza.Name != "test-cluster" {
+		t.Errorf("expected stanza name test-cluster, got %s", stanza.Name)
+	}
+	if stanza.Status.Code != 0 {
+		t.Errorf("expected status code 0, got %d", stanza.Status.Code)
+	}
+	if stanza.Status.Message != "ok" {
+		t.Errorf("expected status message ok, got %s", stanza.Status.Message)
+	}
+	if len(stanza.Backup) != 2 {
+		t.Fatalf("expected 2 backups, got %d", len(stanza.Backup))
+	}
+}
+
+func TestBackupInfoParsing(t *testing.T) {
+	var stanzas []StanzaInfo
+	if err := json.Unmarshal([]byte(sampleInfoJSON), &stanzas); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	full := stanzas[0].Backup[0]
+	if full.Label != "20260325-191631F" {
+		t.Errorf("expected label 20260325-191631F, got %s", full.Label)
+	}
+	if full.Type != "full" {
+		t.Errorf("expected type full, got %s", full.Type)
+	}
+	if full.Archive.Start != "000000010000003400000076" {
+		t.Errorf("unexpected archive start: %s", full.Archive.Start)
+	}
+	if full.Archive.Stop != "000000010000003400000078" {
+		t.Errorf("unexpected archive stop: %s", full.Archive.Stop)
+	}
+	if full.LSN.Start != "34/76000028" {
+		t.Errorf("unexpected LSN start: %s", full.LSN.Start)
+	}
+	if full.Timestamp.Start != 1742929591 {
+		t.Errorf("unexpected timestamp start: %d", full.Timestamp.Start)
+	}
+	if full.Timestamp.Stop != 1742931337 {
+		t.Errorf("unexpected timestamp stop: %d", full.Timestamp.Stop)
+	}
+	if full.Error {
+		t.Error("expected error to be false")
+	}
+
+	diff := stanzas[0].Backup[1]
+	if diff.Type != "diff" {
+		t.Errorf("expected type diff, got %s", diff.Type)
+	}
+}
+
+func TestLatestBackup(t *testing.T) {
+	var stanzas []StanzaInfo
+	if err := json.Unmarshal([]byte(sampleInfoJSON), &stanzas); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	latest := stanzas[0].LatestBackup()
+	if latest == nil {
+		t.Fatal("expected latest backup, got nil")
+	}
+	if latest.Type != "diff" {
+		t.Errorf("expected latest backup to be diff, got %s", latest.Type)
+	}
+	if latest.Label != "20260325-200017F_20260326-085844D" {
+		t.Errorf("unexpected latest label: %s", latest.Label)
+	}
+}
+
+func TestLatestBackup_Empty(t *testing.T) {
+	var stanzas []StanzaInfo
+	if err := json.Unmarshal([]byte(sampleInfoEmptyJSON), &stanzas); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	latest := stanzas[0].LatestBackup()
+	if latest != nil {
+		t.Error("expected nil for empty backup list")
+	}
+}
+
+func TestStanzaInfoRunningStatus(t *testing.T) {
+	var stanzas []StanzaInfo
+	if err := json.Unmarshal([]byte(sampleInfoRunningJSON), &stanzas); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	stanza := stanzas[0]
+	if stanza.Status.Message != "ok (backup/expire running - 56.73% complete)" {
+		t.Errorf("unexpected status message: %s", stanza.Status.Message)
+	}
+}
+
+func TestBackupInfoSize(t *testing.T) {
+	var stanzas []StanzaInfo
+	if err := json.Unmarshal([]byte(sampleInfoJSON), &stanzas); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	full := stanzas[0].Backup[0]
+	if full.Info.Size != 274463129600 {
+		t.Errorf("unexpected size: %d", full.Info.Size)
+	}
+	if full.Info.Repository.Size != 30064771072 {
+		t.Errorf("unexpected repo size: %d", full.Info.Repository.Size)
+	}
+}

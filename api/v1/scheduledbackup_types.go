@@ -60,12 +60,19 @@ type ScheduledBackupSpec struct {
 	// +optional
 	Target BackupTarget `json:"target,omitempty"`
 
-	// The backup method to be used, possible options are `barmanObjectStore`,
-	// `volumeSnapshot` or `plugin`. Defaults to: `barmanObjectStore`.
+	// The backup method to be used, possible options are `barmanObjectStore`, `pgBackRest`
+	// `volumeSnapshot` or `plugin`. Defaults to: `pgBackRest`.
 	// +optional
-	// +kubebuilder:validation:Enum=barmanObjectStore;volumeSnapshot;plugin
-	// +kubebuilder:default:=barmanObjectStore
+	// +kubebuilder:validation:Enum=barmanObjectStore;volumeSnapshot;plugin;pgBackRest
+	// +kubebuilder:default:=pgBackRest
 	Method BackupMethod `json:"method,omitempty"`
+
+	// The pgBackRest backup type. Possible values are `full`, `diff` (differential),
+	// or `incr` (incremental). Defaults to `full`. Only used when method is `pgBackRest`.
+	// +optional
+	// +kubebuilder:validation:Enum=full;diff;incr
+	// +kubebuilder:default:=full
+	PgBackRestBackupType PgBackRestBackupType `json:"pgBackRestBackupType,omitempty"`
 
 	// Configuration parameters passed to the plugin managing this backup
 	// +optional

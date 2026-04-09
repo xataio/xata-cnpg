@@ -1821,3 +1821,156 @@ var _ = Describe("pgBackRest configuration", func() {
 		Expect(backupConfig.IsPgBackRestConfigured()).To(BeTrue())
 	})
 })
+
+var _ = Describe("pgBackRest recovery source", func() {
+	It("returns nil when bootstrap is nil", func() {
+		cluster := &Cluster{}
+		Expect(cluster.GetRecoverySourcePgBackRest()).To(BeNil())
+	})
+
+	It("returns nil when recovery is nil", func() {
+		cluster := &Cluster{
+			Spec: ClusterSpec{
+				Bootstrap: &BootstrapConfiguration{},
+			},
+		}
+		Expect(cluster.GetRecoverySourcePgBackRest()).To(BeNil())
+	})
+
+	It("returns nil when source is empty", func() {
+		cluster := &Cluster{
+			Spec: ClusterSpec{
+				Bootstrap: &BootstrapConfiguration{
+					Recovery: &BootstrapRecovery{},
+				},
+			},
+		}
+		Expect(cluster.GetRecoverySourcePgBackRest()).To(BeNil())
+	})
+
+	It("returns nil when external cluster not found", func() {
+		cluster := &Cluster{
+			Spec: ClusterSpec{
+				Bootstrap: &BootstrapConfiguration{
+					Recovery: &BootstrapRecovery{
+						Source: "nonexistent",
+					},
+				},
+			},
+		}
+		Expect(cluster.GetRecoverySourcePgBackRest()).To(BeNil())
+	})
+
+	It("returns nil when external cluster has no pgbackrest config", func() {
+		cluster := &Cluster{
+			Spec: ClusterSpec{
+				Bootstrap: &BootstrapConfiguration{
+					Recovery: &BootstrapRecovery{
+						Source: "source-cluster",
+					},
+				},
+				ExternalClusters: []ExternalCluster{
+					{
+						Name:              "source-cluster",
+						BarmanObjectStore: &BarmanObjectStoreConfiguration{},
+					},
+				},
+			},
+		}
+		Expect(cluster.GetRecoverySourcePgBackRest()).To(BeNil())
+	})
+
+	It("returns recovery source when pgbackrest is configured", func() {
+		cluster := &Cluster{
+			Spec: ClusterSpec{
+				Bootstrap: &BootstrapConfiguration{
+					Recovery: &BootstrapRecovery{
+						Source: "source-cluster",
+					},
+				},
+				ExternalClusters: []ExternalCluster{
+					{
+						Name: "source-cluster",
+						PgBackRest: &PgBackRestExternalCluster{
+							Repository: PgBackRestRepository{
+								S3: &PgBackRestS3{
+									Bucket: "test-bucket",
+									Region: "us-east-1",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		result := cluster.GetRecoverySourcePgBackRest()
+		Expect(result).ToNot(BeNil())
+		Expect(result.StanzaName).To(Equal("source-cluster"))
+		Expect(result.Repository.S3.Bucket).To(Equal("test-bucket"))
+		Expect(result.BackupName).To(BeEmpty())
+	})
+
+	It("returns backup name when specified", func() {
+		cluster := &Cluster{
+			Spec: ClusterSpec{
+				Bootstrap: &BootstrapConfiguration{
+					Recovery: &BootstrapRecovery{
+						Source: "source-cluster",
+						Backup: &BackupSource{
+							LocalObjectReference: LocalObjectReference{Name: "my-backup"},
+						},
+					},
+				},
+				ExternalClusters: []ExternalCluster{
+					{
+						Name: "source-cluster",
+						PgBackRest: &PgBackRestExternalCluster{
+							Repository: PgBackRestRepository{
+								S3: &PgBackRestS3{
+									Bucket: "test-bucket",
+									Region: "us-east-1",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		result := cluster.GetRecoverySourcePgBackRest()
+		Expect(result).ToNot(BeNil())
+		Expect(result.BackupName).To(Equal("my-backup"))
+	})
+
+	It("returns options when specified on external cluster", func() {
+		processMax := 2
+		cluster := &Cluster{
+			Spec: ClusterSpec{
+				Bootstrap: &BootstrapConfiguration{
+					Recovery: &BootstrapRecovery{
+						Source: "source-cluster",
+					},
+				},
+				ExternalClusters: []ExternalCluster{
+					{
+						Name: "source-cluster",
+						PgBackRest: &PgBackRestExternalCluster{
+							Repository: PgBackRestRepository{
+								S3: &PgBackRestS3{
+									Bucket: "test-bucket",
+									Region: "us-east-1",
+								},
+							},
+							Options: &PgBackRestOptions{
+								ProcessMax: &processMax,
+							},
+						},
+					},
+				},
+			},
+		}
+		result := cluster.GetRecoverySourcePgBackRest()
+		Expect(result).ToNot(BeNil())
+		Expect(result.Options).ToNot(BeNil())
+		Expect(*result.Options.ProcessMax).To(Equal(2))
+	})
+})

@@ -142,3 +142,33 @@ func Backup(ctx context.Context, stanzaName string, backupType string) error {
 
 	return runPgBackRest(ctx, "--stanza="+stanzaName, "backup", "--type="+backupType, "--no-archive-check")
 }
+
+// Restore restores a PostgreSQL data directory from the pgbackrest repository.
+func Restore(ctx context.Context, stanzaName string, pgDataPath string, backupLabel string) error {
+	contextLog := log.FromContext(ctx)
+	contextLog.Info("Starting pgbackrest restore",
+		"stanza", stanzaName, "pgDataPath", pgDataPath, "backupLabel", backupLabel)
+
+	args := []string{"--stanza=" + stanzaName, "restore", "--pg1-path=" + pgDataPath}
+	if backupLabel != "" {
+		args = append(args, "--set="+backupLabel)
+	}
+
+	return runPgBackRest(ctx, args...)
+}
+
+// ArchiveGet retrieves a WAL file from the pgbackrest repository.
+// Returns ErrWALNotFound if the WAL segment does not exist in the repository.
+func ArchiveGet(ctx context.Context, stanzaName string, walName string, destPath string) error {
+	err := runPgBackRest(ctx, "--stanza="+stanzaName, "archive-get", walName, destPath)
+	if err == nil {
+		return nil
+	}
+
+	var cmdErr *CommandError
+	if errors.As(err, &cmdErr) && cmdErr.ExitCode == 2 {
+		return ErrWALNotFound
+	}
+
+	return err
+}

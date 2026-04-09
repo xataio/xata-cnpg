@@ -2321,6 +2321,10 @@ type ExternalCluster struct {
 	// +optional
 	BarmanObjectStore *BarmanObjectStoreConfiguration `json:"barmanObjectStore,omitempty"`
 
+	// The pgbackrest configuration for this external cluster (repository and options)
+	// +optional
+	PgBackRest *PgBackRestExternalCluster `json:"pgBackRest,omitempty"`
+
 	// The configuration of the plugin that is taking care
 	// of WAL archiving and backups for this external cluster
 	PluginConfiguration *PluginConfiguration `json:"plugin,omitempty"`

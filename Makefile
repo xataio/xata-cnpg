@@ -51,7 +51,7 @@ PGBOUNCER_IMAGE_NAME ?= $(shell grep 'DefaultPgbouncerImage.*=' "pkg/versions/ve
 # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize versioning=loose
 KUSTOMIZE_VERSION ?= v5.6.0
 # renovate: datasource=go depName=sigs.k8s.io/controller-tools
-CONTROLLER_TOOLS_VERSION ?= v0.19.0
+CONTROLLER_TOOLS_VERSION ?= 50567dcb # Use unreleased version for PR controller-tools##1327
 GENREF_VERSION ?= 015aaac611407c4fe591bc8700d2c67b7521efca
 # renovate: datasource=go depName=github.com/goreleaser/goreleaser
 GORELEASER_VERSION ?= v2.12.7

@@ -1788,3 +1788,36 @@ var _ = Describe("Failover quorum", func() {
 		Entry("with failover quorum disabled", clusterWithFailoverQuorumDisabled, false),
 	)
 })
+
+var _ = Describe("pgBackRest configuration", func() {
+	It("returns false when backup configuration is nil", func() {
+		var backupConfig *BackupConfiguration
+		Expect(backupConfig.IsPgBackRestConfigured()).To(BeFalse())
+	})
+
+	It("returns false when pgBackRest is nil", func() {
+		backupConfig := &BackupConfiguration{}
+		Expect(backupConfig.IsPgBackRestConfigured()).To(BeFalse())
+	})
+
+	It("returns false when pgBackRest repository is nil", func() {
+		backupConfig := &BackupConfiguration{
+			PgBackRest: &PgBackRestConfiguration{},
+		}
+		Expect(backupConfig.IsPgBackRestConfigured()).To(BeFalse())
+	})
+
+	It("returns true when pgBackRest repository is configured", func() {
+		backupConfig := &BackupConfiguration{
+			PgBackRest: &PgBackRestConfiguration{
+				Repository: &PgBackRestRepository{
+					S3: &PgBackRestS3{
+						Bucket: "test-bucket",
+						Region: "us-east-1",
+					},
+				},
+			},
+		}
+		Expect(backupConfig.IsPgBackRestConfigured()).To(BeTrue())
+	})
+})

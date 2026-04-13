@@ -352,8 +352,10 @@ func externalClusterSecrets(cluster apiv1.Cluster) []string {
 func backupSecrets(cluster apiv1.Cluster, backupOrigin *apiv1.Backup) []string {
 	var result []string
 
-	// Secrets needed to access S3 and Azure
-	if cluster.Spec.Backup != nil && cluster.Spec.Backup.BarmanObjectStore != nil {
+	// Secrets needed by the configured backup method (barman or pgbackrest, never both)
+	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		result = append(result, pgbackrestSecrets(cluster)...)
+	} else if cluster.Spec.Backup != nil && cluster.Spec.Backup.BarmanObjectStore != nil {
 		result = append(
 			result,
 			s3CredentialsSecrets(cluster.Spec.Backup.BarmanObjectStore.AWS)...)
@@ -363,13 +365,13 @@ func backupSecrets(cluster apiv1.Cluster, backupOrigin *apiv1.Backup) []string {
 		result = append(
 			result,
 			googleCredentialsSecrets(cluster.Spec.Backup.BarmanObjectStore.Google)...)
-	}
 
-	// Secrets needed by Barman, if set
-	if cluster.Spec.Backup.IsBarmanEndpointCASet() {
-		result = append(
-			result,
-			cluster.Spec.Backup.BarmanObjectStore.EndpointCA.Name)
+		// Secrets needed by Barman, if set
+		if cluster.Spec.Backup.IsBarmanEndpointCASet() {
+			result = append(
+				result,
+				cluster.Spec.Backup.BarmanObjectStore.EndpointCA.Name)
+		}
 	}
 
 	if backupOrigin != nil {
@@ -382,6 +384,27 @@ func backupSecrets(cluster apiv1.Cluster, backupOrigin *apiv1.Backup) []string {
 		result = append(
 			result,
 			googleCredentialsSecrets(backupOrigin.Status.Google)...)
+	}
+
+	return result
+}
+
+func pgbackrestSecrets(cluster apiv1.Cluster) []string {
+	if cluster.Spec.Backup == nil || !cluster.Spec.Backup.IsPgBackRestConfigured() {
+		return nil
+	}
+
+	var result []string
+	s3 := cluster.Spec.Backup.PgBackRest.Repository.S3
+	if s3 == nil {
+		return nil
+	}
+
+	if s3.AccessKeyID != nil {
+		result = append(result, s3.AccessKeyID.Name)
+	}
+	if s3.SecretAccessKey != nil {
+		result = append(result, s3.SecretAccessKey.Name)
 	}
 
 	return result

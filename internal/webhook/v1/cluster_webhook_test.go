@@ -5232,6 +5232,98 @@ var _ = Describe("validatePluginConfiguration", func() {
 		cluster.Spec.Plugins = append(cluster.Spec.Plugins, walPlugin1)
 		Expect(v.validatePluginConfiguration(cluster)).To(BeNil())
 	})
+
+	It("returns an error if a WAL archiver plugin is enabled when pgBackRest is configured", func() {
+		cluster.Spec.Backup = &apiv1.BackupConfiguration{
+			PgBackRest: &apiv1.PgBackRestConfiguration{
+				Repository: &apiv1.PgBackRestRepository{
+					S3: &apiv1.PgBackRestS3{
+						Bucket: "test-bucket",
+						Region: "us-east-1",
+					},
+				},
+			},
+		}
+		cluster.Spec.Plugins = append(cluster.Spec.Plugins, walPlugin1)
+		errs := v.validatePluginConfiguration(cluster)
+		Expect(errs).To(HaveLen(1))
+		Expect(errs[0].Error()).To(ContainSubstring(
+			"Cannot enable a WAL archiver plugin when pgBackRest is configured"))
+	})
+
+	It("returns no errors when pgBackRest is configured with non-WAL-archiver plugins", func() {
+		cluster.Spec.Backup = &apiv1.BackupConfiguration{
+			PgBackRest: &apiv1.PgBackRestConfiguration{
+				Repository: &apiv1.PgBackRestRepository{
+					S3: &apiv1.PgBackRestS3{
+						Bucket: "test-bucket",
+						Region: "us-east-1",
+					},
+				},
+			},
+		}
+		nonWalPlugin := apiv1.PluginConfiguration{
+			Name:          "some-other-plugin",
+			Enabled:       ptr.To(true),
+			IsWALArchiver: ptr.To(false),
+		}
+		cluster.Spec.Plugins = append(cluster.Spec.Plugins, nonWalPlugin)
+		Expect(v.validatePluginConfiguration(cluster)).To(BeNil())
+	})
+})
+
+var _ = Describe("pgBackRest backup configuration validation", func() {
+	var v *ClusterCustomValidator
+	BeforeEach(func() {
+		v = &ClusterCustomValidator{}
+	})
+
+	It("returns an error when both barmanObjectStore and pgBackRest are configured", func() {
+		cluster := &apiv1.Cluster{
+			Spec: apiv1.ClusterSpec{
+				Backup: &apiv1.BackupConfiguration{
+					BarmanObjectStore: &apiv1.BarmanObjectStoreConfiguration{},
+					PgBackRest: &apiv1.PgBackRestConfiguration{
+						Repository: &apiv1.PgBackRestRepository{
+							S3: &apiv1.PgBackRestS3{
+								Bucket: "test-bucket",
+								Region: "us-east-1",
+							},
+						},
+					},
+				},
+			},
+		}
+		errs := v.validateBackupConfiguration(cluster)
+		Expect(errs).ToNot(BeEmpty())
+		Expect(errs[0].Error()).To(ContainSubstring(
+			"Cannot configure both barmanObjectStore and pgBackRest"))
+	})
+
+	It("returns no errors when only pgBackRest is configured", func() {
+		cluster := &apiv1.Cluster{
+			Spec: apiv1.ClusterSpec{
+				Backup: &apiv1.BackupConfiguration{
+					PgBackRest: &apiv1.PgBackRestConfiguration{
+						Repository: &apiv1.PgBackRestRepository{
+							S3: &apiv1.PgBackRestS3{
+								Bucket: "test-bucket",
+								Region: "us-east-1",
+							},
+						},
+					},
+				},
+			},
+		}
+		errs := v.validateBackupConfiguration(cluster)
+		Expect(errs).To(BeEmpty())
+	})
+
+	It("returns no errors when no backup is configured", func() {
+		cluster := &apiv1.Cluster{}
+		errs := v.validateBackupConfiguration(cluster)
+		Expect(errs).To(BeEmpty())
+	})
 })
 
 var _ = Describe("liveness probe validation", func() {

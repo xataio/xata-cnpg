@@ -480,3 +480,21 @@ var _ = Describe("GetVolumeSnapshotConfiguration", func() {
 		})
 	})
 })
+
+var _ = Describe("BackupMethod", func() {
+	It("pgBackRest is managed by instance", func() {
+		Expect(BackupMethodPgBackRest.IsManagedByInstance()).To(BeTrue())
+	})
+
+	It("pgBackRest is not managed by operator", func() {
+		Expect(BackupMethodPgBackRest.IsManagedByOperator()).To(BeFalse())
+	})
+
+	It("barmanObjectStore is managed by instance", func() {
+		Expect(BackupMethodBarmanObjectStore.IsManagedByInstance()).To(BeTrue())
+	})
+
+	It("volumeSnapshot is managed by operator", func() {
+		Expect(BackupMethodVolumeSnapshot.IsManagedByOperator()).To(BeTrue())
+	})
+})

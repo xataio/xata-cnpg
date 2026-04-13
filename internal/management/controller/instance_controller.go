@@ -1089,7 +1089,8 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 
 	if !r.pgBackRestStanzaCreated.Load() {
 		if err := pgbackrest.StanzaCreate(ctx, cluster.Name); err != nil {
-			return fmt.Errorf("creating pgbackrest stanza: %w", err)
+			log.FromContext(ctx).Error(err, "Failed to create pgbackrest stanza, will retry on next reconcile")
+			return nil
 		}
 		r.pgBackRestStanzaCreated.Store(true)
 	}

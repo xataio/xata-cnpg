@@ -20,4 +20,6 @@ SPDX-License-Identifier: Apache-2.0
 // Package v1 contains API Schema definitions for the postgresql v1 API group
 // +kubebuilder:object:generate=true
 // +groupName=postgresql.cnpg.io
+// +kubebuilder:ac:generate=true
+// +kubebuilder:ac:output:package=../../pkg/client/applyconfiguration
 package v1

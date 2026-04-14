@@ -302,6 +302,13 @@ type BackupSpec struct {
 	// +kubebuilder:default:=pgBackRest
 	Method BackupMethod `json:"method,omitempty"`
 
+	// The pgBackRest backup type. Possible values are `full`, `diff` (differential),
+	// or `incr` (incremental). Defaults to `full`. Only used when method is `pgBackRest`.
+	// +optional
+	// +kubebuilder:validation:Enum=full;diff;incr
+	// +kubebuilder:default:=full
+	PgBackRestBackupType PgBackRestBackupType `json:"pgBackRestBackupType,omitempty"`
+
 	// Configuration parameters passed to the plugin managing this backup
 	// +optional
 	PluginConfiguration *BackupPluginConfiguration `json:"pluginConfiguration,omitempty"`

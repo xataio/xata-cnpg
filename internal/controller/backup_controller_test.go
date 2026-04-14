@@ -539,3 +539,72 @@ var _ = Describe("checkPrerequisites for plugin backups", func() {
 		Expect(stored.Status.Method).To(BeEquivalentTo(apiv1.BackupMethodPlugin))
 	})
 })
+
+var _ = Describe("checkPrerequisites for pgBackRest backups", func() {
+	var env *testingEnvironment
+	BeforeEach(func() { env = buildTestEnvironment() })
+
+	It("allows pgBackRest backups when pgBackRest is configured", func(ctx context.Context) {
+		ns := newFakeNamespace(env.client)
+
+		cluster := newFakeCNPGCluster(env.client, ns, func(c *apiv1.Cluster) {
+			c.Spec.Backup = &apiv1.BackupConfiguration{
+				PgBackRest: &apiv1.PgBackRestConfiguration{
+					Repository: &apiv1.PgBackRestRepository{
+						S3: &apiv1.PgBackRestS3{
+							Bucket: "test-bucket",
+							Region: "us-east-1",
+						},
+					},
+				},
+			}
+		})
+
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pgbackrest-backup", Namespace: ns},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: cluster.Name},
+				Method:  apiv1.BackupMethodPgBackRest,
+			},
+		}
+		expectErr := env.client.Create(ctx, backup)
+		Expect(expectErr).ToNot(HaveOccurred())
+
+		res, err := env.backupReconciler.checkPrerequisites(ctx, *backup, *cluster)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(res).To(BeNil())
+
+		var stored apiv1.Backup
+		expectErr = env.client.Get(ctx, client.ObjectKeyFromObject(backup), &stored)
+		Expect(expectErr).ToNot(HaveOccurred())
+		Expect(stored.Status.Phase).To(BeEmpty())
+	})
+
+	It("fails pgBackRest backups when pgBackRest is not configured", func(ctx context.Context) {
+		ns := newFakeNamespace(env.client)
+
+		cluster := newFakeCNPGCluster(env.client, ns, func(c *apiv1.Cluster) {
+			c.Spec.Backup = nil
+		})
+
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pgbackrest-backup-missing", Namespace: ns},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: cluster.Name},
+				Method:  apiv1.BackupMethodPgBackRest,
+			},
+		}
+		expectErr := env.client.Create(ctx, backup)
+		Expect(expectErr).ToNot(HaveOccurred())
+
+		res, err := env.backupReconciler.checkPrerequisites(ctx, *backup, *cluster)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(res).ToNot(BeNil())
+
+		var stored apiv1.Backup
+		expectErr = env.client.Get(ctx, client.ObjectKeyFromObject(backup), &stored)
+		Expect(expectErr).ToNot(HaveOccurred())
+		Expect(stored.Status.Phase).To(BeEquivalentTo(apiv1.BackupPhaseFailed))
+		Expect(stored.Status.Method).To(BeEquivalentTo(apiv1.BackupMethodPgBackRest))
+	})
+})

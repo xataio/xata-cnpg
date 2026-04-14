@@ -133,3 +133,12 @@ func StanzaCreate(ctx context.Context, stanzaName string) error {
 func ArchivePush(ctx context.Context, stanzaName string, walPath string) error {
 	return runPgBackRest(ctx, "--stanza="+stanzaName, "archive-push", walPath)
 }
+
+// Backup takes a backup of the PostgreSQL cluster.
+// backupType should be "full", "diff", or "incr".
+func Backup(ctx context.Context, stanzaName string, backupType string) error {
+	contextLog := log.FromContext(ctx)
+	contextLog.Info("Starting pgbackrest backup", "stanza", stanzaName, "type", backupType)
+
+	return runPgBackRest(ctx, "--stanza="+stanzaName, "backup", "--type="+backupType, "--no-archive-check")
+}

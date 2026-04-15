@@ -84,4 +84,36 @@ var _ = Describe("Scheduled backup", func() {
 		Expect(backup.ObjectMeta.Name).To(BeEquivalentTo(backupName))
 		Expect(backup.Spec.Target).To(BeEquivalentTo(BackupTargetPrimary))
 	})
+
+	It("properly creates a pgbackrest backup with method and type", func() {
+		scheduledBackup.Spec.Method = BackupMethodPgBackRest
+		scheduledBackup.Spec.PgBackRestBackupType = PgBackRestBackupTypeFull
+		backup := scheduledBackup.CreateBackup("test")
+		Expect(backup).ToNot(BeNil())
+		Expect(backup.Spec.Method).To(BeEquivalentTo(BackupMethodPgBackRest))
+		Expect(backup.Spec.PgBackRestBackupType).To(BeEquivalentTo(PgBackRestBackupTypeFull))
+	})
+
+	It("properly creates a pgbackrest diff backup", func() {
+		scheduledBackup.Spec.Method = BackupMethodPgBackRest
+		scheduledBackup.Spec.PgBackRestBackupType = PgBackRestBackupTypeDiff
+		backup := scheduledBackup.CreateBackup("test")
+		Expect(backup).ToNot(BeNil())
+		Expect(backup.Spec.PgBackRestBackupType).To(BeEquivalentTo(PgBackRestBackupTypeDiff))
+	})
+
+	It("properly creates a pgbackrest incr backup", func() {
+		scheduledBackup.Spec.Method = BackupMethodPgBackRest
+		scheduledBackup.Spec.PgBackRestBackupType = PgBackRestBackupTypeIncr
+		backup := scheduledBackup.CreateBackup("test")
+		Expect(backup).ToNot(BeNil())
+		Expect(backup.Spec.PgBackRestBackupType).To(BeEquivalentTo(PgBackRestBackupTypeIncr))
+	})
+
+	It("defaults pgBackRestBackupType to empty when not set", func() {
+		scheduledBackup.Spec.Method = BackupMethodPgBackRest
+		backup := scheduledBackup.CreateBackup("test")
+		Expect(backup).ToNot(BeNil())
+		Expect(backup.Spec.PgBackRestBackupType).To(BeEmpty())
+	})
 })

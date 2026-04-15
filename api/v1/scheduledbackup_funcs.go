@@ -72,12 +72,13 @@ func (scheduledBackup *ScheduledBackup) CreateBackup(name string) *Backup {
 			Namespace: scheduledBackup.Namespace,
 		},
 		Spec: BackupSpec{
-			Cluster:             scheduledBackup.Spec.Cluster,
-			Target:              scheduledBackup.Spec.Target,
-			Method:              scheduledBackup.Spec.Method,
-			Online:              scheduledBackup.Spec.Online,
-			OnlineConfiguration: scheduledBackup.Spec.OnlineConfiguration,
-			PluginConfiguration: scheduledBackup.Spec.PluginConfiguration,
+			Cluster:              scheduledBackup.Spec.Cluster,
+			Target:               scheduledBackup.Spec.Target,
+			Method:               scheduledBackup.Spec.Method,
+			Online:               scheduledBackup.Spec.Online,
+			OnlineConfiguration:  scheduledBackup.Spec.OnlineConfiguration,
+			PluginConfiguration:  scheduledBackup.Spec.PluginConfiguration,
+			PgBackRestBackupType: scheduledBackup.Spec.PgBackRestBackupType,
 		},
 	}
 	utils.InheritAnnotations(&backup.ObjectMeta, scheduledBackup.Annotations, nil, configuration.Current)

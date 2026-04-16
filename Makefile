@@ -66,6 +66,11 @@ export BUILD_IMAGE
 export POSTGRES_IMAGE_NAME
 export PGBOUNCER_IMAGE_NAME
 export OPERATOR_MANIFEST_PATH
+
+# Define external apply configuration mappings for controller-gen
+EXTERNAL_ACS  = github.com/cloudnative-pg/machinery/pkg/api.LocalObjectReference@k8s.io/client-go/applyconfigurations/core/v1
+EXTERNAL_ACS := $(EXTERNAL_ACS);k8s.io/api/core/v1.TypedLocalObjectReference@k8s.io/client-go/applyconfigurations/core/v1
+
 # We don't need `trivialVersions=true` anymore, with `crd` it's ok for multi versions
 CRD_OPTIONS ?= "crd"
 
@@ -191,6 +196,7 @@ manifests: controller-gen ## Generate manifests e.g. CRD, RBAC etc.
 
 generate: controller-gen ## Generate code.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(CONTROLLER_GEN) applyconfiguration:externalApplyConfigurations="$(EXTERNAL_ACS)" paths="./..."
 
 ##@ Formatters and Linters
 

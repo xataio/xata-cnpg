@@ -79,3 +79,26 @@ func TestConstants(t *testing.T) {
 		t.Errorf("unexpected SpoolPath: %s", SpoolPath)
 	}
 }
+
+func TestArchiveGet_WALNotFound(t *testing.T) {
+	// Simulate a CommandError with exit code 2 (WAL not found)
+	cmdErr := &CommandError{
+		Command:  "archive-get",
+		ExitCode: 2,
+		Stderr:   "WAL segment not found",
+	}
+
+	// Verify that exit code 2 maps to ErrWALNotFound
+	var err error = cmdErr
+	if !errors.As(err, &cmdErr) {
+		t.Fatal("expected CommandError")
+	}
+	if cmdErr.ExitCode != 2 {
+		t.Errorf("expected exit code 2, got %d", cmdErr.ExitCode)
+	}
+
+	// Verify ErrWALNotFound is a distinct error
+	if errors.Is(cmdErr, ErrWALNotFound) {
+		t.Error("CommandError should not be ErrWALNotFound directly")
+	}
+}

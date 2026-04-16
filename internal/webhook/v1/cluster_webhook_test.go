@@ -2417,6 +2417,33 @@ var _ = Describe("bootstrap recovery validation", func() {
 		errorsList := v.validateBootstrapRecoverySource(recoveryCluster)
 		Expect(errorsList).To(HaveLen(1))
 	})
+
+	It("accepts pgBackRest as a valid recovery source", func() {
+		recoveryCluster := &apiv1.Cluster{
+			Spec: apiv1.ClusterSpec{
+				Bootstrap: &apiv1.BootstrapConfiguration{
+					Recovery: &apiv1.BootstrapRecovery{
+						Source: "source-cluster",
+					},
+				},
+				ExternalClusters: []apiv1.ExternalCluster{
+					{
+						Name: "source-cluster",
+						PgBackRest: &apiv1.PgBackRestExternalCluster{
+							Repository: apiv1.PgBackRestRepository{
+								S3: &apiv1.PgBackRestS3{
+									Bucket: "test-bucket",
+									Region: "us-east-1",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		errorsList := v.validateBootstrapRecoverySource(recoveryCluster)
+		Expect(errorsList).To(BeEmpty())
+	})
 })
 
 var _ = Describe("toleration validation", func() {

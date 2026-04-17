@@ -36,6 +36,8 @@ type ExternalClusterApplyConfiguration struct {
 	Password *corev1.SecretKeySelector `json:"password,omitempty"`
 	// The configuration for the barman-cloud tool suite
 	BarmanObjectStore *api.BarmanObjectStoreConfiguration `json:"barmanObjectStore,omitempty"`
+	// The pgbackrest configuration for this external cluster (repository and options)
+	PgBackRest *PgBackRestExternalClusterApplyConfiguration `json:"pgBackRest,omitempty"`
 	// The configuration of the plugin that is taking care
 	// of WAL archiving and backups for this external cluster
 	PluginConfiguration *PluginConfigurationApplyConfiguration `json:"plugin,omitempty"`
@@ -106,6 +108,14 @@ func (b *ExternalClusterApplyConfiguration) WithPassword(value corev1.SecretKeyS
 // If called multiple times, the BarmanObjectStore field is set to the value of the last call.
 func (b *ExternalClusterApplyConfiguration) WithBarmanObjectStore(value api.BarmanObjectStoreConfiguration) *ExternalClusterApplyConfiguration {
 	b.BarmanObjectStore = &value
+	return b
+}
+
+// WithPgBackRest sets the PgBackRest field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PgBackRest field is set to the value of the last call.
+func (b *ExternalClusterApplyConfiguration) WithPgBackRest(value *PgBackRestExternalClusterApplyConfiguration) *ExternalClusterApplyConfiguration {
+	b.PgBackRest = value
 	return b
 }
 

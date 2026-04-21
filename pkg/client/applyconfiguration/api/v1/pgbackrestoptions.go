@@ -45,6 +45,12 @@ type PgBackRestOptionsApplyConfiguration struct {
 	Priority *int `json:"priority,omitempty"`
 	// Backup retention policy.
 	Retention *PgBackRestRetentionApplyConfiguration `json:"retention,omitempty"`
+	// RepoPath is the pgbackrest repo1-path — the prefix in the storage
+	// backend where backups and WAL archives are stored. When unset, it
+	// defaults to /<clusterName>. Configure this to isolate a new cluster
+	// incarnation from existing data under the default path, or to restore
+	// from a custom path.
+	RepoPath *string `json:"repoPath,omitempty"`
 }
 
 // PgBackRestOptionsApplyConfiguration constructs a declarative configuration of the PgBackRestOptions type for use with
@@ -154,5 +160,13 @@ func (b *PgBackRestOptionsApplyConfiguration) WithPriority(value int) *PgBackRes
 // If called multiple times, the Retention field is set to the value of the last call.
 func (b *PgBackRestOptionsApplyConfiguration) WithRetention(value *PgBackRestRetentionApplyConfiguration) *PgBackRestOptionsApplyConfiguration {
 	b.Retention = value
+	return b
+}
+
+// WithRepoPath sets the RepoPath field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RepoPath field is set to the value of the last call.
+func (b *PgBackRestOptionsApplyConfiguration) WithRepoPath(value string) *PgBackRestOptionsApplyConfiguration {
+	b.RepoPath = &value
 	return b
 }

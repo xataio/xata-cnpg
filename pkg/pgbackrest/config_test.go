@@ -125,6 +125,70 @@ func TestApplyOptionDefaults_ProcessMaxNotOverridden(t *testing.T) {
 	}
 }
 
+func TestApplyOptionDefaults_RepoPath(t *testing.T) {
+	cluster := &apiv1.Cluster{
+		Spec: apiv1.ClusterSpec{
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("500m"),
+				},
+			},
+		},
+	}
+	cluster.Name = "my-cluster"
+
+	opts := &apiv1.PgBackRestOptions{}
+	applyOptionDefaults(opts, cluster)
+
+	if opts.RepoPath != "my-cluster" {
+		t.Errorf("expected repoPath my-cluster, got %s", opts.RepoPath)
+	}
+}
+
+func TestApplyOptionDefaults_RepoPathNotOverridden(t *testing.T) {
+	cluster := &apiv1.Cluster{
+		Spec: apiv1.ClusterSpec{
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("500m"),
+				},
+			},
+		},
+	}
+	cluster.Name = "my-cluster"
+
+	opts := &apiv1.PgBackRestOptions{RepoPath: "custom-path"}
+	applyOptionDefaults(opts, cluster)
+
+	if opts.RepoPath != "custom-path" {
+		t.Errorf("expected repoPath custom-path, got %s", opts.RepoPath)
+	}
+}
+
+func TestConfigureGlobalOptions_RepoPath(t *testing.T) {
+	cfg := ini.Empty()
+	section := cfg.Section("global")
+
+	opts := &apiv1.PgBackRestOptions{RepoPath: "my-cluster"}
+	configureGlobalOptions(opts, section)
+
+	if v := section.Key("repo1-path").String(); v != "/my-cluster" {
+		t.Errorf("expected repo1-path /my-cluster, got %s", v)
+	}
+}
+
+func TestConfigureGlobalOptions_RepoPathEmpty(t *testing.T) {
+	cfg := ini.Empty()
+	section := cfg.Section("global")
+
+	opts := &apiv1.PgBackRestOptions{}
+	configureGlobalOptions(opts, section)
+
+	if section.HasKey("repo1-path") {
+		t.Error("repo1-path should not be set when repoPath is empty")
+	}
+}
+
 func TestConfigureGlobalOptions(t *testing.T) {
 	cfg := ini.Empty()
 	section := cfg.Section("global")

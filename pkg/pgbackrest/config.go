@@ -108,9 +108,6 @@ func generateBaseConfig(
 		}
 	}
 
-	// Repository path
-	global.Key("repo1-path").SetValue("/" + stanzaName)
-
 	// Spool path (used when archive-async is enabled)
 	global.Key("spool-path").SetValue(SpoolPath)
 
@@ -232,6 +229,9 @@ func applyOptionDefaults(opts *apiv1.PgBackRestOptions, cluster *apiv1.Cluster) 
 			opts.ProcessMax = &processMax
 		}
 	}
+	if opts.RepoPath == "" {
+		opts.RepoPath = cluster.Name
+	}
 }
 
 // configureOptions maps PgBackRestOptions fields to pgbackrest config sections.
@@ -248,6 +248,9 @@ func configureOptions(opts *apiv1.PgBackRestOptions, cfg *ini.File) {
 // configureGlobalOptions sets options in [global] that apply to all commands
 // or are safely ignored by commands that don't use them.
 func configureGlobalOptions(opts *apiv1.PgBackRestOptions, section *ini.Section) {
+	if opts.RepoPath != "" {
+		section.Key("repo1-path").SetValue("/" + opts.RepoPath)
+	}
 	if opts.CompressType != "" {
 		section.Key("compress-type").SetValue(opts.CompressType)
 	}

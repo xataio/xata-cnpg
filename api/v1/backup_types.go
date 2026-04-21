@@ -263,6 +263,13 @@ type PgBackRestOptions struct {
 	// Backup retention policy.
 	// +optional
 	Retention *PgBackRestRetention `json:"retention,omitempty"`
+	// RepoPath is the pgbackrest repo1-path — the prefix in the storage
+	// backend where backups and WAL archives are stored. When unset, it
+	// defaults to /<clusterName>. Configure this to isolate a new cluster
+	// incarnation from existing data under the default path, or to restore
+	// from a custom path.
+	// +optional
+	RepoPath string `json:"repoPath,omitempty"`
 	// TODO: add in future iterations:
 	// - encryption: cipherType, cipherPass
 	// - backup behavior: stopAuto, manifestSaveThreshold, resumeOff

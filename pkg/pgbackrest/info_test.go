@@ -239,6 +239,75 @@ func TestStanzaInfoRunningStatus(t *testing.T) {
 	}
 }
 
+func TestFindBackupByAnnotation(t *testing.T) {
+	tests := []struct {
+		name          string
+		backups       []BackupInfo
+		key           string
+		value         string
+		expectedLabel string
+	}{
+		{
+			"finds matching backup",
+			[]BackupInfo{
+				{Label: "20260414-131825F", Annotation: map[string]string{"backup-cr": "backup-1"}},
+				{Label: "20260414-132407D", Annotation: map[string]string{"backup-cr": "backup-2"}},
+			},
+			"backup-cr", "backup-2", "20260414-132407D",
+		},
+		{
+			"finds first backup",
+			[]BackupInfo{
+				{Label: "20260414-131825F", Annotation: map[string]string{"backup-cr": "backup-1"}},
+				{Label: "20260414-132407D", Annotation: map[string]string{"backup-cr": "backup-2"}},
+			},
+			"backup-cr", "backup-1", "20260414-131825F",
+		},
+		{
+			"not found",
+			[]BackupInfo{
+				{Label: "20260414-131825F", Annotation: map[string]string{"backup-cr": "backup-1"}},
+			},
+			"backup-cr", "nonexistent", "",
+		},
+		{
+			"wrong key",
+			[]BackupInfo{
+				{Label: "20260414-131825F", Annotation: map[string]string{"backup-cr": "backup-1"}},
+			},
+			"other-key", "backup-1", "",
+		},
+		{
+			"nil annotation map",
+			[]BackupInfo{
+				{Label: "20260414-131825F"},
+			},
+			"backup-cr", "backup-1", "",
+		},
+		{
+			"empty backup list",
+			[]BackupInfo{},
+			"backup-cr", "backup-1", "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stanza := StanzaInfo{Backup: tt.backups}
+			found := stanza.FindBackupByAnnotation(tt.key, tt.value)
+			if tt.expectedLabel == "" {
+				if found != nil {
+					t.Errorf("expected nil, got %s", found.Label)
+				}
+			} else {
+				if found == nil || found.Label != tt.expectedLabel {
+					t.Errorf("expected %s, got %v", tt.expectedLabel, found)
+				}
+			}
+		})
+	}
+}
+
 func TestBackupInfoSize(t *testing.T) {
 	var stanzas []StanzaInfo
 	if err := json.Unmarshal([]byte(sampleInfoJSON), &stanzas); err != nil {

@@ -63,7 +63,8 @@ type BackupInfo struct {
 			Delta int64 `json:"delta"`
 		} `json:"repository"`
 	} `json:"info"`
-	Error bool `json:"error"`
+	Error      bool              `json:"error"`
+	Annotation map[string]string `json:"annotation,omitempty"`
 }
 
 // LatestBackup returns the last backup in the list, or nil if empty.
@@ -72,6 +73,17 @@ func (s *StanzaInfo) LatestBackup() *BackupInfo {
 		return nil
 	}
 	return &s.Backup[len(s.Backup)-1]
+}
+
+// FindBackupByAnnotation returns the backup matching the given annotation
+// key=value pair, or nil if not found.
+func (s *StanzaInfo) FindBackupByAnnotation(key, value string) *BackupInfo {
+	for i := range s.Backup {
+		if s.Backup[i].Annotation[key] == value {
+			return &s.Backup[i]
+		}
+	}
+	return nil
 }
 
 // Info runs pgbackrest info and returns the parsed stanza info.

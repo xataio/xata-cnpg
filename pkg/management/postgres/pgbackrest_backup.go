@@ -22,6 +22,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
@@ -34,6 +35,10 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/resources"
 	"github.com/xataio/xata-cnpg/pkg/resources/status"
 )
+
+// progressRegex extracts the progress percentage from pgbackrest info status message
+// e.g. "ok (backup/expire running - 56.73% complete)" -> "56.73%"
+var progressRegex = regexp.MustCompile(`(\d+\.\d+)% complete`)
 
 // PgBackRestBackupCommand represents a pgbackrest backup being executed.
 type PgBackRestBackupCommand struct {
@@ -118,7 +123,17 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 		backupType = apiv1.PgBackRestBackupTypeFull
 	}
 
-	if err := pgbackrest.Backup(ctx, b.Cluster.Name, string(backupType)); err != nil {
+	// Annotate the backup with our CR name so we can find it later
+	annotation := fmt.Sprintf("backup-cr=%s", b.Backup.Name)
+
+	// Start a progress ticker that polls pgbackrest info during the backup
+	progressCtx, stopProgress := context.WithCancel(ctx)
+	go b.pollProgress(progressCtx)
+
+	err := pgbackrest.Backup(ctx, b.Cluster.Name, string(backupType), annotation)
+	stopProgress()
+
+	if err != nil {
 		b.Log.Error(err, "Backup failed")
 		b.Recorder.Event(b.Backup, "Normal", "Failed", "Backup failed")
 		_ = status.FlagBackupAsFailed(ctx, b.Client, b.Backup, b.Cluster, err)
@@ -127,29 +142,8 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 
 	b.Log.Info("Backup completed, fetching backup info")
 
-	// Fetch backup details from pgbackrest info
-	stanza, err := pgbackrest.Info(ctx, b.Cluster.Name)
-	if err != nil {
-		b.Log.Error(err, "Failed to get pgbackrest info after backup")
-	} else {
-		if latest := stanza.LatestBackup(); latest != nil {
-			b.Backup.Status.BackupID = latest.Label
-			b.Backup.Status.BackupName = latest.Label
-			b.Backup.Status.BeginWal = latest.Archive.Start
-			b.Backup.Status.EndWal = latest.Archive.Stop
-			b.Backup.Status.BeginLSN = latest.LSN.Start
-			b.Backup.Status.EndLSN = latest.LSN.Stop
-			b.Backup.Status.StartedAt = &metav1.Time{Time: time.Unix(latest.Timestamp.Start, 0)}
-			b.Backup.Status.StoppedAt = &metav1.Time{Time: time.Unix(latest.Timestamp.Stop, 0)}
-			b.Log.Info("Backup info populated",
-				"backupID", latest.Label,
-				"beginWal", latest.Archive.Start,
-				"endWal", latest.Archive.Stop,
-				"beginLSN", latest.LSN.Start,
-				"endLSN", latest.LSN.Stop,
-			)
-		}
-	}
+	// Fetch backup details using annotation to find the exact backup
+	b.populateBackupDetails(ctx)
 
 	b.Recorder.Event(b.Backup, "Normal", "Completed", "Backup completed")
 
@@ -164,6 +158,88 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	}); err != nil {
 		b.Log.Error(err, "Can't update the cluster with the completed backup data")
 	}
+}
+
+// pollProgress periodically checks pgbackrest info for backup progress
+// and patches the Backup CR status. Runs until ctx is cancelled.
+func (b *PgBackRestBackupCommand) pollProgress(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			stanza, err := pgbackrest.Info(ctx, b.Cluster.Name)
+			if err != nil {
+				b.Log.Debug("Progress poll: pgbackrest info failed", "err", err)
+				continue
+			}
+
+			matches := progressRegex.FindStringSubmatch(stanza.Status.Message)
+			if len(matches) >= 2 {
+				progress := matches[1] + "%"
+				b.Log.Info("Backup progress", "progress", progress)
+				b.Backup.Status.Progress = progress
+				if err := PatchBackupStatusAndRetry(ctx, b.Client, b.Backup); err != nil {
+					b.Log.Debug("Failed to patch backup progress", "err", err)
+				}
+			}
+		}
+	}
+}
+
+// populateBackupDetails fetches backup details from pgbackrest info,
+// matching by the backup-cr annotation. Retries up to 3 times on failure.
+// Falls back to the latest backup if annotation matching fails.
+func (b *PgBackRestBackupCommand) populateBackupDetails(ctx context.Context) {
+	var stanza *pgbackrest.StanzaInfo
+	var err error
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		stanza, err = pgbackrest.Info(ctx, b.Cluster.Name)
+		if err == nil {
+			break
+		}
+		b.Log.Warning("Failed to get pgbackrest info, retrying",
+			"attempt", attempt, "err", err)
+		time.Sleep(time.Duration(attempt) * 2 * time.Second)
+	}
+
+	if err != nil {
+		b.Log.Error(err, "Failed to get pgbackrest info after retries, backup status will be incomplete")
+		return
+	}
+
+	// Find the backup by annotation, fall back to latest
+	backup := stanza.FindBackupByAnnotation("backup-cr", b.Backup.Name)
+	if backup == nil {
+		b.Log.Warning("Backup not found by annotation, falling back to latest")
+		backup = stanza.LatestBackup()
+	}
+
+	if backup == nil {
+		b.Log.Warning("No backup found in pgbackrest info")
+		return
+	}
+
+	b.Backup.Status.BackupID = backup.Label
+	b.Backup.Status.BackupName = backup.Label
+	b.Backup.Status.BeginWal = backup.Archive.Start
+	b.Backup.Status.EndWal = backup.Archive.Stop
+	b.Backup.Status.BeginLSN = backup.LSN.Start
+	b.Backup.Status.EndLSN = backup.LSN.Stop
+	b.Backup.Status.StartedAt = &metav1.Time{Time: time.Unix(backup.Timestamp.Start, 0)}
+	b.Backup.Status.StoppedAt = &metav1.Time{Time: time.Unix(backup.Timestamp.Stop, 0)}
+
+	b.Log.Info("Backup details populated",
+		"backupID", backup.Label,
+		"beginWal", backup.Archive.Start,
+		"endWal", backup.Archive.Stop,
+		"beginLSN", backup.LSN.Start,
+		"endLSN", backup.LSN.Stop,
+	)
 }
 
 func (b *PgBackRestBackupCommand) retryWithRefreshedCluster(

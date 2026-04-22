@@ -205,7 +205,8 @@ func TestLatestBackup(t *testing.T) {
 
 	latest := stanzas[0].LatestBackup()
 	if latest == nil {
-		t.Fatal("expected latest backup, got nil")
+		t.Error("expected latest backup, got nil")
+		return
 	}
 	if latest.Type != "diff" {
 		t.Errorf("expected latest backup to be diff, got %s", latest.Type)

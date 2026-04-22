@@ -344,6 +344,11 @@ spec:
                   type: string
                 description: A map containing the plugin metadata
                 type: object
+              progress:
+                description: |-
+                  Progress of the backup, reported during execution
+                  (e.g. "56.73% complete")
+                type: string
               s3Credentials:
                 description: The credentials to use to upload data to S3
                 properties:

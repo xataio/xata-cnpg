@@ -89,36 +89,52 @@ const sampleInfoJSON = `[
 const sampleInfoRunningJSON = `[
   {
     "name": "test-cluster",
+    "backup": [],
+    "status": {
+      "code": 2,
+      "message": "no valid backups",
+      "lock": {
+        "backup": {
+          "held": true,
+          "size": 109792819251,
+          "size-cplt": 75161927680
+        },
+        "restore": {
+          "held": false
+        }
+      }
+    }
+  }
+]`
+
+const sampleInfoRunningWithBackupsJSON = `[
+  {
+    "name": "test-cluster",
     "backup": [
       {
-        "label": "20260325-191631F",
+        "label": "20260423-085834F",
         "type": "full",
-        "archive": {
-          "start": "000000010000003400000076",
-          "stop": "000000010000003400000078"
-        },
-        "lsn": {
-          "start": "34/76000028",
-          "stop": "34/78000080"
-        },
-        "timestamp": {
-          "start": 1742929591,
-          "stop": 1742931337
-        },
-        "info": {
-          "size": 274463129600,
-          "delta": 274463129600,
-          "repository": {
-            "size": 30064771072,
-            "delta": 30064771072
-          }
-        },
-        "error": false
+        "archive": {"start": "0000000100000014000000FC", "stop": "0000000100000014000000FD"},
+        "lsn": {"start": "14/FC000028", "stop": "14/FD000050"},
+        "timestamp": {"start": 1776934714, "stop": 1776935470},
+        "info": {"size": 109792819513, "delta": 109792819513, "repository": {"size": 12035911988, "delta": 12035911988}},
+        "error": false,
+        "annotation": {"backup-cr": "perf-full-5vscm"}
       }
     ],
     "status": {
       "code": 0,
-      "message": "ok (backup/expire running - 56.73% complete)"
+      "message": "ok",
+      "lock": {
+        "backup": {
+          "held": true,
+          "size": 109792819251,
+          "size-cplt": 50000000000
+        },
+        "restore": {
+          "held": false
+        }
+      }
     }
   }
 ]`
@@ -229,14 +245,51 @@ func TestLatestBackup_Empty(t *testing.T) {
 }
 
 func TestStanzaInfoRunningStatus(t *testing.T) {
-	var stanzas []StanzaInfo
-	if err := json.Unmarshal([]byte(sampleInfoRunningJSON), &stanzas); err != nil {
-		t.Fatalf("failed to parse: %v", err)
+	tests := []struct {
+		name       string
+		json       string
+		expectCode int
+		expectHeld bool
+		expectSize int64
+		expectCplt int64
+	}{
+		{
+			"first backup - no valid backups",
+			sampleInfoRunningJSON,
+			2, true, 109792819251, 75161927680,
+		},
+		{
+			"subsequent backup - ok status",
+			sampleInfoRunningWithBackupsJSON,
+			0, true, 109792819251, 50000000000,
+		},
 	}
 
-	stanza := stanzas[0]
-	if stanza.Status.Message != "ok (backup/expire running - 56.73% complete)" {
-		t.Errorf("unexpected status message: %s", stanza.Status.Message)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stanzas []StanzaInfo
+			if err := json.Unmarshal([]byte(tt.json), &stanzas); err != nil {
+				t.Fatalf("failed to parse: %v", err)
+			}
+
+			stanza := stanzas[0]
+			if stanza.Status.Code != tt.expectCode {
+				t.Errorf("expected status code %d, got %d", tt.expectCode, stanza.Status.Code)
+			}
+			if stanza.Status.Lock == nil {
+				t.Error("expected lock info, got nil")
+				return
+			}
+			if stanza.Status.Lock.Backup.Held != tt.expectHeld {
+				t.Errorf("expected backup held %v, got %v", tt.expectHeld, stanza.Status.Lock.Backup.Held)
+			}
+			if stanza.Status.Lock.Backup.Size != tt.expectSize {
+				t.Errorf("expected size %d, got %d", tt.expectSize, stanza.Status.Lock.Backup.Size)
+			}
+			if stanza.Status.Lock.Backup.SizeCplt != tt.expectCplt {
+				t.Errorf("expected size-cplt %d, got %d", tt.expectCplt, stanza.Status.Lock.Backup.SizeCplt)
+			}
+		})
 	}
 }
 

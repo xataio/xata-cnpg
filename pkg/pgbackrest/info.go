@@ -36,6 +36,13 @@ type StanzaInfo struct {
 	Status struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
+		Lock    *struct {
+			Backup struct {
+				Held     bool  `json:"held"`
+				Size     int64 `json:"size"`
+				SizeCplt int64 `json:"size-cplt"`
+			} `json:"backup"`
+		} `json:"lock,omitempty"`
 	} `json:"status"`
 }
 

@@ -22,7 +22,6 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
@@ -35,10 +34,6 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/resources"
 	"github.com/xataio/xata-cnpg/pkg/resources/status"
 )
-
-// progressRegex extracts the progress percentage from pgbackrest info status message
-// e.g. "ok (backup/expire running - 56.73% complete)" -> "56.73%"
-var progressRegex = regexp.MustCompile(`(\d+\.\d+)% complete`)
 
 // PgBackRestBackupCommand represents a pgbackrest backup being executed.
 type PgBackRestBackupCommand struct {
@@ -173,17 +168,18 @@ func (b *PgBackRestBackupCommand) pollProgress(ctx context.Context) {
 		case <-ticker.C:
 			stanza, err := pgbackrest.Info(ctx, b.Cluster.Name)
 			if err != nil {
-				b.Log.Debug("Progress poll: pgbackrest info failed", "err", err)
+				b.Log.Info("Progress poll: pgbackrest info failed", "err", err)
 				continue
 			}
 
-			matches := progressRegex.FindStringSubmatch(stanza.Status.Message)
-			if len(matches) >= 2 {
-				progress := matches[1] + "%"
+			lock := stanza.Status.Lock
+			if lock != nil && lock.Backup.Held && lock.Backup.Size > 0 {
+				pct := float64(lock.Backup.SizeCplt) / float64(lock.Backup.Size) * 100
+				progress := fmt.Sprintf("%.2f%%", pct)
 				b.Log.Info("Backup progress", "progress", progress)
 				b.Backup.Status.Progress = progress
 				if err := PatchBackupStatusAndRetry(ctx, b.Client, b.Backup); err != nil {
-					b.Log.Debug("Failed to patch backup progress", "err", err)
+					b.Log.Info("Failed to patch backup progress", "err", err)
 				}
 			}
 		}

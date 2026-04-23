@@ -117,7 +117,10 @@ const sampleInfoRunningWithBackupsJSON = `[
         "archive": {"start": "0000000100000014000000FC", "stop": "0000000100000014000000FD"},
         "lsn": {"start": "14/FC000028", "stop": "14/FD000050"},
         "timestamp": {"start": 1776934714, "stop": 1776935470},
-        "info": {"size": 109792819513, "delta": 109792819513, "repository": {"size": 12035911988, "delta": 12035911988}},
+        "info": {
+          "size": 109792819513, "delta": 109792819513,
+          "repository": {"size": 12035911988, "delta": 12035911988}
+        },
         "error": false,
         "annotation": {"backup-cr": "perf-full-5vscm"}
       }

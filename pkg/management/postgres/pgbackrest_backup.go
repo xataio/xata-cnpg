@@ -142,6 +142,7 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 
 	b.Recorder.Event(b.Backup, "Normal", "Completed", "Backup completed")
 
+	b.Backup.Status.Progress = "100%"
 	b.Backup.Status.SetAsCompleted()
 
 	if err := PatchBackupStatusAndRetry(ctx, b.Client, b.Backup); err != nil {

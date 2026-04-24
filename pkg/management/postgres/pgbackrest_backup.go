@@ -205,7 +205,9 @@ func (b *PgBackRestBackupCommand) populateBackupDetails(ctx context.Context) {
 	}
 
 	if err != nil {
-		b.Log.Error(err, "Failed to get pgbackrest info after retries, backup status will be incomplete")
+		b.Log.Error(err, fmt.Sprintf("BACKUP_STATUS_INCOMPLETE: pgbackrest info failed after retries. "+
+			"The backup data is in S3 with annotation backup-cr=%s belonging to cluster %s",
+			b.Backup.Name, b.Cluster.Name))
 		return
 	}
 

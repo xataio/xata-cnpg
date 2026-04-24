@@ -180,7 +180,26 @@ func internalRun(
 	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
 		walPath := filepath.Join(pgData, walName)
 		contextLog.Info("Archiving WAL via pgbackrest", "walName", walName, "walPath", walPath)
-		return pgbackrest.ArchivePush(ctx, cluster.Name, walPath)
+
+		err := pgbackrest.ArchivePush(ctx, cluster.Name, walPath)
+		if err == nil {
+			return nil
+		}
+
+		// If the stanza metadata (archive.info) was deleted from the repository,
+		// attempt to recreate it. This only succeeds when the S3 path is fully
+		// clean — if partial data remains, stanza-create will fail and the error
+		// is returned for manual intervention.
+		if pgbackrest.IsStanzaMissingFromRepo(err) {
+			contextLog.Warning("Stanza metadata missing from repository, recreating. " +
+				"Previous backups may be unavailable — a new full backup is recommended")
+			if stanzaErr := pgbackrest.StanzaCreate(ctx, cluster.Name); stanzaErr != nil {
+				return fmt.Errorf("failed to recreate stanza after metadata loss: %w", stanzaErr)
+			}
+			return pgbackrest.ArchivePush(ctx, cluster.Name, walPath)
+		}
+
+		return err
 	}
 
 	// Request Barman Cloud to archive this WAL

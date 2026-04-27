@@ -176,6 +176,9 @@ func TestStanzaInfoParsing(t *testing.T) {
 	if len(stanza.Backup) != 2 {
 		t.Fatalf("expected 2 backups, got %d", len(stanza.Backup))
 	}
+	if stanza.Status.Lock != nil {
+		t.Error("expected Lock to be nil when not present in JSON")
+	}
 }
 
 func TestBackupInfoParsing(t *testing.T) {

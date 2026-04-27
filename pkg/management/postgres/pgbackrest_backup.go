@@ -22,6 +22,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
@@ -35,6 +36,10 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/resources/status"
 )
 
+// AnnotationKeyBackupCR is the pgbackrest annotation key used to link a
+// backup in the repository to the Kubernetes Backup CR that triggered it.
+const AnnotationKeyBackupCR = "backup-cr"
+
 // PgBackRestBackupCommand represents a pgbackrest backup being executed.
 type PgBackRestBackupCommand struct {
 	Cluster  *apiv1.Cluster
@@ -43,6 +48,10 @@ type PgBackRestBackupCommand struct {
 	Recorder record.EventRecorder
 	Log      log.Logger
 	Instance *Instance
+
+	// statusMu protects writes to Backup.Status from concurrent goroutines
+	// (progress ticker and main backup goroutine).
+	statusMu sync.Mutex
 }
 
 // NewPgBackRestBackupCommand initializes a PgBackRestBackupCommand.
@@ -119,7 +128,7 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	}
 
 	// Annotate the backup with our CR name so we can find it later
-	annotation := fmt.Sprintf("backup-cr=%s", b.Backup.Name)
+	annotation := fmt.Sprintf("%s=%s", AnnotationKeyBackupCR, b.Backup.Name)
 
 	// Start a progress ticker that polls pgbackrest info during the backup
 	progressCtx, stopProgress := context.WithCancel(ctx)
@@ -142,8 +151,10 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 
 	b.Recorder.Event(b.Backup, "Normal", "Completed", "Backup completed")
 
+	b.statusMu.Lock()
 	b.Backup.Status.Progress = "100%"
 	b.Backup.Status.SetAsCompleted()
+	b.statusMu.Unlock()
 
 	if err := PatchBackupStatusAndRetry(ctx, b.Client, b.Backup); err != nil {
 		b.Log.Error(err, "Can't set backup status as completed")
@@ -178,10 +189,13 @@ func (b *PgBackRestBackupCommand) pollProgress(ctx context.Context) {
 				pct := float64(lock.Backup.SizeCplt) / float64(lock.Backup.Size) * 100
 				progress := fmt.Sprintf("%.2f%%", pct)
 				b.Log.Info("Backup progress", "progress", progress)
+
+				b.statusMu.Lock()
 				b.Backup.Status.Progress = progress
 				if err := PatchBackupStatusAndRetry(ctx, b.Client, b.Backup); err != nil {
 					b.Log.Info("Failed to patch backup progress", "err", err)
 				}
+				b.statusMu.Unlock()
 			}
 		}
 	}
@@ -206,13 +220,14 @@ func (b *PgBackRestBackupCommand) populateBackupDetails(ctx context.Context) {
 
 	if err != nil {
 		b.Log.Error(err, fmt.Sprintf("BACKUP_STATUS_INCOMPLETE: pgbackrest info failed after retries. "+
-			"The backup data is in S3 with annotation backup-cr=%s belonging to cluster %s",
+			"The backup data is in S3 with annotation %s=%s belonging to cluster %s",
+			AnnotationKeyBackupCR,
 			b.Backup.Name, b.Cluster.Name))
 		return
 	}
 
 	// Find the backup by annotation, fall back to latest
-	backup := stanza.FindBackupByAnnotation("backup-cr", b.Backup.Name)
+	backup := stanza.FindBackupByAnnotation(AnnotationKeyBackupCR, b.Backup.Name)
 	if backup == nil {
 		b.Log.Warning("Backup not found by annotation, falling back to latest")
 		backup = stanza.LatestBackup()
@@ -223,6 +238,7 @@ func (b *PgBackRestBackupCommand) populateBackupDetails(ctx context.Context) {
 		return
 	}
 
+	b.statusMu.Lock()
 	b.Backup.Status.BackupID = backup.Label
 	b.Backup.Status.BackupName = backup.Label
 	b.Backup.Status.BeginWal = backup.Archive.Start
@@ -231,6 +247,7 @@ func (b *PgBackRestBackupCommand) populateBackupDetails(ctx context.Context) {
 	b.Backup.Status.EndLSN = backup.LSN.Stop
 	b.Backup.Status.StartedAt = &metav1.Time{Time: time.Unix(backup.Timestamp.Start, 0)}
 	b.Backup.Status.StoppedAt = &metav1.Time{Time: time.Unix(backup.Timestamp.Stop, 0)}
+	b.statusMu.Unlock()
 
 	b.Log.Info("Backup details populated",
 		"backupID", backup.Label,

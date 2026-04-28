@@ -49,6 +49,8 @@ type clusterClientImpl struct {
 }
 
 func (c *clusterClientImpl) RecordWALArchive(ctx context.Context, walName string, modTime string) error {
+	contextLogger := log.FromContext(ctx).WithValues("endpoint", url.PathWALArchiveRecord)
+
 	record := webserver.WALArchiveRecord{
 		WALName: walName,
 		ModTime: modTime,
@@ -67,7 +69,11 @@ func (c *clusterClientImpl) RecordWALArchive(ctx context.Context, walName string
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if errClose := resp.Body.Close(); errClose != nil {
+			contextLogger.Error(errClose, "while closing response body")
+		}
+	}()
 
 	return nil
 }

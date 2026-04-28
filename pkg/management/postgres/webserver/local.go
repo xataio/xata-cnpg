@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -62,6 +63,7 @@ func NewLocalWebServer(
 	serveMux.HandleFunc(url.PathCache, endpoints.serveCache)
 	serveMux.HandleFunc(url.PathPgBackup, endpoints.requestBackup)
 	serveMux.HandleFunc(url.PathWALArchiveStatusCondition, endpoints.setWALArchiveStatusCondition)
+	serveMux.HandleFunc(url.PathWALArchiveRecord, endpoints.recordWALArchive)
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf("localhost:%d", url.LocalPort),
@@ -284,6 +286,12 @@ type ArchiveStatusRequest struct {
 	Error string `json:"error,omitempty"`
 }
 
+// WALArchiveRecord is the request body for recording a WAL archive timestamp.
+type WALArchiveRecord struct {
+	WALName string `json:"walName"`
+	ModTime string `json:"modTime"`
+}
+
 func (asr *ArchiveStatusRequest) getContinuousArchivingCondition() metav1.Condition {
 	if asr.Error != "" {
 		return metav1.Condition{
@@ -335,6 +343,26 @@ func (ws *localWebserverEndpoints) setWALArchiveStatusCondition(w http.ResponseW
 			fmt.Sprintf("error while updating wal archiving condition: %v", errCond.Error()),
 			http.StatusInternalServerError)
 		return
+	}
+
+	_, _ = fmt.Fprint(w, "OK")
+}
+
+func (ws *localWebserverEndpoints) recordWALArchive(w http.ResponseWriter, r *http.Request) {
+	var record WALArchiveRecord
+	if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
+		http.Error(w, fmt.Sprintf("error decoding request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	modTime, err := time.Parse(time.RFC3339Nano, record.ModTime)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error parsing modTime: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if ws.instance.WALCache != nil {
+		ws.instance.WALCache.Record(record.WALName, modTime)
 	}
 
 	_, _ = fmt.Fprint(w, "OK")

@@ -359,6 +359,16 @@ func (r *InstanceReconciler) Reconcile(
 		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
+	// Update the last recoverability point from the WAL archiver on the primary.
+	// Requeue every 5 minutes to keep this field current.
+	if r.instance.GetPodName() == cluster.Status.CurrentPrimary &&
+		cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		if err := r.updateLastRecoverabilityPoint(ctx, cluster); err != nil {
+			contextLogger.Error(err, "while updating last recoverability point")
+		}
+		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+	}
+
 	return reconcile.Result{}, nil
 }
 
@@ -1059,6 +1069,38 @@ func (r *InstanceReconciler) reconcileCheckWalArchiveFile(cluster *apiv1.Cluster
 	}
 
 	return nil
+}
+
+// updateLastRecoverabilityPoint determines the latest safe PITR timestamp
+// by correlating the last WAL confirmed in S3 (from pgbackrest info) with
+// the WAL file modification times recorded by the archiver.
+//
+// We use the "one WAL before" strategy: if archive.max is WAL_N, we advertise
+// the timestamp of WAL_N-1. This is safe because WAL_N is in S3 and acts as
+// a buffer — PostgreSQL can always replay into it to reach the target time.
+func (r *InstanceReconciler) updateLastRecoverabilityPoint(ctx context.Context, cluster *apiv1.Cluster) error {
+	stanza, err := pgbackrest.Info(ctx, cluster.Name)
+	if err != nil {
+		return fmt.Errorf("getting pgbackrest info: %w", err)
+	}
+
+	archiveMax := stanza.ArchiveMax()
+	if archiveMax == "" {
+		return nil
+	}
+
+	walTime, ok := r.instance.WALCache.GetTimeBefore(archiveMax)
+	if !ok {
+		return nil
+	}
+
+	formattedTime := walTime.UTC().Format(time.RFC3339)
+	if cluster.Status.LastRecoverabilityPoint == formattedTime {
+		return nil
+	}
+
+	cluster.Status.LastRecoverabilityPoint = formattedTime
+	return r.client.Status().Update(ctx, cluster)
 }
 
 // reconcilePgBackRestConfig generates and writes the pgbackrest configuration

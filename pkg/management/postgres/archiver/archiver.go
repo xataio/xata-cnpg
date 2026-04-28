@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path"
 	"path/filepath"
 	"time"
@@ -180,7 +181,31 @@ func internalRun(
 	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
 		walPath := filepath.Join(pgData, walName)
 		contextLog.Info("Archiving WAL via pgbackrest", "walName", walName, "walPath", walPath)
-		return pgbackrest.ArchivePush(ctx, cluster.Name, walPath)
+
+		// Get the WAL file's modification time before archiving — this approximates
+		// the timestamp of the last transaction in the WAL.
+		var walModTime time.Time
+		if stat, err := os.Stat(walPath); err == nil {
+			walModTime = stat.ModTime()
+		}
+
+		if err := pgbackrest.ArchivePush(ctx, cluster.Name, walPath); err != nil {
+			return err
+		}
+
+		// Record the WAL name and its file modification time in the instance
+		// manager's in-memory cache for PITR window calculation.
+		if !walModTime.IsZero() {
+			walBaseName := filepath.Base(walName)
+			localClient := local.NewClient()
+			if err := localClient.Cluster().RecordWALArchive(
+				ctx, walBaseName, walModTime.Format(time.RFC3339Nano),
+			); err != nil {
+				contextLog.Debug("Failed to record WAL archive timestamp", "err", err)
+			}
+		}
+
+		return nil
 	}
 
 	// Request Barman Cloud to archive this WAL

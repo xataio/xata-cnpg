@@ -37,11 +37,39 @@ type ClusterClient interface {
 	// An empty errMessage means that the archive process was successful.
 	// Returns any error encountered during the request.
 	SetWALArchiveStatusCondition(ctx context.Context, errMessage string) error
+
+	// RecordWALArchive sends a WAL archive timestamp to the instance manager's
+	// in-memory cache for PITR window calculation.
+	RecordWALArchive(ctx context.Context, walName string, modTime string) error
 }
 
 // clusterClientImpl a client to interact with the uncategorized endpoints
 type clusterClientImpl struct {
 	cli *http.Client
+}
+
+func (c *clusterClientImpl) RecordWALArchive(ctx context.Context, walName string, modTime string) error {
+	record := webserver.WALArchiveRecord{
+		WALName: walName,
+		ModTime: modTime,
+	}
+
+	encoded, err := json.Marshal(&record)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(
+		url.Local(url.PathWALArchiveRecord, url.LocalPort),
+		"application/json",
+		bytes.NewBuffer(encoded),
+	)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
 }
 
 func (c *clusterClientImpl) SetWALArchiveStatusCondition(ctx context.Context, errMessage string) error {

@@ -79,12 +79,6 @@ const sampleInfoJSON = `[
         "error": false
       }
     ],
-    "archive": [
-      {
-        "max": "0000000100000035000000EE",
-        "min": "000000010000003400000076"
-      }
-    ],
     "status": {
       "code": 0,
       "message": "ok"
@@ -257,31 +251,5 @@ func TestBackupInfoSize(t *testing.T) {
 	}
 	if full.Info.Repository.Size != 30064771072 {
 		t.Errorf("unexpected repo size: %d", full.Info.Repository.Size)
-	}
-}
-
-func TestArchiveMax(t *testing.T) {
-	tests := []struct {
-		name     string
-		json     string
-		expected string
-	}{
-		{"with archive data", sampleInfoJSON, "0000000100000035000000EE"},
-		{"empty backup list", sampleInfoEmptyJSON, ""},
-		{"running backup", sampleInfoRunningJSON, ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var stanzas []StanzaInfo
-			if err := json.Unmarshal([]byte(tt.json), &stanzas); err != nil {
-				t.Fatalf("failed to parse: %v", err)
-			}
-
-			got := stanzas[0].ArchiveMax()
-			if got != tt.expected {
-				t.Errorf("expected %s, got %s", tt.expected, got)
-			}
-		})
 	}
 }

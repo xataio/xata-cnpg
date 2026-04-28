@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/xataio/xata-cnpg/internal/management/cache"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 	"github.com/xataio/xata-cnpg/pkg/management/url"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/resources/status"
 )
 
@@ -45,6 +47,10 @@ type localWebserverEndpoints struct {
 	typedClient   client.Client
 	instance      *postgres.Instance
 	eventRecorder record.EventRecorder
+
+	// lastPITRUpdate tracks when we last updated LastRecoverabilityPoint
+	// on the cluster status. Used to throttle updates to every 5 minutes.
+	lastPITRUpdate time.Time
 }
 
 // NewLocalWebServer returns a webserver that allows connection only from localhost
@@ -355,6 +361,11 @@ func (ws *localWebserverEndpoints) recordWALArchive(w http.ResponseWriter, r *ht
 		return
 	}
 
+	if record.WALName == "" {
+		http.Error(w, "walName is required", http.StatusBadRequest)
+		return
+	}
+
 	modTime, err := time.Parse(time.RFC3339Nano, record.ModTime)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("error parsing modTime: %v", err), http.StatusBadRequest)
@@ -365,5 +376,58 @@ func (ws *localWebserverEndpoints) recordWALArchive(w http.ResponseWriter, r *ht
 		ws.instance.WALCache.Record(record.WALName, modTime)
 	}
 
+	// Throttled PITR update: update LastRecoverabilityPoint at most every 5 minutes.
+	// We check if the previous WAL (WAL_N-1) has been confirmed in S3 by looking
+	// for its .ok status file in the spool directory. If confirmed, we use
+	// WAL_N-1's file modification time as the safe PITR timestamp.
+	// 5 minutes = archive_timeout default. If archive_timeout changes, this should too.
+	if time.Since(ws.lastPITRUpdate) >= 5*time.Minute && ws.instance.WALCache != nil {
+		ws.updateLastRecoverabilityPoint(r.Context(), record.WALName)
+	}
+
 	_, _ = fmt.Fprint(w, "OK")
+}
+
+// updateLastRecoverabilityPoint checks if the previous WAL has been uploaded
+// to S3 by looking for its .ok status file in the pgbackrest spool directory.
+// If confirmed, it uses the previous WAL's file modification time (from the
+// cache) as the LastRecoverabilityPoint.
+func (ws *localWebserverEndpoints) updateLastRecoverabilityPoint(ctx context.Context, currentWAL string) {
+	contextLogger := log.FromContext(ctx)
+
+	cache := ws.instance.WALCache
+	prevWAL, ok := cache.GetEntryBefore(currentWAL)
+	if !ok {
+		return
+	}
+
+	// Check if the previous WAL has been confirmed in S3 via its .ok status file
+	stanza := ws.instance.GetClusterName()
+	okFile := fmt.Sprintf("%s/%s/archive-push-async/out/%s.ok",
+		pgbackrest.SpoolPath, stanza, prevWAL.WALName)
+
+	if _, err := os.Stat(okFile); err != nil {
+		return
+	}
+
+	formattedTime := prevWAL.ModTime.UTC().Format(time.RFC3339)
+
+	cluster, err := ws.getCluster(ctx)
+	if err != nil {
+		contextLogger.Info("PITR update: failed to get cluster", "err", err)
+		return
+	}
+
+	if cluster.Status.LastRecoverabilityPoint == formattedTime {
+		ws.lastPITRUpdate = time.Now()
+		return
+	}
+
+	cluster.Status.LastRecoverabilityPoint = formattedTime
+	if err := ws.typedClient.Status().Update(ctx, cluster); err != nil {
+		contextLogger.Info("PITR update: failed to update cluster status", "err", err)
+		return
+	}
+
+	ws.lastPITRUpdate = time.Now()
 }

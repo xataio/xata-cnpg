@@ -31,25 +31,12 @@ import (
 
 // StanzaInfo represents a stanza in pgbackrest info JSON output.
 type StanzaInfo struct {
-	Name    string       `json:"name"`
-	Backup  []BackupInfo `json:"backup"`
-	Archive []struct {
-		Max string `json:"max"`
-		Min string `json:"min"`
-	} `json:"archive"`
+	Name   string       `json:"name"`
+	Backup []BackupInfo `json:"backup"`
 	Status struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 	} `json:"status"`
-}
-
-// ArchiveMax returns the last WAL segment name confirmed in the repository,
-// or empty string if no archives exist.
-func (s *StanzaInfo) ArchiveMax() string {
-	if len(s.Archive) == 0 {
-		return ""
-	}
-	return s.Archive[0].Max
 }
 
 // BackupInfo represents a single backup in pgbackrest info JSON output.

@@ -26,8 +26,8 @@ import (
 
 // WALCacheEntry records the file modification time of an archived WAL.
 type WALCacheEntry struct {
-	WALName string    `json:"wal"`
-	ModTime time.Time `json:"time"`
+	WALName string
+	ModTime time.Time
 }
 
 // WALCache tracks recently archived WAL files and their modification times.
@@ -66,16 +66,27 @@ func (c *WALCache) Record(walName string, modTime time.Time) {
 // is safe to advertise as a PITR target, because the given WAL (which is
 // in S3) acts as a safety buffer.
 func (c *WALCache) GetTimeBefore(walName string) (time.Time, bool) {
+	entry, ok := c.GetEntryBefore(walName)
+	if !ok {
+		return time.Time{}, false
+	}
+	return entry.ModTime, true
+}
+
+// GetEntryBefore returns the WAL cache entry immediately before the given
+// WAL name. Returns the full entry (name + modTime) so callers can use
+// the WAL name for further checks (e.g. spool .ok file lookup).
+func (c *WALCache) GetEntryBefore(walName string) (WALCacheEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for i, entry := range c.entries {
 		if entry.WALName == walName && i > 0 {
-			return c.entries[i-1].ModTime, true
+			return c.entries[i-1], true
 		}
 	}
 
-	return time.Time{}, false
+	return WALCacheEntry{}, false
 }
 
 // trim removes entries older than maxAge.

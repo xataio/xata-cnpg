@@ -575,6 +575,22 @@ func createMonitoringTx(conn *sql.DB) (*sql.Tx, error) {
 
 	// Set the pg_monitor role
 	_, err = tx.Exec("SET ROLE TO pg_monitor")
+	if err != nil {
+		return nil, err
+	}
+
+	// Pin search_path to pg_catalog so unqualified relation/function references
+	// in metric bodies cannot be hijacked by a non-superuser who owns `public`
+	// and has tilted the database-level search_path. See F-9.
+	_, err = tx.Exec("SET search_path = pg_catalog")
+	if err != nil {
+		return nil, err
+	}
+
+	// Demote session_user as well as current_user, so that a stray RESET ROLE
+	// inside a metric body cannot escalate back to the connection's
+	// authenticated superuser. Tx-scoped via SET LOCAL.
+	_, err = tx.Exec("SET LOCAL session_authorization TO pg_monitor")
 
 	return tx, err
 }

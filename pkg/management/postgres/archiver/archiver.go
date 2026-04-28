@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"path"
 	"path/filepath"
 	"time"
@@ -182,13 +181,15 @@ func internalRun(
 		walPath := filepath.Join(pgData, walName)
 		contextLog.Info("Archiving WAL via pgbackrest", "walName", walName, "walPath", walPath)
 
-		walModTime := getFileModTime(walPath)
-
 		if err := pgbackrest.ArchivePush(ctx, cluster.Name, walPath); err != nil {
 			return err
 		}
 
-		recordWALModTime(ctx, contextLog, walName, walModTime)
+		// Notify the instance manager that a WAL was archived, triggering
+		// a throttled update of LastRecoverabilityPoint on the cluster status.
+		if err := local.NewClient().Cluster().NotifyWALArchived(ctx); err != nil {
+			contextLog.Debug("Failed to notify WAL archive", "err", err)
+		}
 		return nil
 	}
 
@@ -363,29 +364,4 @@ func checkWalArchive(
 	}
 
 	return nil
-}
-
-// getFileModTime returns the modification time of a file, or zero time on error.
-func getFileModTime(path string) time.Time {
-	stat, err := os.Stat(path)
-	if err != nil {
-		return time.Time{}
-	}
-	return stat.ModTime()
-}
-
-// recordWALModTime sends the WAL file's modification time to the instance
-// manager's in-memory cache for PITR window calculation.
-func recordWALModTime(ctx context.Context, contextLog log.Logger, walName string, modTime time.Time) {
-	if modTime.IsZero() {
-		return
-	}
-
-	walBaseName := filepath.Base(walName)
-	localClient := local.NewClient()
-	if err := localClient.Cluster().RecordWALArchive(
-		ctx, walBaseName, modTime.Format(time.RFC3339Nano),
-	); err != nil {
-		contextLog.Debug("Failed to record WAL archive timestamp", "err", err)
-	}
 }

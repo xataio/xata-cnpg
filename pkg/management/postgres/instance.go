@@ -52,7 +52,6 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/logpipe"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/pool"
 	postgresutils "github.com/xataio/xata-cnpg/pkg/management/postgres/utils"
-	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
 	"github.com/xataio/xata-cnpg/pkg/specs"
 	"github.com/xataio/xata-cnpg/pkg/utils"
@@ -233,9 +232,6 @@ type Instance struct {
 	MetricsPortTLS bool
 
 	serverCertificateHandler serverCertificateHandler
-
-	// WALCache tracks recently archived WAL file timestamps for PITR window calculation.
-	WALCache *pgbackrest.WALCache
 
 	// Cluster is the cluster this instance belongs to
 	Cluster *apiv1.Cluster
@@ -433,9 +429,6 @@ func NewInstance() *Instance {
 		slotsReplicatorChan:        make(chan *apiv1.ReplicationSlotsConfiguration),
 		roleSynchronizerChan:       make(chan *apiv1.ManagedConfiguration),
 		tablespaceSynchronizerChan: make(chan map[string]apiv1.TablespaceConfiguration),
-		// 10 minutes = 2x the default archive_timeout of 5 minutes.
-		// If archive_timeout changes, this should change too.
-		WALCache: pgbackrest.NewWALCache(10 * time.Minute),
 	}
 }
 

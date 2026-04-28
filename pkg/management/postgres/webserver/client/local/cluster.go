@@ -38,9 +38,9 @@ type ClusterClient interface {
 	// Returns any error encountered during the request.
 	SetWALArchiveStatusCondition(ctx context.Context, errMessage string) error
 
-	// RecordWALArchive sends a WAL archive timestamp to the instance manager's
-	// in-memory cache for PITR window calculation.
-	RecordWALArchive(ctx context.Context, walName string, modTime string) error
+	// NotifyWALArchived notifies the instance manager that a WAL was archived,
+	// triggering a throttled update of LastRecoverabilityPoint.
+	NotifyWALArchived(ctx context.Context) error
 }
 
 // clusterClientImpl a client to interact with the uncategorized endpoints
@@ -48,23 +48,13 @@ type clusterClientImpl struct {
 	cli *http.Client
 }
 
-func (c *clusterClientImpl) RecordWALArchive(ctx context.Context, walName string, modTime string) error {
+func (c *clusterClientImpl) NotifyWALArchived(ctx context.Context) error {
 	contextLogger := log.FromContext(ctx).WithValues("endpoint", url.PathWALArchiveRecord)
-
-	record := webserver.WALArchiveRecord{
-		WALName: walName,
-		ModTime: modTime,
-	}
-
-	encoded, err := json.Marshal(&record)
-	if err != nil {
-		return err
-	}
 
 	resp, err := http.Post(
 		url.Local(url.PathWALArchiveRecord, url.LocalPort),
 		"application/json",
-		bytes.NewBuffer(encoded),
+		nil,
 	)
 	if err != nil {
 		return err

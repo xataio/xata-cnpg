@@ -55,9 +55,6 @@ const (
 	// PathWALArchiveStatusCondition is the URL path for setting the wal-archive condition on the Cluster object
 	PathWALArchiveStatusCondition string = "/cluster/status/condition/wal/archive"
 
-	// PathWALArchiveRecord is the URL path for recording a WAL archive timestamp
-	PathWALArchiveRecord string = "/wal/archive/record"
-
 	// PathPgBackup is the URL path for PostgreSQL Backup
 	PathPgBackup string = "/pg/backup"
 

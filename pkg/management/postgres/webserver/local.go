@@ -49,6 +49,10 @@ type localWebserverEndpoints struct {
 	// lastPITRUpdate tracks when we last updated LastRecoverabilityPoint
 	// on the cluster status. Used to throttle updates to every 5 minutes.
 	lastPITRUpdate time.Time
+	// lastArchivedAt is the archivedAt timestamp from the previous PITR update.
+	// We advertise this value (not the current one) because the current WAL
+	// serves as the safety buffer.
+	lastArchivedAt string
 }
 
 // NewLocalWebServer returns a webserver that allows connection only from localhost
@@ -67,7 +71,6 @@ func NewLocalWebServer(
 	serveMux.HandleFunc(url.PathCache, endpoints.serveCache)
 	serveMux.HandleFunc(url.PathPgBackup, endpoints.requestBackup)
 	serveMux.HandleFunc(url.PathWALArchiveStatusCondition, endpoints.setWALArchiveStatusCondition)
-	serveMux.HandleFunc(url.PathWALArchiveRecord, endpoints.recordWALArchive)
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf("localhost:%d", url.LocalPort),
@@ -288,6 +291,9 @@ func (ws *localWebserverEndpoints) startPgBackRestBackup(
 // ArchiveStatusRequest is the request body for the archive status endpoint
 type ArchiveStatusRequest struct {
 	Error string `json:"error,omitempty"`
+	// ArchivedAt is the wall clock time when the WAL was archived.
+	// Used to track the last recoverability point for PITR.
+	ArchivedAt string `json:"archivedAt,omitempty"`
 }
 
 func (asr *ArchiveStatusRequest) getContinuousArchivingCondition() metav1.Condition {
@@ -343,63 +349,37 @@ func (ws *localWebserverEndpoints) setWALArchiveStatusCondition(w http.ResponseW
 		return
 	}
 
-	_, _ = fmt.Fprint(w, "OK")
-}
-
-func (ws *localWebserverEndpoints) recordWALArchive(w http.ResponseWriter, _ *http.Request) {
-	// Throttled PITR update: at most every 5 minutes, read pg_stat_archiver
-	// to get the last archived WAL timestamp and update the cluster status.
-	//
-	// This runs inside archive_command, so pg_stat_archiver still shows the
-	// PREVIOUS WAL (WAL_N-1), not the one being archived now (WAL_N).
-	// WAL_N is already in S3 (ArchivePush waited for confirmation), so it
-	// acts as a safety buffer for WAL_N-1's timestamp.
-	//
+	// Throttled PITR update: use the archivedAt timestamp from the request.
+	// This runs inside archive_command for WAL_N. The archivedAt value was
+	// captured by the caller AFTER ArchivePush returned (WAL_N is in S3).
+	// On the next successful archive (WAL_N+1), the PREVIOUS archivedAt
+	// (from WAL_N) becomes the safe PITR point, with WAL_N+1 as the buffer.
 	// 5 minutes = archive_timeout default. If archive_timeout changes, this should too.
-	if time.Since(ws.lastPITRUpdate) >= 5*time.Minute {
-		ws.updateLastRecoverabilityPoint()
+	if asr.ArchivedAt != "" && time.Since(ws.lastPITRUpdate) >= 5*time.Minute {
+		ws.updateLastRecoverabilityPoint(ctx, cluster, asr.ArchivedAt)
 	}
 
 	_, _ = fmt.Fprint(w, "OK")
 }
 
-// updateLastRecoverabilityPoint reads pg_stat_archiver.last_archived_time
-// and patches the cluster status with it as the LastRecoverabilityPoint.
-func (ws *localWebserverEndpoints) updateLastRecoverabilityPoint() {
-	db, err := ws.instance.GetSuperUserDB()
-	if err != nil {
-		log.Info("PITR update: failed to get DB connection", "err", err)
-		return
+// updateLastRecoverabilityPoint stores the current archivedAt as the previous
+// value and publishes the previous value as the LastRecoverabilityPoint.
+// The "one WAL before" strategy means we always advertise the PREVIOUS
+// archive's timestamp, using the current WAL in S3 as a safety buffer.
+func (ws *localWebserverEndpoints) updateLastRecoverabilityPoint(
+	ctx context.Context,
+	cluster *apiv1.Cluster,
+	archivedAt string,
+) {
+	// Use the previous archivedAt value — the current one needs a buffer WAL
+	if ws.lastArchivedAt != "" && ws.lastArchivedAt != cluster.Status.LastRecoverabilityPoint {
+		cluster.Status.LastRecoverabilityPoint = ws.lastArchivedAt
+		if err := ws.typedClient.Status().Update(ctx, cluster); err != nil {
+			log.Info("PITR update: failed to update cluster status", "err", err)
+			return
+		}
 	}
 
-	var lastArchivedTime *time.Time
-	if err := db.QueryRow("SELECT last_archived_time FROM pg_stat_archiver").Scan(&lastArchivedTime); err != nil {
-		log.Info("PITR update: failed to query pg_stat_archiver", "err", err)
-		return
-	}
-
-	if lastArchivedTime == nil {
-		return
-	}
-
-	formattedTime := lastArchivedTime.UTC().Format(time.RFC3339)
-
-	cluster, err := ws.getCluster(context.Background())
-	if err != nil {
-		log.Info("PITR update: failed to get cluster", "err", err)
-		return
-	}
-
-	if cluster.Status.LastRecoverabilityPoint == formattedTime {
-		ws.lastPITRUpdate = time.Now()
-		return
-	}
-
-	cluster.Status.LastRecoverabilityPoint = formattedTime
-	if err := ws.typedClient.Status().Update(context.Background(), cluster); err != nil {
-		log.Info("PITR update: failed to update cluster status", "err", err)
-		return
-	}
-
+	ws.lastArchivedAt = archivedAt
 	ws.lastPITRUpdate = time.Now()
 }

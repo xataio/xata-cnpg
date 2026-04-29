@@ -181,16 +181,7 @@ func internalRun(
 		walPath := filepath.Join(pgData, walName)
 		contextLog.Info("Archiving WAL via pgbackrest", "walName", walName, "walPath", walPath)
 
-		if err := pgbackrest.ArchivePush(ctx, cluster.Name, walPath); err != nil {
-			return err
-		}
-
-		// Notify the instance manager that a WAL was archived, triggering
-		// a throttled update of LastRecoverabilityPoint on the cluster status.
-		if err := local.NewClient().Cluster().NotifyWALArchived(ctx); err != nil {
-			contextLog.Debug("Failed to notify WAL archive", "err", err)
-		}
-		return nil
+		return pgbackrest.ArchivePush(ctx, cluster.Name, walPath)
 	}
 
 	// Request Barman Cloud to archive this WAL

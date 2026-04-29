@@ -35,12 +35,9 @@ import (
 type ClusterClient interface {
 	// SetWALArchiveStatusCondition sets the wal-archive status condition.
 	// An empty errMessage means that the archive process was successful.
+	// archivedAt is the wall clock time of the archive, used for PITR tracking.
 	// Returns any error encountered during the request.
-	SetWALArchiveStatusCondition(ctx context.Context, errMessage string) error
-
-	// NotifyWALArchived notifies the instance manager that a WAL was archived,
-	// triggering a throttled update of LastRecoverabilityPoint.
-	NotifyWALArchived(ctx context.Context) error
+	SetWALArchiveStatusCondition(ctx context.Context, errMessage string, archivedAt string) error
 }
 
 // clusterClientImpl a client to interact with the uncategorized endpoints
@@ -48,31 +45,12 @@ type clusterClientImpl struct {
 	cli *http.Client
 }
 
-func (c *clusterClientImpl) NotifyWALArchived(ctx context.Context) error {
-	contextLogger := log.FromContext(ctx).WithValues("endpoint", url.PathWALArchiveRecord)
-
-	resp, err := http.Post(
-		url.Local(url.PathWALArchiveRecord, url.LocalPort),
-		"application/json",
-		nil,
-	)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if errClose := resp.Body.Close(); errClose != nil {
-			contextLogger.Error(errClose, "while closing response body")
-		}
-	}()
-
-	return nil
-}
-
-func (c *clusterClientImpl) SetWALArchiveStatusCondition(ctx context.Context, errMessage string) error {
+func (c *clusterClientImpl) SetWALArchiveStatusCondition(ctx context.Context, errMessage string, archivedAt string) error {
 	contextLogger := log.FromContext(ctx).WithValues("endpoint", url.PathWALArchiveStatusCondition)
 
 	asr := webserver.ArchiveStatusRequest{
-		Error: errMessage,
+		Error:      errMessage,
+		ArchivedAt: archivedAt,
 	}
 
 	encoded, err := json.Marshal(&asr)

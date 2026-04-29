@@ -45,7 +45,10 @@ type clusterClientImpl struct {
 	cli *http.Client
 }
 
-func (c *clusterClientImpl) SetWALArchiveStatusCondition(ctx context.Context, errMessage string, archivedAt string) error {
+func (c *clusterClientImpl) SetWALArchiveStatusCondition(ctx context.Context,
+	errMessage string,
+	archivedAt string,
+) error {
 	contextLogger := log.FromContext(ctx).WithValues("endpoint", url.PathWALArchiveStatusCondition)
 
 	asr := webserver.ArchiveStatusRequest{

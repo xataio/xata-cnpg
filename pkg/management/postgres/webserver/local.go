@@ -49,10 +49,12 @@ type localWebserverEndpoints struct {
 	// lastPITRUpdate tracks when we last updated LastRecoverabilityPoint
 	// on the cluster status. Used to throttle updates to every 5 minutes.
 	lastPITRUpdate time.Time
-	// lastArchivedAt is the archivedAt timestamp from the previous PITR update.
-	// We advertise this value (not the current one) because the current WAL
-	// serves as the safety buffer.
-	lastArchivedAt string
+	// latestArchivedAt is updated on every successful WAL archive.
+	latestArchivedAt string
+	// pitrCandidate is captured from latestArchivedAt at each throttle fire.
+	// Published as LastRecoverabilityPoint on the NEXT throttle fire, after
+	// a full interval of buffer WALs has accumulated in S3.
+	pitrCandidate string
 }
 
 // NewLocalWebServer returns a webserver that allows connection only from localhost
@@ -349,37 +351,37 @@ func (ws *localWebserverEndpoints) setWALArchiveStatusCondition(w http.ResponseW
 		return
 	}
 
-	// Throttled PITR update: use the archivedAt timestamp from the request.
-	// This runs inside archive_command for WAL_N. The archivedAt value was
-	// captured by the caller AFTER ArchivePush returned (WAL_N is in S3).
-	// On the next successful archive (WAL_N+1), the PREVIOUS archivedAt
-	// (from WAL_N) becomes the safe PITR point, with WAL_N+1 as the buffer.
+	// Track the latest archive timestamp on every successful archive.
+	if asr.ArchivedAt != "" {
+		ws.latestArchivedAt = asr.ArchivedAt
+	}
+
+	// Throttled PITR update: every 5 minutes, publish the pitrCandidate
+	// (captured at the PREVIOUS throttle point) as LastRecoverabilityPoint,
+	// then snapshot latestArchivedAt as the next candidate.
+	//
+	// This gives the candidate a full throttle interval (~5 min) of buffer
+	// WALs in S3 before it's advertised, making it safe for PITR.
 	// 5 minutes = archive_timeout default. If archive_timeout changes, this should too.
 	if asr.ArchivedAt != "" && time.Since(ws.lastPITRUpdate) >= 5*time.Minute {
-		ws.updateLastRecoverabilityPoint(ctx, cluster, asr.ArchivedAt)
+		ws.updateLastRecoverabilityPoint(ctx, cluster)
 	}
 
 	_, _ = fmt.Fprint(w, "OK")
 }
 
-// updateLastRecoverabilityPoint stores the current archivedAt as the previous
-// value and publishes the previous value as the LastRecoverabilityPoint.
-// The "one WAL before" strategy means we always advertise the PREVIOUS
-// archive's timestamp, using the current WAL in S3 as a safety buffer.
 func (ws *localWebserverEndpoints) updateLastRecoverabilityPoint(
 	ctx context.Context,
 	cluster *apiv1.Cluster,
-	archivedAt string,
 ) {
-	// Use the previous archivedAt value — the current one needs a buffer WAL
-	if ws.lastArchivedAt != "" && ws.lastArchivedAt != cluster.Status.LastRecoverabilityPoint {
-		cluster.Status.LastRecoverabilityPoint = ws.lastArchivedAt
+	if ws.pitrCandidate != "" && ws.pitrCandidate != cluster.Status.LastRecoverabilityPoint {
+		cluster.Status.LastRecoverabilityPoint = ws.pitrCandidate
 		if err := ws.typedClient.Status().Update(ctx, cluster); err != nil {
 			log.Info("PITR update: failed to update cluster status", "err", err)
 			return
 		}
 	}
 
-	ws.lastArchivedAt = archivedAt
+	ws.pitrCandidate = ws.latestArchivedAt
 	ws.lastPITRUpdate = time.Now()
 }

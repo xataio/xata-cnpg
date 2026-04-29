@@ -82,3 +82,66 @@ func PatchConditionsWithOptimisticLock(
 
 	return nil
 }
+
+// StatusModifier is a callback that modifies the cluster status before patching.
+type StatusModifier func(cluster *apiv1.Cluster)
+
+// PatchStatusAndConditionsWithOptimisticLock updates conditions and applies a
+// StatusModifier in a single atomic status patch with retry on conflict.
+// NOTE: this shares logic with PatchConditionsWithOptimisticLock. The duplication
+// is intentional to avoid modifying a critical function used across the codebase.
+// If this becomes a maintenance issue, extract the shared logic in a dedicated PR.
+func PatchStatusAndConditionsWithOptimisticLock(
+	ctx context.Context,
+	c client.Client,
+	cluster *apiv1.Cluster,
+	modifier StatusModifier,
+	conditions ...metav1.Condition,
+) error {
+	if cluster == nil || (len(conditions) == 0 && modifier == nil) {
+		return nil
+	}
+
+	applyConditions := func(cluster *apiv1.Cluster) bool {
+		changed := false
+		for _, c := range conditions {
+			changed = changed || meta.SetStatusCondition(&cluster.Status.Conditions, c)
+		}
+		return changed
+	}
+
+	var currentCluster apiv1.Cluster
+	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		if err := c.Get(ctx, client.ObjectKeyFromObject(cluster), &currentCluster); err != nil {
+			return err
+		}
+
+		updatedCluster := currentCluster.DeepCopy()
+		changed := applyConditions(updatedCluster)
+
+		if modifier != nil {
+			modifier(updatedCluster)
+			changed = true
+		}
+
+		if !changed {
+			return nil
+		}
+
+		if err := c.Status().Patch(
+			ctx,
+			updatedCluster,
+			client.MergeFromWithOptions(&currentCluster, client.MergeFromWithOptimisticLock{}),
+		); err != nil {
+			return err
+		}
+
+		cluster.Status.Conditions = updatedCluster.Status.Conditions
+
+		return nil
+	}); err != nil {
+		return fmt.Errorf("while patching status: %w", err)
+	}
+
+	return nil
+}

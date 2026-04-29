@@ -27,9 +27,7 @@ import (
 func TestPITRTracker_FirstCall(t *testing.T) {
 	tracker := &PITRTracker{}
 
-	tracker.RecordArchive("2026-04-28T10:00:00Z")
-
-	if !tracker.ShouldUpdate("2026-04-28T10:00:00Z") {
+	if !tracker.RecordArchive("2026-04-28T10:00:00Z") {
 		t.Error("should update on first call (lastUpdate is zero)")
 	}
 
@@ -49,9 +47,7 @@ func TestPITRTracker_SecondCall(t *testing.T) {
 		lastUpdate:       time.Now().Add(-6 * time.Minute),
 	}
 
-	tracker.RecordArchive("2026-04-28T10:05:00Z")
-
-	if !tracker.ShouldUpdate("2026-04-28T10:05:00Z") {
+	if !tracker.RecordArchive("2026-04-28T10:05:00Z") {
 		t.Error("should update after 6 minutes")
 	}
 
@@ -69,7 +65,7 @@ func TestPITRTracker_ThrottleNotReached(t *testing.T) {
 		lastUpdate: time.Now().Add(-2 * time.Minute),
 	}
 
-	if tracker.ShouldUpdate("2026-04-28T10:02:00Z") {
+	if tracker.RecordArchive("2026-04-28T10:02:00Z") {
 		t.Error("should not update before 5 minutes")
 	}
 }
@@ -77,13 +73,11 @@ func TestPITRTracker_ThrottleNotReached(t *testing.T) {
 func TestPITRTracker_EmptyArchivedAt(t *testing.T) {
 	tracker := &PITRTracker{}
 
-	tracker.RecordArchive("")
+	if tracker.RecordArchive("") {
+		t.Error("should not update with empty archivedAt")
+	}
 	if tracker.latestArchivedAt != "" {
 		t.Error("empty archivedAt should not be recorded")
-	}
-
-	if tracker.ShouldUpdate("") {
-		t.Error("should not update with empty archivedAt")
 	}
 }
 
@@ -111,7 +105,9 @@ func TestPITRTracker_IdleThenResume(t *testing.T) {
 	if publish != "2026-04-28T10:00:00Z" {
 		t.Errorf("should publish T=0 candidate, got %s", publish)
 	}
-	// Now candidate = latestArchivedAt = 10:07:00 (NOT 10:03:00, since 10:07 was recorded)
+	// candidate is set from latestArchivedAt, which was overwritten to 10:07:00
+	// when archiving resumed. The 10:03:00 value from the idle period is lost,
+	// but that's fine — all WALs up to 10:07:00 are in S3 anyway.
 	if tracker.candidate != "2026-04-28T10:07:00Z" {
 		t.Errorf("candidate should be latest archived, got %s", tracker.candidate)
 	}

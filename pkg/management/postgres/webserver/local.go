@@ -327,10 +327,22 @@ func (ws *localWebserverEndpoints) setWALArchiveStatusCondition(w http.ResponseW
 		return
 	}
 
-	if errCond := status.PatchConditionsWithOptimisticLock(
+	// Build an optional status modifier for the PITR update.
+	// This is included in the same patch as the condition update — one write.
+	var modifier status.StatusModifier
+	if ws.pitrTracker.RecordArchive(asr.ArchivedAt) {
+		if publish := ws.pitrTracker.Update(); publish != "" {
+			modifier = func(cluster *apiv1.Cluster) {
+				cluster.Status.LastRecoverabilityPoint = publish
+			}
+		}
+	}
+
+	if errCond := status.PatchStatusAndConditionsWithOptimisticLock(
 		ctx,
 		ws.typedClient,
 		cluster,
+		modifier,
 		asr.getContinuousArchivingCondition(),
 	); errCond != nil {
 		contextLogger.Error(errCond, "Error changing wal archiving condition",
@@ -342,27 +354,5 @@ func (ws *localWebserverEndpoints) setWALArchiveStatusCondition(w http.ResponseW
 		return
 	}
 
-	ws.pitrTracker.RecordArchive(asr.ArchivedAt)
-
-	if ws.pitrTracker.ShouldUpdate(asr.ArchivedAt) {
-		ws.publishRecoverabilityPoint(ctx, contextLogger, cluster)
-	}
-
 	_, _ = fmt.Fprint(w, "OK")
-}
-
-func (ws *localWebserverEndpoints) publishRecoverabilityPoint(
-	ctx context.Context,
-	contextLogger log.Logger,
-	cluster *apiv1.Cluster,
-) {
-	publish := ws.pitrTracker.Update()
-	if publish == "" || publish == cluster.Status.LastRecoverabilityPoint {
-		return
-	}
-
-	cluster.Status.LastRecoverabilityPoint = publish
-	if err := ws.typedClient.Status().Update(ctx, cluster); err != nil {
-		contextLogger.Info("PITR update: failed to update cluster status", "err", err)
-	}
 }

@@ -34,17 +34,14 @@ type PITRTracker struct {
 	candidate        string
 }
 
-// RecordArchive records the timestamp of a successful WAL archive.
-func (t *PITRTracker) RecordArchive(archivedAt string) {
-	if archivedAt != "" {
-		t.latestArchivedAt = archivedAt
+// RecordArchive records the timestamp of a successful WAL archive
+// and returns true if a PITR update should be performed.
+func (t *PITRTracker) RecordArchive(archivedAt string) bool {
+	if archivedAt == "" {
+		return false
 	}
-}
-
-// ShouldUpdate returns true if the throttle interval has passed
-// and there is an archivedAt value to process.
-func (t *PITRTracker) ShouldUpdate(archivedAt string) bool {
-	return archivedAt != "" && time.Since(t.lastUpdate) >= pitrThrottleInterval
+	t.latestArchivedAt = archivedAt
+	return time.Since(t.lastUpdate) >= pitrThrottleInterval
 }
 
 // Update rotates the candidate: returns the current candidate to

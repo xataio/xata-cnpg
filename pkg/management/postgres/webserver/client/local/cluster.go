@@ -35,9 +35,8 @@ import (
 type ClusterClient interface {
 	// SetWALArchiveStatusCondition sets the wal-archive status condition.
 	// An empty errMessage means that the archive process was successful.
-	// archivedAt is the wall clock time of the archive, used for PITR tracking.
 	// Returns any error encountered during the request.
-	SetWALArchiveStatusCondition(ctx context.Context, errMessage string, archivedAt string) error
+	SetWALArchiveStatusCondition(ctx context.Context, errMessage string) error
 }
 
 // clusterClientImpl a client to interact with the uncategorized endpoints
@@ -45,15 +44,11 @@ type clusterClientImpl struct {
 	cli *http.Client
 }
 
-func (c *clusterClientImpl) SetWALArchiveStatusCondition(ctx context.Context,
-	errMessage string,
-	archivedAt string,
-) error {
+func (c *clusterClientImpl) SetWALArchiveStatusCondition(ctx context.Context, errMessage string) error {
 	contextLogger := log.FromContext(ctx).WithValues("endpoint", url.PathWALArchiveStatusCondition)
 
 	asr := webserver.ArchiveStatusRequest{
-		Error:      errMessage,
-		ArchivedAt: archivedAt,
+		Error: errMessage,
 	}
 
 	encoded, err := json.Marshal(&asr)

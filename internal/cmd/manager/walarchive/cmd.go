@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/spf13/cobra"
@@ -70,15 +69,13 @@ func NewCmd() *cobra.Command {
 				} else {
 					contextLog.Error(err, logErrorMessage)
 				}
-				if reqErr := localClient.Cluster().SetWALArchiveStatusCondition(ctx, err.Error(), ""); reqErr != nil {
+				if reqErr := localClient.Cluster().SetWALArchiveStatusCondition(ctx, err.Error()); reqErr != nil {
 					contextLog.Error(reqErr, "while invoking the set wal archive condition endpoint")
 				}
 				return err
 			}
 
-			if err := localClient.Cluster().SetWALArchiveStatusCondition(
-				ctx, "", time.Now().UTC().Format(time.RFC3339),
-			); err != nil {
+			if err := localClient.Cluster().SetWALArchiveStatusCondition(ctx, ""); err != nil {
 				contextLog.Error(err, "while invoking the set wal archive condition endpoint")
 			}
 			return nil

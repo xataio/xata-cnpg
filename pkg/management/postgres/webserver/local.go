@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -45,7 +46,7 @@ type localWebserverEndpoints struct {
 	instance      *postgres.Instance
 	eventRecorder record.EventRecorder
 
-	pitrTracker PITRTracker
+	lastPITRUpdate time.Time
 }
 
 // NewLocalWebServer returns a webserver that allows connection only from localhost
@@ -284,9 +285,6 @@ func (ws *localWebserverEndpoints) startPgBackRestBackup(
 // ArchiveStatusRequest is the request body for the archive status endpoint
 type ArchiveStatusRequest struct {
 	Error string `json:"error,omitempty"`
-	// ArchivedAt is the wall clock time when the WAL was archived.
-	// Used to track the last recoverability point for PITR.
-	ArchivedAt string `json:"archivedAt,omitempty"`
 }
 
 func (asr *ArchiveStatusRequest) getContinuousArchivingCondition() metav1.Condition {
@@ -327,14 +325,18 @@ func (ws *localWebserverEndpoints) setWALArchiveStatusCondition(w http.ResponseW
 		return
 	}
 
-	// Build an optional status modifier for the PITR update.
-	// This is included in the same patch as the condition update — one write.
+	// Throttled PITR update: every 5 minutes, read pg_stat_archiver.last_archived_time
+	// and include it in the same status patch as the condition update.
+	// This runs inside archive_command (CLI hasn't exited), so pg_stat_archiver
+	// still shows WAL_N-1. WAL_N is in S3 (ArchivePush completed), acting as buffer.
+	// 5 minutes = archive_timeout default. If archive_timeout changes, this should too.
 	var modifier status.Modifier
-	if ws.pitrTracker.RecordArchive(asr.ArchivedAt) {
-		if publish := ws.pitrTracker.Update(); publish != "" {
+	if asr.Error == "" && time.Since(ws.lastPITRUpdate) >= 5*time.Minute {
+		if t := ws.readLastArchivedTime(); t != "" {
 			modifier = func(cluster *apiv1.Cluster) {
-				cluster.Status.LastRecoverabilityPoint = publish
+				cluster.Status.LastRecoverabilityPoint = t
 			}
+			ws.lastPITRUpdate = time.Now()
 		}
 	}
 
@@ -355,4 +357,24 @@ func (ws *localWebserverEndpoints) setWALArchiveStatusCondition(w http.ResponseW
 	}
 
 	_, _ = fmt.Fprint(w, "OK")
+}
+
+// readLastArchivedTime queries pg_stat_archiver for the last archived WAL
+// timestamp. Returns an RFC3339 string or empty on error.
+func (ws *localWebserverEndpoints) readLastArchivedTime() string {
+	db, err := ws.instance.GetSuperUserDB()
+	if err != nil {
+		return ""
+	}
+
+	var lastArchivedTime *time.Time
+	if err := db.QueryRow("SELECT last_archived_time FROM pg_stat_archiver").Scan(&lastArchivedTime); err != nil {
+		return ""
+	}
+
+	if lastArchivedTime == nil {
+		return ""
+	}
+
+	return lastArchivedTime.UTC().Format(time.RFC3339)
 }

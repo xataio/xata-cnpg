@@ -1505,6 +1505,7 @@ type ExtensionConfiguration struct {
 // ones. `initdb` will be used as the bootstrap method if left
 // unspecified. Refer to the Bootstrap page of the documentation for more
 // information.
+// +structType=atomic
 type BootstrapConfiguration struct {
 	// Bootstrap the cluster via initdb
 	// +optional

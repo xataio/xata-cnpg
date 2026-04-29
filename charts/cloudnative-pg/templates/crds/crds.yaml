@@ -2828,6 +2828,7 @@ spec:
                         type: object
                     type: object
                 type: object
+                x-kubernetes-map-type: atomic
               certificates:
                 description: The configuration for the CA and related certificates
                 properties:

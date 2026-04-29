@@ -78,10 +78,10 @@ func TestPITRTracker_RecordArchive(t *testing.T) {
 
 func TestPITRTracker_Update(t *testing.T) {
 	tests := []struct {
-		name             string
-		tracker          PITRTracker
-		expectPublish    string
-		expectCandidate  string
+		name            string
+		tracker         PITRTracker
+		expectPublish   string
+		expectCandidate string
 	}{
 		{
 			"first update — no candidate yet",

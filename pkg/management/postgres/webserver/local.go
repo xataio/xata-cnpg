@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -46,15 +45,7 @@ type localWebserverEndpoints struct {
 	instance      *postgres.Instance
 	eventRecorder record.EventRecorder
 
-	// lastPITRUpdate tracks when we last updated LastRecoverabilityPoint
-	// on the cluster status. Used to throttle updates to every 5 minutes.
-	lastPITRUpdate time.Time
-	// latestArchivedAt is updated on every successful WAL archive.
-	latestArchivedAt string
-	// pitrCandidate is captured from latestArchivedAt at each throttle fire.
-	// Published as LastRecoverabilityPoint on the NEXT throttle fire, after
-	// a full interval of buffer WALs has accumulated in S3.
-	pitrCandidate string
+	pitrTracker PITRTracker
 }
 
 // NewLocalWebServer returns a webserver that allows connection only from localhost
@@ -351,37 +342,27 @@ func (ws *localWebserverEndpoints) setWALArchiveStatusCondition(w http.ResponseW
 		return
 	}
 
-	// Track the latest archive timestamp on every successful archive.
-	if asr.ArchivedAt != "" {
-		ws.latestArchivedAt = asr.ArchivedAt
-	}
+	ws.pitrTracker.RecordArchive(asr.ArchivedAt)
 
-	// Throttled PITR update: every 5 minutes, publish the pitrCandidate
-	// (captured at the PREVIOUS throttle point) as LastRecoverabilityPoint,
-	// then snapshot latestArchivedAt as the next candidate.
-	//
-	// This gives the candidate a full throttle interval (~5 min) of buffer
-	// WALs in S3 before it's advertised, making it safe for PITR.
-	// 5 minutes = archive_timeout default. If archive_timeout changes, this should too.
-	if asr.ArchivedAt != "" && time.Since(ws.lastPITRUpdate) >= 5*time.Minute {
-		ws.updateLastRecoverabilityPoint(ctx, cluster)
+	if ws.pitrTracker.ShouldUpdate(asr.ArchivedAt) {
+		ws.publishRecoverabilityPoint(ctx, contextLogger, cluster)
 	}
 
 	_, _ = fmt.Fprint(w, "OK")
 }
 
-func (ws *localWebserverEndpoints) updateLastRecoverabilityPoint(
+func (ws *localWebserverEndpoints) publishRecoverabilityPoint(
 	ctx context.Context,
+	contextLogger log.Logger,
 	cluster *apiv1.Cluster,
 ) {
-	if ws.pitrCandidate != "" && ws.pitrCandidate != cluster.Status.LastRecoverabilityPoint {
-		cluster.Status.LastRecoverabilityPoint = ws.pitrCandidate
-		if err := ws.typedClient.Status().Update(ctx, cluster); err != nil {
-			log.Info("PITR update: failed to update cluster status", "err", err)
-			return
-		}
+	publish := ws.pitrTracker.Update()
+	if publish == "" || publish == cluster.Status.LastRecoverabilityPoint {
+		return
 	}
 
-	ws.pitrCandidate = ws.latestArchivedAt
-	ws.lastPITRUpdate = time.Now()
+	cluster.Status.LastRecoverabilityPoint = publish
+	if err := ws.typedClient.Status().Update(ctx, cluster); err != nil {
+		contextLogger.Info("PITR update: failed to update cluster status", "err", err)
+	}
 }

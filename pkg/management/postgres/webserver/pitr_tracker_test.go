@@ -24,65 +24,97 @@ import (
 	"time"
 )
 
-func TestPITRTracker_FirstCall(t *testing.T) {
-	tracker := &PITRTracker{}
-
-	if !tracker.RecordArchive("2026-04-28T10:00:00Z") {
-		t.Error("should update on first call (lastUpdate is zero)")
+func TestPITRTracker_RecordArchive(t *testing.T) {
+	tests := []struct {
+		name           string
+		tracker        PITRTracker
+		archivedAt     string
+		expectShouldUp bool
+		expectLatest   string
+	}{
+		{
+			"first call with value",
+			PITRTracker{},
+			"2026-04-28T10:00:00Z",
+			true,
+			"2026-04-28T10:00:00Z",
+		},
+		{
+			"throttle not reached",
+			PITRTracker{lastUpdate: time.Now().Add(-2 * time.Minute)},
+			"2026-04-28T10:02:00Z",
+			false,
+			"2026-04-28T10:02:00Z",
+		},
+		{
+			"throttle reached",
+			PITRTracker{lastUpdate: time.Now().Add(-6 * time.Minute)},
+			"2026-04-28T10:06:00Z",
+			true,
+			"2026-04-28T10:06:00Z",
+		},
+		{
+			"empty archivedAt",
+			PITRTracker{},
+			"",
+			false,
+			"",
+		},
 	}
 
-	publish := tracker.Update()
-	if publish != "" {
-		t.Errorf("first call should publish empty, got %s", publish)
-	}
-	if tracker.candidate != "2026-04-28T10:00:00Z" {
-		t.Errorf("candidate should be set, got %s", tracker.candidate)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tracker := tt.tracker
+			got := tracker.RecordArchive(tt.archivedAt)
+			if got != tt.expectShouldUp {
+				t.Errorf("RecordArchive returned %v, want %v", got, tt.expectShouldUp)
+			}
+			if tracker.latestArchivedAt != tt.expectLatest {
+				t.Errorf("latestArchivedAt = %s, want %s", tracker.latestArchivedAt, tt.expectLatest)
+			}
+		})
 	}
 }
 
-func TestPITRTracker_SecondCall(t *testing.T) {
-	tracker := &PITRTracker{
-		candidate:        "2026-04-28T10:00:00Z",
-		latestArchivedAt: "2026-04-28T10:04:58Z",
-		lastUpdate:       time.Now().Add(-6 * time.Minute),
+func TestPITRTracker_Update(t *testing.T) {
+	tests := []struct {
+		name             string
+		tracker          PITRTracker
+		expectPublish    string
+		expectCandidate  string
+	}{
+		{
+			"first update — no candidate yet",
+			PITRTracker{latestArchivedAt: "2026-04-28T10:00:00Z"},
+			"",
+			"2026-04-28T10:00:00Z",
+		},
+		{
+			"second update — publishes previous candidate",
+			PITRTracker{
+				candidate:        "2026-04-28T10:00:00Z",
+				latestArchivedAt: "2026-04-28T10:05:00Z",
+			},
+			"2026-04-28T10:00:00Z",
+			"2026-04-28T10:05:00Z",
+		},
 	}
 
-	if !tracker.RecordArchive("2026-04-28T10:05:00Z") {
-		t.Error("should update after 6 minutes")
-	}
-
-	publish := tracker.Update()
-	if publish != "2026-04-28T10:00:00Z" {
-		t.Errorf("should publish previous candidate, got %s", publish)
-	}
-	if tracker.candidate != "2026-04-28T10:05:00Z" {
-		t.Errorf("candidate should be latest, got %s", tracker.candidate)
-	}
-}
-
-func TestPITRTracker_ThrottleNotReached(t *testing.T) {
-	tracker := &PITRTracker{
-		lastUpdate: time.Now().Add(-2 * time.Minute),
-	}
-
-	if tracker.RecordArchive("2026-04-28T10:02:00Z") {
-		t.Error("should not update before 5 minutes")
-	}
-}
-
-func TestPITRTracker_EmptyArchivedAt(t *testing.T) {
-	tracker := &PITRTracker{}
-
-	if tracker.RecordArchive("") {
-		t.Error("should not update with empty archivedAt")
-	}
-	if tracker.latestArchivedAt != "" {
-		t.Error("empty archivedAt should not be recorded")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tracker := tt.tracker
+			publish := tracker.Update()
+			if publish != tt.expectPublish {
+				t.Errorf("Update returned %s, want %s", publish, tt.expectPublish)
+			}
+			if tracker.candidate != tt.expectCandidate {
+				t.Errorf("candidate = %s, want %s", tracker.candidate, tt.expectCandidate)
+			}
+		})
 	}
 }
 
 func TestPITRTracker_IdleThenResume(t *testing.T) {
-	// Simulate: active archiving, then idle, then resume
 	tracker := &PITRTracker{}
 
 	// T=0: First throttle fire

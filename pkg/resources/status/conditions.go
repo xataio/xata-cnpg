@@ -83,11 +83,11 @@ func PatchConditionsWithOptimisticLock(
 	return nil
 }
 
-// StatusModifier is a callback that modifies the cluster status before patching.
-type StatusModifier func(cluster *apiv1.Cluster)
+// Modifier is a callback that modifies the cluster status before patching.
+type Modifier func(cluster *apiv1.Cluster)
 
 // PatchStatusAndConditionsWithOptimisticLock updates conditions and applies a
-// StatusModifier in a single atomic status patch with retry on conflict.
+// Modifier in a single atomic status patch with retry on conflict.
 // NOTE: this shares logic with PatchConditionsWithOptimisticLock. The duplication
 // is intentional to avoid modifying a critical function used across the codebase.
 // If this becomes a maintenance issue, extract the shared logic in a dedicated PR.
@@ -95,7 +95,7 @@ func PatchStatusAndConditionsWithOptimisticLock(
 	ctx context.Context,
 	c client.Client,
 	cluster *apiv1.Cluster,
-	modifier StatusModifier,
+	modifier Modifier,
 	conditions ...metav1.Condition,
 ) error {
 	if cluster == nil || (len(conditions) == 0 && modifier == nil) {

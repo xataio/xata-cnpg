@@ -329,7 +329,7 @@ func (ws *localWebserverEndpoints) setWALArchiveStatusCondition(w http.ResponseW
 
 	// Build an optional status modifier for the PITR update.
 	// This is included in the same patch as the condition update — one write.
-	var modifier status.StatusModifier
+	var modifier status.Modifier
 	if ws.pitrTracker.RecordArchive(asr.ArchivedAt) {
 		if publish := ws.pitrTracker.Update(); publish != "" {
 			modifier = func(cluster *apiv1.Cluster) {

@@ -38,11 +38,14 @@ import (
 
 // GenerateConfig builds a pgbackrest.conf INI configuration from the cluster
 // spec. It resolves S3 credentials from Kubernetes secrets.
+// isPrimary controls whether this pod gets replica-specific config for
+// backup-standby (pg1-host pointing to the primary via TLS).
 func GenerateConfig(
 	ctx context.Context,
 	k8sClient client.Client,
 	cluster *apiv1.Cluster,
 	pgDataPath string,
+	isPrimary bool,
 ) (string, error) {
 	pgbackrestConfig := cluster.Spec.Backup.PgBackRest
 
@@ -61,6 +64,13 @@ func GenerateConfig(
 	}
 	applyOptionDefaults(opts, cluster)
 	configureOptions(opts, cfg)
+
+	// On replicas, configure pg1 as the remote primary (via TLS) and pg2 as
+	// the local standby. This enables backup-standby: pgbackrest copies files
+	// locally from the replica while coordinating with the primary over TLS.
+	if !isPrimary {
+		configureReplicaStanza(cfg.Section(cluster.Name), cluster.Name, pgDataPath)
+	}
 
 	return renderConfig(cfg)
 }
@@ -351,4 +361,21 @@ func resolveSecretKeyRef(
 	}
 
 	return string(value), nil
+}
+
+// configureReplicaStanza sets up the stanza section on a replica for
+// backup-standby mode. pg1 is the remote primary (accessed via TLS for
+// pg_backup_start/stop and remaining files), pg2 is the local standby
+// where the bulk of the file copy happens.
+func configureReplicaStanza(stanza *ini.Section, clusterName string, pgDataPath string) {
+	// pg1 = remote primary (TLS connection for pg_backup_start/stop + remaining files)
+	// pg1-path is already set by generateBaseConfig — we add the host/TLS options.
+	stanza.Key("pg1-host").SetValue(clusterName + "-rw")
+	stanza.Key("pg1-host-type").SetValue("tls")
+	stanza.Key("pg1-host-ca-file").SetValue(postgres.ServerCACertificateLocation)
+	stanza.Key("pg1-host-cert-file").SetValue(postgres.StreamingReplicaCertificateLocation)
+	stanza.Key("pg1-host-key-file").SetValue(postgres.StreamingReplicaKeyLocation)
+
+	// pg2 = local standby (bulk file copy)
+	stanza.Key("pg2-path").SetValue(pgDataPath)
 }

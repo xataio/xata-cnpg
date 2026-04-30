@@ -1078,7 +1078,8 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		})
 	}
 
-	content, err := pgbackrest.GenerateConfig(ctx, r.GetClient(), cluster, r.instance.PgData)
+	isPrimary := r.instance.GetPodName() == cluster.Status.CurrentPrimary
+	content, err := pgbackrest.GenerateConfig(ctx, r.GetClient(), cluster, r.instance.PgData, isPrimary)
 	if err != nil {
 		return fmt.Errorf("generating pgbackrest config: %w", err)
 	}

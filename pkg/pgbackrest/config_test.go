@@ -462,3 +462,32 @@ func TestGenerateBaseConfig_TLSAndPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigureReplicaStanza(t *testing.T) {
+	cfg := ini.Empty()
+	stanza := cfg.Section("test-cluster")
+	stanza.Key("pg1-path").SetValue("/pgdata")
+
+	configureReplicaStanza(stanza, "test-cluster", "/pgdata")
+
+	tests := []struct {
+		name     string
+		key      string
+		expected string
+	}{
+		{"pg1-host", "pg1-host", "test-cluster-rw"},
+		{"pg1-host-type", "pg1-host-type", "tls"},
+		{"pg1-host-ca-file", "pg1-host-ca-file", "/controller/certificates/server-ca.crt"},
+		{"pg1-host-cert-file", "pg1-host-cert-file", "/controller/certificates/streaming_replica.crt"},
+		{"pg1-host-key-file", "pg1-host-key-file", "/controller/certificates/streaming_replica.key"},
+		{"pg2-path", "pg2-path", "/pgdata"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if v := stanza.Key(tt.key).String(); v != tt.expected {
+				t.Errorf("expected %s=%s, got %s", tt.key, tt.expected, v)
+			}
+		})
+	}
+}

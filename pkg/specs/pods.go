@@ -273,14 +273,17 @@ func createPostgresContainers(cluster apiv1.Cluster, envConfig EnvConfig, enable
 					ContainerPort: url.StatusPort,
 					Protocol:      "TCP",
 				},
-				{
-					Name:          "pgbackrest",
-					ContainerPort: pgbackrest.TLSServerPort,
-					Protocol:      "TCP",
-				},
 			},
 			SecurityContext: GetSecurityContext(&cluster),
 		},
+	}
+
+	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		containers[0].Ports = append(containers[0].Ports, corev1.ContainerPort{
+			Name:          "pgbackrest",
+			ContainerPort: pgbackrest.TLSServerPort,
+			Protocol:      "TCP",
+		})
 	}
 
 	if cluster.Annotations[utils.EnableInstancePprofAnnotationName] == "true" {

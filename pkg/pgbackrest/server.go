@@ -23,6 +23,7 @@ import (
 	"context"
 	"os/exec"
 	"sync"
+	"syscall"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 )
@@ -54,7 +55,7 @@ func (s *TLSServer) Start(ctx context.Context) error {
 
 	args := []string{"--config=" + ConfigFilePath, "server"}
 
-	cmd := exec.CommandContext(ctx, pgbackrestBinary, args...) // #nosec G204
+	cmd := exec.Command(pgbackrestBinary, args...) // #nosec G204
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -82,7 +83,7 @@ func (s *TLSServer) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop sends SIGTERM to the pgbackrest server and waits for it to exit.
+// Stop sends SIGTERM to the pgbackrest server for graceful shutdown.
 func (s *TLSServer) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -91,7 +92,7 @@ func (s *TLSServer) Stop() {
 		return
 	}
 
-	_ = s.cmd.Process.Kill()
+	_ = s.cmd.Process.Signal(syscall.SIGTERM)
 	s.running = false
 }
 

@@ -108,13 +108,13 @@ func generateBaseConfig(
 		}
 	}
 
-	// Spool path (used when archive-async is enabled)
-	global.Key("spool-path").SetValue(SpoolPath)
-
-	// Log and temp paths — container filesystem is read-only,
-	// redirect to the writable scratch-data volume.
-	global.Key("log-path").SetValue("/controller/pgbackrest/log")
-	global.Key("lock-path").SetValue("/controller/pgbackrest/lock")
+	// pgbackrest working directories — stored on the PGDATA PVC (outside the
+	// pgdata/ subdirectory) so each cluster uses its own dedicated storage
+	// instead of shared node scratch space.
+	pgbackrestDir := filepath.Dir(pgDataPath) + "/pgbackrest"
+	global.Key("spool-path").SetValue(pgbackrestDir + "/spool")
+	global.Key("log-path").SetValue(pgbackrestDir + "/log")
+	global.Key("lock-path").SetValue(pgbackrestDir + "/lock")
 
 	// Stanza section
 	stanza := cfg.Section(stanzaName)

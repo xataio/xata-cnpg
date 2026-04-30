@@ -96,6 +96,19 @@ func (s *TLSServer) Stop() {
 	s.running = false
 }
 
+// Reload sends SIGHUP to the pgbackrest server, causing it to re-read
+// its configuration and TLS certificates from disk.
+func (s *TLSServer) Reload() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.running || s.cmd == nil || s.cmd.Process == nil {
+		return
+	}
+
+	_ = s.cmd.Process.Signal(syscall.SIGHUP)
+}
+
 // IsRunning returns true if the TLS server process is alive.
 func (s *TLSServer) IsRunning() bool {
 	s.mu.Lock()

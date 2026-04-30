@@ -284,6 +284,9 @@ func (r *InstanceReconciler) Reconcile(
 		if err = r.processConfigReloadAndManageRestart(ctx, cluster); err != nil {
 			return reconcile.Result{}, fmt.Errorf("cannot apply new PostgreSQL configuration: %w", err)
 		}
+
+		// Reload pgbackrest TLS server to pick up rotated certificates
+		r.pgBackRestTLSServer.Reload()
 	}
 
 	if err = r.updateFailoverQuorumObject(ctx, cluster); err != nil {

@@ -20,6 +20,7 @@ SPDX-License-Identifier: Apache-2.0
 package pgbackrest
 
 import (
+	"context"
 	"testing"
 
 	"gopkg.in/ini.v1"
@@ -415,5 +416,49 @@ func TestConfigureOptions_CommandScoping(t *testing.T) {
 	// Restore section should NOT have other options
 	if restore.HasKey("start-fast") {
 		t.Error("start-fast should not be in restore section")
+	}
+}
+
+func TestGenerateBaseConfig_TLSAndPaths(t *testing.T) {
+	repo := &apiv1.PgBackRestRepository{
+		S3: &apiv1.PgBackRestS3{
+			Bucket:             "test-bucket",
+			Region:             "us-east-1",
+			InheritFromIAMRole: true,
+		},
+	}
+
+	cfg, err := generateBaseConfig(
+		context.Background(), nil, "default",
+		repo, "test-cluster", "/pgdata",
+	)
+	if err != nil {
+		t.Fatalf("generateBaseConfig failed: %v", err)
+	}
+
+	global := cfg.Section("global")
+	stanza := cfg.Section("test-cluster")
+
+	tests := []struct {
+		name     string
+		section  *ini.Section
+		key      string
+		expected string
+	}{
+		{"tls ca file", global, "tls-server-ca-file", "/controller/certificates/server-ca.crt"},
+		{"tls cert file", global, "tls-server-cert-file", "/controller/certificates/server.crt"},
+		{"tls key file", global, "tls-server-key-file", "/controller/certificates/server.key"},
+		{"tls address", global, "tls-server-address", "*"},
+		{"tls auth", global, "tls-server-auth", "streaming_replica=*"},
+		{"spool path", global, "spool-path", SpoolPath},
+		{"pg1 path", stanza, "pg1-path", "/pgdata"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if v := tt.section.Key(tt.key).String(); v != tt.expected {
+				t.Errorf("expected %s=%s, got %s", tt.key, tt.expected, v)
+			}
+		})
 	}
 }

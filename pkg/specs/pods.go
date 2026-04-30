@@ -43,6 +43,7 @@ import (
 	cnpgiClient "github.com/xataio/xata-cnpg/internal/cnpi/plugin/client"
 	"github.com/xataio/xata-cnpg/internal/configuration"
 	"github.com/xataio/xata-cnpg/pkg/management/url"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 	"github.com/xataio/xata-cnpg/pkg/utils/hash"
@@ -270,6 +271,11 @@ func createPostgresContainers(cluster apiv1.Cluster, envConfig EnvConfig, enable
 				{
 					Name:          "status",
 					ContainerPort: url.StatusPort,
+					Protocol:      "TCP",
+				},
+				{
+					Name:          "pgbackrest",
+					ContainerPort: pgbackrest.TLSServerPort,
 					Protocol:      "TCP",
 				},
 			},

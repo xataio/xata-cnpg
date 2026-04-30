@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/postgres"
 )
 
 // GenerateConfig builds a pgbackrest.conf INI configuration from the cluster
@@ -115,6 +116,16 @@ func generateBaseConfig(
 	// redirect to the writable scratch-data volume.
 	global.Key("log-path").SetValue("/controller/pgbackrest/log")
 	global.Key("lock-path").SetValue("/controller/pgbackrest/lock")
+
+	// TLS server config — every pod runs a pgbackrest TLS server for
+	// backup-standby inter-pod communication. Uses existing CNPG certs.
+	// The streaming_replica cert (CN=streaming_replica) is used by replicas
+	// to connect to the primary's TLS server.
+	global.Key("tls-server-ca-file").SetValue(postgres.ServerCACertificateLocation)
+	global.Key("tls-server-cert-file").SetValue(postgres.ServerCertificateLocation)
+	global.Key("tls-server-key-file").SetValue(postgres.ServerKeyLocation)
+	global.Key("tls-server-address").SetValue("*")
+	global.Key("tls-server-auth").SetValue(apiv1.StreamingReplicationUser + "=*")
 
 	// Stanza section
 	stanza := cfg.Section(stanzaName)

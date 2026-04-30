@@ -1095,6 +1095,14 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		r.pgBackRestStanzaCreated.Store(true)
 	}
 
+	// Start the pgbackrest TLS server if not already running.
+	// All pods run the server so backup-standby works after switchovers.
+	if !r.pgBackRestTLSServer.IsRunning() {
+		if err := r.pgBackRestTLSServer.Start(ctx); err != nil {
+			log.FromContext(ctx).Error(err, "Failed to start pgbackrest TLS server")
+		}
+	}
+
 	return nil
 }
 

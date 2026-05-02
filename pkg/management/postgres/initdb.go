@@ -445,7 +445,9 @@ func (info InitInfo) executeQueries(sqlUser *sql.DB, queries []string) error {
 	if err != nil {
 		return fmt.Errorf("acquiring dedicated connection for init queries: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	for _, sqlQuery := range queries {
 		log.Debug("Executing query", "sqlQuery", sqlQuery)

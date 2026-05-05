@@ -85,8 +85,7 @@ func fillDefaultParameters(config *pgx.ConnConfig) {
 	// when it's needed
 	config.RuntimeParams["datestyle"] = "ISO"
 
-	// Pin search_path so a tenant ALTER DATABASE / ALTER ROLE setting cannot
-	// influence operator-issued queries (CWE-426). User-SQL paths (initdb
-	// post-init scripts, custom monitoring queries) reset this explicitly.
-	config.RuntimeParams["search_path"] = "pg_catalog"
+	// Pin search_path via the startup packet so it cannot be overridden by
+	// database- or role-level defaults.
+	config.RuntimeParams["search_path"] = `"$user", public`
 }

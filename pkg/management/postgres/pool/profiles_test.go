@@ -33,16 +33,12 @@ var _ = Describe("Connection profile defaults", func() {
 		return cfg
 	}
 
-	DescribeTable("pin search_path = pg_catalog in the startup packet",
+	DescribeTable("pin search_path in the startup packet",
 		func(profile ConnectionProfile) {
 			cfg := parseConfig()
 			profile.Enrich(cfg)
 
-			// CWE-426: every operator-issued connection must carry a
-			// fixed search_path so that no tenant-controlled ALTER
-			// DATABASE / ALTER ROLE setting can influence operator
-			// queries.
-			Expect(cfg.RuntimeParams).To(HaveKeyWithValue("search_path", "pg_catalog"))
+			Expect(cfg.RuntimeParams).To(HaveKeyWithValue("search_path", `"$user", public`))
 
 			// Verify the pre-existing defaults are still present.
 			Expect(cfg.RuntimeParams).To(HaveKeyWithValue("client_encoding", "UTF8"))

@@ -61,8 +61,11 @@ func isUsefulPoolerSecret(object client.Object) bool {
 	})
 }
 
-// clusterSwitchoverPredicate fires only on Update events where
-// CurrentPrimary or TargetPrimary changed between old and new object.
+// clusterSwitchoverPredicate fires on Update events where any of CurrentPrimary,
+// TargetPrimary, or Phase changed. Phase is included so that the resume edge —
+// gated on PhaseHealthy by reconcileSwitchoverPause — is reliably observed even
+// when the final settle write only updates Phase without touching the primary
+// fields again.
 var clusterSwitchoverPredicate = predicate.Funcs{
 	CreateFunc: func(_ event.CreateEvent) bool {
 		return false
@@ -80,8 +83,9 @@ var clusterSwitchoverPredicate = predicate.Funcs{
 			return false
 		}
 
-		// Fire when CurrentPrimary or TargetPrimary changed
+		// Fire when CurrentPrimary, TargetPrimary, or Phase changed
 		return oldCluster.Status.CurrentPrimary != newCluster.Status.CurrentPrimary ||
-			oldCluster.Status.TargetPrimary != newCluster.Status.TargetPrimary
+			oldCluster.Status.TargetPrimary != newCluster.Status.TargetPrimary ||
+			oldCluster.Status.Phase != newCluster.Status.Phase
 	},
 }

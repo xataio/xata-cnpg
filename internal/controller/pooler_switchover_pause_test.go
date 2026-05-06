@@ -189,6 +189,7 @@ var _ = Describe("pooler_switchover_pause unit tests", func() {
 			cluster := newFakeCNPGCluster(env.client, namespace, func(c *apiv1.Cluster) {
 				c.Status.CurrentPrimary = "pod-2"
 				c.Status.TargetPrimary = "pod-2" // switchover complete
+				c.Status.Phase = apiv1.PhaseHealthy
 			})
 
 			// Create a pooler that was auto-paused (has annotation + status)
@@ -282,6 +283,71 @@ var _ = Describe("pooler_switchover_pause unit tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(updatedPooler.Spec.PgBouncer.IsPaused()).To(BeTrue())
 			Expect(updatedPooler.Status.PausedForSwitchover).To(BeTrue())
+		})
+
+		It("should stay paused on transient primary match while phase is not healthy", func() {
+			// Regression: during a real failover the cluster controller writes
+			// CurrentPrimary and TargetPrimary at different points, so the pair
+			// briefly looks consistent even though Phase is still "Failing over".
+			// The pooler must remain paused through that flicker.
+			ctx := context.Background()
+			namespace := newFakeNamespace(env.client)
+			cluster := newFakeCNPGCluster(env.client, namespace, func(c *apiv1.Cluster) {
+				c.Status.CurrentPrimary = "pod-2"
+				c.Status.TargetPrimary = "pod-2" // transient match
+				c.Status.Phase = apiv1.PhaseFailOver
+			})
+
+			pooler := &apiv1.Pooler{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pooler-flicker-test",
+					Namespace: namespace,
+					Annotations: map[string]string{
+						utils.PausedDuringSwitchoverAnnotationName: "true",
+					},
+					Labels: map[string]string{},
+				},
+				Spec: apiv1.PoolerSpec{
+					Cluster:   apiv1.LocalObjectReference{Name: cluster.Name},
+					Type:      apiv1.PoolerTypeRW,
+					Instances: ptr.To(int32(1)),
+					PgBouncer: &apiv1.PgBouncerSpec{
+						PauseDuringSwitchover:        ptr.To(true),
+						PauseDuringSwitchoverTimeout: &metav1.Duration{Duration: 5 * time.Minute},
+						Paused:                       ptr.To(true),
+						PoolMode:                     apiv1.PgBouncerPoolModeSession,
+					},
+				},
+			}
+			Expect(env.client.Create(ctx, pooler)).To(Succeed())
+
+			pooler.Status.PausedForSwitchover = true
+			pooler.Status.PausedForSwitchoverTimestamp = pgTime.GetCurrentTimestamp()
+			Expect(env.client.Status().Update(ctx, pooler)).To(Succeed())
+
+			Expect(env.poolerReconciler.reconcileSwitchoverPause(ctx, pooler, cluster)).To(Succeed())
+
+			// Then the cluster settles into healthy: pooler should resume.
+			cluster.Status.Phase = apiv1.PhaseHealthy
+			Expect(env.client.Status().Update(ctx, cluster)).To(Succeed())
+
+			updatedPooler := &apiv1.Pooler{}
+			Expect(env.client.Get(ctx,
+				types.NamespacedName{Name: pooler.Name, Namespace: namespace},
+				updatedPooler)).To(Succeed())
+			Expect(updatedPooler.Spec.PgBouncer.IsPaused()).To(BeTrue())
+			Expect(updatedPooler.Status.PausedForSwitchover).To(BeTrue())
+			Expect(updatedPooler.Annotations[utils.PausedDuringSwitchoverAnnotationName]).To(Equal("true"))
+
+			Expect(env.poolerReconciler.reconcileSwitchoverPause(ctx, updatedPooler, cluster)).To(Succeed())
+
+			finalPooler := &apiv1.Pooler{}
+			Expect(env.client.Get(ctx,
+				types.NamespacedName{Name: pooler.Name, Namespace: namespace},
+				finalPooler)).To(Succeed())
+			Expect(finalPooler.Spec.PgBouncer.IsPaused()).To(BeFalse())
+			Expect(finalPooler.Status.PausedForSwitchover).To(BeFalse())
+			Expect(finalPooler.Annotations).ToNot(HaveKey(utils.PausedDuringSwitchoverAnnotationName))
 		})
 
 		It("should force resume after timeout exceeded", func() {

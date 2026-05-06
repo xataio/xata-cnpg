@@ -44,6 +44,11 @@ const (
 
 // reconcileSwitchoverPause checks if the pooler should be paused or resumed
 // based on the switchover state of the referenced cluster.
+//
+// Pause is edge-triggered on the first observed primary mismatch. Resume is
+// latched on the cluster reaching PhaseHealthy with the primaries reconciled,
+// so that transient consistent states observed mid-failover (when CNPG writes
+// CurrentPrimary and TargetPrimary at different points) do not flap the pooler.
 func (r *PoolerReconciler) reconcileSwitchoverPause(
 	ctx context.Context,
 	pooler *apiv1.Pooler,
@@ -61,25 +66,25 @@ func (r *PoolerReconciler) reconcileSwitchoverPause(
 		return nil
 	}
 
-	switchoverInProgress := cluster.Status.CurrentPrimary != "" &&
+	primaryMismatch := cluster.Status.CurrentPrimary != "" &&
 		cluster.Status.CurrentPrimary != cluster.Status.TargetPrimary
 
-	if switchoverInProgress {
-		return r.handleSwitchoverInProgress(ctx, pooler, contextLogger)
+	if pooler.Status.PausedForSwitchover {
+		// Latched: only resume once the cluster reports a fully settled state.
+		// While the failover is in progress the cluster controller may briefly
+		// publish CurrentPrimary == TargetPrimary before flipping back, so we
+		// gate the resume on PhaseHealthy in addition to the primary match.
+		if cluster.Status.Phase == apiv1.PhaseHealthy && !primaryMismatch {
+			// Resume the pooler now that the cluster has fully settled.
+			return r.resumePoolerAfterSwitchover(ctx, pooler, contextLogger)
+		}
+		// Already paused by us - check timeout
+		return r.checkPauseTimeout(ctx, pooler, contextLogger)
 	}
 
-	return r.handleSwitchoverComplete(ctx, pooler, contextLogger)
-}
-
-// handleSwitchoverInProgress pauses the pooler if not already paused for switchover.
-func (r *PoolerReconciler) handleSwitchoverInProgress(
-	ctx context.Context,
-	pooler *apiv1.Pooler,
-	contextLogger log.Logger,
-) error {
-	// Already paused by us - check timeout
-	if pooler.Status.PausedForSwitchover {
-		return r.checkPauseTimeout(ctx, pooler, contextLogger)
+	// No handoff in progress and we never paused this pooler — nothing to do.
+	if !primaryMismatch {
+		return nil
 	}
 
 	// Skip if already manually paused (no annotation from us)
@@ -91,20 +96,6 @@ func (r *PoolerReconciler) handleSwitchoverInProgress(
 
 	// Pause the pooler
 	return r.pausePoolerForSwitchover(ctx, pooler, contextLogger)
-}
-
-// handleSwitchoverComplete resumes the pooler if it was paused by us.
-func (r *PoolerReconciler) handleSwitchoverComplete(
-	ctx context.Context,
-	pooler *apiv1.Pooler,
-	contextLogger log.Logger,
-) error {
-	// Only resume if we paused it
-	if !pooler.Status.PausedForSwitchover {
-		return nil
-	}
-
-	return r.resumePoolerAfterSwitchover(ctx, pooler, contextLogger)
 }
 
 // pausePoolerForSwitchover sets the pooler to paused state and marks it.

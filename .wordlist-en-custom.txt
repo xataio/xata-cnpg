@@ -141,6 +141,7 @@ DigitalOcean
 DisablePassword
 DisabledDefaultServices
 DoD
+DoS
 DockerHub
 Dockle
 EBS
@@ -1513,6 +1514,7 @@ webhooks
 webserver
 webtest
 wikipedia
+whitespace
 wp
 writeService
 wsl

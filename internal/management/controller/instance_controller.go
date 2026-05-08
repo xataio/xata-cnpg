@@ -294,6 +294,10 @@ func (r *InstanceReconciler) Reconcile(
 	// From now on, the database can be assumed as running. Every operation
 	// needing the database to be up should be put below this line.
 
+	if err := r.ensureSuperuserTimeoutProtection(ctx); err != nil {
+		contextLogger.Error(err, "while protecting superuser from timeout settings")
+	}
+
 	r.configureSlotReplicator(cluster)
 
 	postgresDB, err := r.instance.ConnectionPool().Connection("postgres")
@@ -1060,6 +1064,39 @@ func (r *InstanceReconciler) reconcileCheckWalArchiveFile(cluster *apiv1.Cluster
 		// If our current condition is archiving we can delete the file
 		if condition.Type == string(apiv1.ConditionContinuousArchiving) && condition.Status == metav1.ConditionTrue {
 			return fileutils.RemoveFile(filePath)
+		}
+	}
+
+	return nil
+}
+
+// ensureSuperuserTimeoutProtection sets timeout parameters to 0 on the postgres
+// role so that user-configured timeouts in postgresql.conf do not affect internal
+// operations (backups, checkpoints, role management, etc).
+func (r *InstanceReconciler) ensureSuperuserTimeoutProtection(ctx context.Context) error {
+	db, err := r.instance.GetSuperUserDB()
+	if err != nil {
+		return fmt.Errorf("getting superuser connection: %w", err)
+	}
+
+	params := []string{
+		"statement_timeout",
+		"lock_timeout",
+		"idle_in_transaction_session_timeout",
+		"idle_session_timeout",
+	}
+
+	version, err := r.instance.GetPgVersion()
+	if err != nil {
+		return fmt.Errorf("getting postgres version: %w", err)
+	}
+	if version.Major >= 17 {
+		params = append(params, "transaction_timeout")
+	}
+
+	for _, param := range params {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER ROLE postgres SET %s = 0", param)); err != nil {
+			return fmt.Errorf("setting %s on postgres role: %w", param, err)
 		}
 	}
 

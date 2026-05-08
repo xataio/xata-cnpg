@@ -86,6 +86,7 @@ func fillDefaultParameters(config *pgx.ConnConfig) {
 	config.RuntimeParams["datestyle"] = "ISO"
 
 	// Pin search_path via the startup packet so it cannot be overridden by
-	// database- or role-level defaults.
-	config.RuntimeParams["search_path"] = `"$user", public`
+	// database- or role-level defaults. pg_catalog is implicitly searched
+	// first when not listed; "$user" is intentionally omitted.
+	config.RuntimeParams["search_path"] = "public"
 }

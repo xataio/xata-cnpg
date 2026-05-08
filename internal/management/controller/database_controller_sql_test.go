@@ -293,16 +293,29 @@ var _ = Describe("Managed Extensions SQL", func() {
 		createExtensionSQL := "CREATE EXTENSION \"testext\" VERSION \"1.0\" SCHEMA \"default\""
 
 		It("returns success when the extension has been created", func(ctx SpecContext) {
+			// CREATE EXTENSION runs inside a transaction with
+			// SET LOCAL search_path TO public so relocatable extensions can
+			// install into a writable schema (CWE-426 hardening).
+			dbMock.ExpectBegin()
+			dbMock.
+				ExpectExec("SET LOCAL search_path TO public").
+				WillReturnResult(sqlmock.NewResult(0, 0))
 			dbMock.
 				ExpectExec(createExtensionSQL).
 				WillReturnResult(sqlmock.NewResult(0, 1))
+			dbMock.ExpectCommit()
 			Expect(createDatabaseExtension(ctx, db, ext)).Error().NotTo(HaveOccurred())
 		})
 
 		It("fails when the extension could not be created", func(ctx SpecContext) {
+			dbMock.ExpectBegin()
+			dbMock.
+				ExpectExec("SET LOCAL search_path TO public").
+				WillReturnResult(sqlmock.NewResult(0, 0))
 			dbMock.
 				ExpectExec(createExtensionSQL).
 				WillReturnError(testError)
+			dbMock.ExpectRollback()
 			Expect(createDatabaseExtension(ctx, db, ext)).Error().To(Equal(testError))
 		})
 	})
@@ -337,9 +350,17 @@ var _ = Describe("Managed Extensions SQL", func() {
 		})
 
 		It("updates the extension version", func(ctx SpecContext) {
+			// ALTER EXTENSION ... UPDATE TO runs upgrade scripts that may
+			// contain unqualified CREATE statements; bracket with
+			// SET LOCAL search_path TO public.
+			dbMock.ExpectBegin()
+			dbMock.
+				ExpectExec("SET LOCAL search_path TO public").
+				WillReturnResult(sqlmock.NewResult(0, 0))
 			dbMock.
 				ExpectExec("ALTER EXTENSION \"testext\" UPDATE TO \"1.0\"").
 				WillReturnResult(sqlmock.NewResult(0, 1))
+			dbMock.ExpectCommit()
 
 			Expect(updateDatabaseExtension(ctx, db, ext,
 				&extInfo{Name: ext.Name, Version: "0.9", Schema: ext.Schema})).Error().NotTo(HaveOccurred())
@@ -358,9 +379,14 @@ var _ = Describe("Managed Extensions SQL", func() {
 			dbMock.
 				ExpectExec("ALTER EXTENSION \"testext\" SET SCHEMA \"default\"").
 				WillReturnResult(sqlmock.NewResult(0, 1))
+			dbMock.ExpectBegin()
+			dbMock.
+				ExpectExec("SET LOCAL search_path TO public").
+				WillReturnResult(sqlmock.NewResult(0, 0))
 			dbMock.
 				ExpectExec("ALTER EXTENSION \"testext\" UPDATE TO \"1.0\"").
 				WillReturnResult(sqlmock.NewResult(0, 1))
+			dbMock.ExpectCommit()
 
 			Expect(updateDatabaseExtension(ctx, db, ext, &extInfo{
 				Name: ext.Name, Version: "0.9",
@@ -381,9 +407,14 @@ var _ = Describe("Managed Extensions SQL", func() {
 			dbMock.
 				ExpectExec("ALTER EXTENSION \"testext\" SET SCHEMA \"default\"").
 				WillReturnResult(sqlmock.NewResult(0, 1))
+			dbMock.ExpectBegin()
+			dbMock.
+				ExpectExec("SET LOCAL search_path TO public").
+				WillReturnResult(sqlmock.NewResult(0, 0))
 			dbMock.
 				ExpectExec("ALTER EXTENSION \"testext\" UPDATE TO \"1.0\"").
 				WillReturnError(testError)
+			dbMock.ExpectRollback()
 
 			Expect(updateDatabaseExtension(ctx, db, ext, &extInfo{
 				Name: ext.Name, Version: "0.9",

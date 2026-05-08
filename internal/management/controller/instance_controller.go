@@ -745,7 +745,20 @@ func (r *InstanceReconciler) reconcileExtensions(
 		// a DDL when it is not really needed.
 
 		if !extension.SkipCreateExtension && extensionIsUsed && !extensionIsInstalled {
-			_, err = tx.Exec(fmt.Sprintf("CREATE EXTENSION %s", extension.Name))
+			// The connection is pinned to search_path = pg_catalog;
+			// relocatable extensions whose install scripts contain
+			// unqualified CREATEs need a writable schema. Bracket only
+			// the CREATE so the rest of the transaction continues
+			// resolving operators out of pg_catalog.
+			if _, err = tx.Exec("SET search_path TO public"); err != nil {
+				break
+			}
+			if _, err = tx.Exec(fmt.Sprintf("CREATE EXTENSION %s", extension.Name)); err != nil {
+				break
+			}
+			if _, err = tx.Exec("RESET search_path"); err != nil {
+				break
+			}
 		} else if !extensionIsUsed && extensionIsInstalled {
 			_, err = tx.Exec(fmt.Sprintf("DROP EXTENSION %s", extension.Name))
 		}

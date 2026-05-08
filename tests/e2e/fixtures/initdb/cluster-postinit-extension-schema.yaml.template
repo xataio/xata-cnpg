@@ -1,11 +1,11 @@
 # Cluster used by the search_path / extension-creation regression test.
 #
 # A tenant DB-owner pre-creates a schema named after the operator's role
-# (`postgres`) and authorizes it to the application owner. With a connection
-# search_path of `"$user", public`, that schema would become the default
-# creation schema for operator-issued `CREATE EXTENSION` calls; the operator
-# pins search_path to `public`, so the next reconcileExtensions cycle must
-# still install pg_stat_statements into `public`.
+# (`postgres`) and authorizes it to the application owner. The operator
+# connection is pinned to search_path = pg_catalog and brackets each
+# CREATE EXTENSION with SET LOCAL search_path TO public, so the next
+# reconcileExtensions cycle must still install pg_stat_statements into
+# `public` regardless of the tenant-created `postgres` schema.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:

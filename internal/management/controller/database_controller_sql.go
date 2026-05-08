@@ -276,10 +276,26 @@ func createDatabaseExtension(ctx context.Context, db *sql.DB, ext apiv1.Extensio
 		sqlCreateExtension.WriteString(fmt.Sprintf(" SCHEMA %s", pgx.Identifier{ext.Schema}.Sanitize()))
 	}
 
-	_, err := db.ExecContext(ctx, sqlCreateExtension.String())
+	// The connection is pinned to search_path = pg_catalog. Relocatable
+	// extensions whose install scripts contain unqualified CREATEs (and
+	// where the spec did not pin a SCHEMA) need a writable schema visible
+	// during the install. SET LOCAL inside a transaction reverts on
+	// COMMIT / ROLLBACK, so the connection state is not leaked.
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("starting transaction for CREATE EXTENSION: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, "SET LOCAL search_path TO public"); err != nil {
+		return fmt.Errorf("setting search_path before CREATE EXTENSION: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, sqlCreateExtension.String()); err != nil {
 		contextLogger.Error(err, "while creating extension", "query", sqlCreateExtension.String())
 		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing CREATE EXTENSION: %w", err)
 	}
 	contextLogger.Info("created extension", "name", ext.Name)
 
@@ -324,8 +340,24 @@ func updateDatabaseExtension(ctx context.Context, db *sql.DB, spec apiv1.Extensi
 			pgx.Identifier{spec.Version}.Sanitize(),
 		)
 
-		if _, err := db.ExecContext(ctx, changeVersionSQL); err != nil {
+		// ALTER EXTENSION ... UPDATE TO runs version-upgrade SQL scripts
+		// shipped with the extension; those scripts can contain unqualified
+		// CREATEs. Bracket with SET LOCAL search_path TO public for the
+		// same reason as createDatabaseExtension.
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("starting transaction for ALTER EXTENSION UPDATE: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		if _, err := tx.ExecContext(ctx, "SET LOCAL search_path TO public"); err != nil {
+			return fmt.Errorf("setting search_path before ALTER EXTENSION UPDATE: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, changeVersionSQL); err != nil {
 			return fmt.Errorf("altering version: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("committing ALTER EXTENSION UPDATE: %w", err)
 		}
 
 		contextLogger.Info("altered extension version", "name", spec.Name, "version", spec.Version)

@@ -285,10 +285,27 @@ func (ds *databaseSnapshotter) executePostImportQueries(
 		return err
 	}
 
+	// User-supplied queries expect the standard "$user", public search_path;
+	// the connection pool pins search_path to pg_catalog at startup, so we
+	// bracket each query. The dedicated *sql.Conn keeps SET and the query
+	// on the same physical connection.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquiring dedicated connection for post-import queries: %w", err)
+	}
+	defer func() {
+		_ = conn.Close()
+	}()
+
 	for _, query := range postImportQueries {
-		_, err := db.Exec(query)
-		if err != nil {
+		if _, err := conn.ExecContext(ctx, `SET search_path TO "$user", public`); err != nil {
+			return fmt.Errorf("setting search_path before post-import query: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, query); err != nil {
 			return err
+		}
+		if _, err := conn.ExecContext(ctx, `RESET search_path`); err != nil {
+			return fmt.Errorf("resetting search_path after post-import query: %w", err)
 		}
 	}
 

@@ -109,6 +109,7 @@ func newMetrics() *metrics {
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- e.Metrics.CollectionsTotal.Desc()
 	ch <- e.Metrics.Error.Desc()
+	ch <- e.Metrics.PgbouncerUp.Desc()
 	e.Metrics.PgCollectionErrors.Describe(ch)
 	e.Metrics.CollectionDuration.Describe(ch)
 	e.Metrics.ShowLists.Describe(ch)
@@ -123,6 +124,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 
 	ch <- e.Metrics.CollectionsTotal
 	ch <- e.Metrics.Error
+	ch <- e.Metrics.PgbouncerUp
 	e.Metrics.PgCollectionErrors.Collect(ch)
 	e.Metrics.CollectionDuration.Collect(ch)
 }
@@ -139,6 +141,7 @@ func (e *Exporter) collectPgBouncerMetrics(ch chan<- prometheus.Metric) {
 	if err != nil {
 		contextLogger.Error(err, "Error opening connection to PostgreSQL")
 		e.Metrics.Error.Set(1)
+		e.Metrics.PgbouncerUp.Set(0)
 		return
 	}
 

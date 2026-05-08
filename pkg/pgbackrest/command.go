@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 )
@@ -54,6 +55,20 @@ func IsAvailable() bool {
 // does not exist in the repository. This is a normal condition — PostgreSQL
 // uses it to stop recovery or fall back to streaming replication.
 var ErrWALNotFound = errors.New("WAL segment not found in repository")
+
+// IsStanzaMissingFromRepo checks whether a pgbackrest error indicates that
+// the stanza metadata (archive.info) has been deleted from the repository.
+// This is exit code 103 with FileMissingError — meaning the info files are
+// gone but pgbackrest found no valid repository to operate against.
+// Recreating the stanza will only succeed if the S3 path is fully clean;
+// if partial data remains, stanza-create will fail separately.
+func IsStanzaMissingFromRepo(err error) bool {
+	var cmdErr *CommandError
+	if !errors.As(err, &cmdErr) {
+		return false
+	}
+	return cmdErr.ExitCode == 103 && strings.Contains(cmdErr.Stderr, "FileMissingError")
+}
 
 // CommandError is returned when a pgbackrest command fails.
 type CommandError struct {

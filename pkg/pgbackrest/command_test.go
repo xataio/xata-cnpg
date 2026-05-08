@@ -21,6 +21,7 @@ package pgbackrest
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -100,5 +101,59 @@ func TestArchiveGet_WALNotFound(t *testing.T) {
 	// Verify ErrWALNotFound is a distinct error
 	if errors.Is(cmdErr, ErrWALNotFound) {
 		t.Error("CommandError should not be ErrWALNotFound directly")
+	}
+}
+
+func TestIsStanzaMissingFromRepo(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			"FileMissingError with exit 103",
+			&CommandError{
+				Command:  "archive-push",
+				ExitCode: 103,
+				Stderr:   "repo1: [FileMissingError] unable to load info file '/stanza/archive/stanza/archive.info'",
+			},
+			true,
+		},
+		{
+			"exit 103 without FileMissingError",
+			&CommandError{
+				Command:  "archive-push",
+				ExitCode: 103,
+				Stderr:   "repo1: [ArchiveMismatchError] PostgreSQL version 17, system-id 123 do not match",
+			},
+			false,
+		},
+		{
+			"FileMissingError with different exit code",
+			&CommandError{
+				Command:  "archive-push",
+				ExitCode: 1,
+				Stderr:   "[FileMissingError] something",
+			},
+			false,
+		},
+		{
+			"nil error",
+			nil,
+			false,
+		},
+		{
+			"non-CommandError",
+			fmt.Errorf("some error"),
+			false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsStanzaMissingFromRepo(tt.err); got != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, got)
+			}
+		})
 	}
 }

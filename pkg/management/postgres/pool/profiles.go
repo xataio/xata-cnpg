@@ -39,6 +39,7 @@ type connectionProfilePostgresql profile
 
 func (connectionProfilePostgresql) Enrich(config *pgx.ConnConfig) {
 	fillDefaultParameters(config)
+	pinSearchPath(config)
 
 	// We don't want to be stuck on queries if synchronous replicas
 	// are still not alive and kicking. The next reconciliation loop
@@ -50,6 +51,7 @@ type connectionProfilePostgresqlPhysicalReplication profile
 
 func (connectionProfilePostgresqlPhysicalReplication) Enrich(config *pgx.ConnConfig) {
 	fillDefaultParameters(config)
+	pinSearchPath(config)
 
 	// The simple query protocol is needed since we're going to use
 	// this function to connect to the PgBouncer administrative
@@ -84,10 +86,12 @@ func fillDefaultParameters(config *pgx.ConnConfig) {
 	// a standard date format for the operator to manage the dates
 	// when it's needed
 	config.RuntimeParams["datestyle"] = "ISO"
+}
 
-	// Pin search_path via the startup packet so it cannot be overridden by
-	// database- or role-level defaults. Code paths that need a writable
-	// schema (CREATE EXTENSION, user-supplied SQL) opt in by setting
-	// search_path locally for the duration of that operation.
+// pinSearchPath pins search_path via the startup packet so it cannot be
+// overridden by database- or role-level defaults. Code paths that need a
+// writable schema (CREATE EXTENSION, user-supplied SQL) opt in by setting
+// search_path locally for the duration of that operation.
+func pinSearchPath(config *pgx.ConnConfig) {
 	config.RuntimeParams["search_path"] = "pg_catalog"
 }

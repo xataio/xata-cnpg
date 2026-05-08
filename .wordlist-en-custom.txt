@@ -198,6 +198,7 @@ GitOps
 GoArch
 Golang
 GolangCI
+GoReleaser
 GoogleCredentials
 Grafana
 HH
@@ -311,6 +312,7 @@ OnlineUpdateEnabled
 OnlineUpgrading
 OpenBao
 OpenID
+OpenSSF
 OpenSSL
 OpenShift
 Openshift
@@ -439,6 +441,7 @@ Ruocco
 SANs
 SAS
 SBOM
+SBOMs
 SCC
 SCCs
 SDK
@@ -584,6 +587,7 @@ addons
 affinityconfiguration
 aks
 albert
+alex
 allTables
 allnamespaces
 alloc
@@ -849,6 +853,7 @@ env
 envFrom
 ephemeralVolumeSource
 ephemeralVolumesSizeLimit
+ermakov
 eu
 excludePatterns
 executables
@@ -877,6 +882,7 @@ fieldPath
 fieldref
 filesystem
 finalizer
+finalizers
 findstr
 fio
 fips
@@ -926,6 +932,7 @@ html
 http
 httpGet
 https
+hu
 hugepages
 icu
 icuLocale
@@ -973,10 +980,12 @@ isolationCheck
 issuecomment
 italy
 jdbc
+jmealo
 jobCount
 jq
 json
 jsonpath
+juliamertz
 kb
 kbytes
 keepalive
@@ -1112,6 +1121,7 @@ observability
 observedGeneration
 oc
 ol
+oleg
 olm
 ongoingBackups
 onlineConfiguration
@@ -1140,6 +1150,7 @@ passwd
 passwordSecret
 passwordStatus
 pc
+pchovelon
 pdf
 periodSeconds
 persistentVolumeClaims
@@ -1216,6 +1227,7 @@ ppc
 pprof
 pre
 preferredDuringSchedulingIgnoredDuringExecution
+prefetched
 preload
 prepended
 primaryUpdateMethod
@@ -1250,6 +1262,7 @@ readinessProbe
 readthedocs
 readyInstances
 reconciler
+reconcilers
 reconciliationLoop
 reconnection
 recoverability
@@ -1297,6 +1310,7 @@ runtime
 rw
 sSfL
 sa
+sanitization
 sas
 scalability
 scalable
@@ -1338,9 +1352,11 @@ serviceTemplate
 serviceaccount
 sessionToken
 sha
+sharifmshaker
 shm
 shmall
 shmmax
+shusaan
 shutdownCheckpointToken
 sig
 sigs

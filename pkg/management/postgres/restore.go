@@ -294,7 +294,7 @@ func (info InitInfo) Restore(ctx context.Context, cli client.Client) error {
 	var envs []string
 	var config string
 
-	// nolint:nestif
+	//nolint:nestif
 	if recoverySource := cluster.GetRecoverySourcePgBackRest(); recoverySource != nil {
 		contextLogger.Info("Restore through pgbackrest detected", "stanza", recoverySource.StanzaName)
 		conf, err := info.restoreViaPgBackRest(ctx, cli, cluster)

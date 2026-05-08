@@ -46,8 +46,19 @@ var _ = Describe("Connection profile defaults", func() {
 		},
 		Entry("ConnectionProfilePostgresql", ConnectionProfilePostgresql),
 		Entry("ConnectionProfilePostgresqlPhysicalReplication", ConnectionProfilePostgresqlPhysicalReplication),
-		Entry("ConnectionProfilePgbouncer", ConnectionProfilePgbouncer),
 	)
+
+	It("does not pin search_path on the pgbouncer profile", func() {
+		// PgBouncer's admin console rejects unknown startup parameters with
+		// SQLSTATE 08P01, and the admin connection never reaches PostgreSQL,
+		// so there is no CWE-426 vector to defend against here.
+		cfg := parseConfig()
+		ConnectionProfilePgbouncer.Enrich(cfg)
+
+		Expect(cfg.RuntimeParams).ToNot(HaveKey("search_path"))
+		Expect(cfg.RuntimeParams).To(HaveKeyWithValue("client_encoding", "UTF8"))
+		Expect(cfg.RuntimeParams).To(HaveKeyWithValue("datestyle", "ISO"))
+	})
 
 	It("preserves the synchronous_commit override on the postgresql profile", func() {
 		cfg := parseConfig()

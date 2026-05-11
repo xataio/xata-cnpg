@@ -56,6 +56,9 @@ func (in *Pooler) GetServerCASecretNameOrDefault(cluster *Cluster) string {
 	if in.Spec.PgBouncer != nil && in.Spec.PgBouncer.ServerCASecret != nil {
 		return in.Spec.PgBouncer.ServerCASecret.Name
 	}
+	if cluster == nil {
+		return ""
+	}
 
 	return cluster.GetServerCASecretName()
 }
@@ -66,6 +69,9 @@ func (in *Pooler) GetClientCASecretNameOrDefault(cluster *Cluster) string {
 	if in.Spec.PgBouncer != nil && in.Spec.PgBouncer.ClientCASecret != nil {
 		return in.Spec.PgBouncer.ClientCASecret.Name
 	}
+	if cluster == nil {
+		return ""
+	}
 
 	return cluster.GetClientCASecretName()
 }
@@ -75,6 +81,9 @@ func (in *Pooler) GetClientCASecretNameOrDefault(cluster *Cluster) string {
 func (in *Pooler) GetClientTLSSecretNameOrDefault(cluster *Cluster) string {
 	if in.Spec.PgBouncer != nil && in.Spec.PgBouncer.ClientTLSSecret != nil {
 		return in.Spec.PgBouncer.ClientTLSSecret.Name
+	}
+	if cluster == nil {
+		return ""
 	}
 
 	return cluster.GetServerTLSSecretName()

@@ -337,6 +337,10 @@ PasswordConfiguration
 PasswordState
 PasswordStatus
 Patroni
+PauseDuringSwitchover
+PauseDuringSwitchoverTimeout
+PausedForSwitchover
+PausedForSwitchoverTimestamp
 Percona
 PersistentVolumeClaim
 PersistentVolumeClaimSpec
@@ -1138,6 +1142,11 @@ passfile
 passwd
 passwordSecret
 passwordStatus
+pauseDuringSwitchover
+pauseDuringSwitchoverTimeout
+pausedDuringSwitchover
+pausedForSwitchover
+pausedForSwitchoverTimestamp
 pc
 pdf
 periodSeconds
@@ -1406,6 +1415,7 @@ svc
 svg
 switchReplicaClusterStatus
 switchoverDelay
+switchoverfailover
 switchovers
 syncReplicaElectionConstraint
 synchronizeLogicalDecoding

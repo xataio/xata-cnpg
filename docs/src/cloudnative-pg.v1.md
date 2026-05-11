@@ -4361,6 +4361,23 @@ client connections until this value is set to <code>false</code> (default). Inte
 the operator calls PgBouncer's <code>PAUSE</code> and <code>RESUME</code> commands.</p>
 </td>
 </tr>
+<tr><td><code>pauseDuringSwitchover</code><br/>
+<i>bool</i>
+</td>
+<td>
+   <p>PauseDuringSwitchover enables automatic pause/resume of this pooler
+during switchover or failover operations on the referenced cluster.
+Default: false (disabled).</p>
+</td>
+</tr>
+<tr><td><code>pauseDuringSwitchoverTimeout</code><br/>
+<a href="https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Duration"><i>meta/v1.Duration</i></a>
+</td>
+<td>
+   <p>PauseDuringSwitchoverTimeout is the maximum time the pooler will remain
+paused during a switchover. Default: 120s.</p>
+</td>
+</tr>
 </tbody>
 </table>
 
@@ -4766,6 +4783,22 @@ you need this functionality, you can create a PodMonitor manually.</p>
 </td>
 <td>
    <p>The number of pods trying to be scheduled</p>
+</td>
+</tr>
+<tr><td><code>pausedForSwitchover</code><br/>
+<i>bool</i>
+</td>
+<td>
+   <p>PausedForSwitchover tracks whether this pooler is currently paused
+as part of an automatic switchover or failover operation.</p>
+</td>
+</tr>
+<tr><td><code>pausedForSwitchoverTimestamp</code><br/>
+<i>string</i>
+</td>
+<td>
+   <p>PausedForSwitchoverTimestamp records when this pooler was paused for
+switchover, in RFC3339Micro format.</p>
 </td>
 </tr>
 </tbody>

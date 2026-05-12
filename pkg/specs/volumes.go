@@ -241,6 +241,10 @@ func CreatePostgresVolumeMounts(cluster apiv1.Cluster) []corev1.VolumeMount {
 		},
 		{
 			Name:      "scratch-data",
+			MountPath: "/tmp",
+		},
+		{
+			Name:      "scratch-data",
 			MountPath: postgres.ScratchDataDirectory,
 		},
 		{

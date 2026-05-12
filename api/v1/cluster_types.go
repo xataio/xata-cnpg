@@ -943,6 +943,12 @@ type ClusterStatus struct {
 	// +optional
 	FirstRecoverabilityPointByMethod map[BackupMethod]metav1.Time `json:"firstRecoverabilityPointByMethod,omitempty"`
 
+	// The latest point in time that can be recovered to, stored as a date
+	// in RFC3339 format. Based on the last successfully archived WAL,
+	// from pg_stat_archiver.last_archived_time on the primary instance.
+	// +optional
+	LastRecoverabilityPoint string `json:"lastRecoverabilityPoint,omitempty"`
+
 	// Last successful backup, stored as a date in RFC3339 format.
 	// This field is calculated from the content of LastSuccessfulBackupByMethod.
 	//

@@ -67,6 +67,9 @@ type BackupStatusApplyConfiguration struct {
 	InstanceID *InstanceIDApplyConfiguration `json:"instanceID,omitempty"`
 	// Status of the volumeSnapshot backup
 	BackupSnapshotStatus *BackupSnapshotStatusApplyConfiguration `json:"snapshotBackupStatus,omitempty"`
+	// Progress of the backup, reported during execution
+	// (e.g. "56.73% complete")
+	Progress *string `json:"progress,omitempty"`
 	// The backup method being used
 	Method *apiv1.BackupMethod `json:"method,omitempty"`
 	// Whether the backup was online/hot (`true`) or offline/cold (`false`)
@@ -282,6 +285,14 @@ func (b *BackupStatusApplyConfiguration) WithInstanceID(value *InstanceIDApplyCo
 // If called multiple times, the BackupSnapshotStatus field is set to the value of the last call.
 func (b *BackupStatusApplyConfiguration) WithBackupSnapshotStatus(value *BackupSnapshotStatusApplyConfiguration) *BackupStatusApplyConfiguration {
 	b.BackupSnapshotStatus = value
+	return b
+}
+
+// WithProgress sets the Progress field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Progress field is set to the value of the last call.
+func (b *BackupStatusApplyConfiguration) WithProgress(value string) *BackupStatusApplyConfiguration {
+	b.Progress = &value
 	return b
 }
 

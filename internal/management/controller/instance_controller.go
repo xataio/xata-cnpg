@@ -297,8 +297,11 @@ func (r *InstanceReconciler) Reconcile(
 	// From now on, the database can be assumed as running. Every operation
 	// needing the database to be up should be put below this line.
 
-	if err := r.ensureSuperuserTimeoutProtection(ctx); err != nil {
-		contextLogger.Error(err, "while protecting superuser from timeout settings")
+	// ALTER ROLE is a write operation — skip on replicas (read-only).
+	if r.instance.GetPodName() == cluster.Status.CurrentPrimary {
+		if err := r.ensureSuperuserTimeoutProtection(ctx); err != nil {
+			contextLogger.Error(err, "while protecting superuser from timeout settings")
+		}
 	}
 
 	r.configureSlotReplicator(cluster)
@@ -1133,7 +1136,9 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		return fmt.Errorf("writing pgbackrest config: %w", err)
 	}
 
-	if !r.pgBackRestStanzaCreated.Load() {
+	// Stanza creation is only needed on the primary — the stanza metadata
+	// lives in S3 and replicas access it directly from there.
+	if isPrimary && !r.pgBackRestStanzaCreated.Load() {
 		if err := pgbackrest.StanzaCreate(ctx, cluster.Name); err != nil {
 			log.FromContext(ctx).Error(err, "Failed to create pgbackrest stanza, will retry on next reconcile")
 			return nil

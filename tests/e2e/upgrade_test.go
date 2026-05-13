@@ -92,7 +92,7 @@ var _ = Describe("Upgrade", Label(tests.LabelUpgrade, tests.LabelNoOpenshift), O
 		rollingUpgradeNamespace = "rolling-upgrade"
 		onlineUpgradeNamespace  = "online-upgrade"
 
-		pgSecrets = fixturesDir + "/upgrade/pgsecrets.yaml" //nolint:gosec
+		pgSecrets = fixturesDir + "/upgrade/pgsecrets.yaml"
 
 		// This is a cluster of the previous version, created before the operator upgrade
 		clusterName1 = "cluster1"
@@ -614,9 +614,9 @@ var _ = Describe("Upgrade", Label(tests.LabelUpgrade, tests.LabelNoOpenshift), O
 
 		assertPGBouncerPodsAreReady(upgradeNamespace, pgBouncerSampleFile, 2)
 
-		var podUIDs []types.UID
 		podList, err := clusterutils.ListPods(env.Ctx, env.Client, upgradeNamespace, clusterName1)
 		Expect(err).ToNot(HaveOccurred())
+		podUIDs := make([]types.UID, 0, len(podList.Items))
 		for _, pod := range podList.Items {
 			podUIDs = append(podUIDs, pod.GetUID())
 		}

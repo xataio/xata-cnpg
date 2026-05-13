@@ -36,8 +36,8 @@ import (
 	"github.com/xataio/xata-cnpg/tests/utils/objects"
 	"github.com/xataio/xata-cnpg/tests/utils/run"
 
-	. "github.com/onsi/ginkgo/v2" // nolint
-	. "github.com/onsi/gomega"    // nolint
+	. "github.com/onsi/ginkgo/v2" //nolint
+	. "github.com/onsi/gomega"    //nolint
 )
 
 // CreateConfigMap creates the operator namespace and enables/disable the online upgrade for

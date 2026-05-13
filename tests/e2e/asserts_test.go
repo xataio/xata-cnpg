@@ -176,12 +176,12 @@ func AssertSwitchoverWithHistory(
 
 	if !isReplica {
 		By("confirming that the all postgres containers have *.history file after switchover", func() {
-			pods = []string{}
 			timeout := 120
 
 			// Gather pod names
 			podList, err := clusterutils.ListPods(env.Ctx, env.Client, namespace, clusterName)
 			Expect(len(podList.Items), err).To(BeEquivalentTo(oldPodListLength))
+			pods = make([]string, 0, len(podList.Items))
 			for _, p := range podList.Items {
 				pods = append(pods, p.Name)
 			}
@@ -1706,7 +1706,7 @@ func AssertClusterRestoreWithApplicationDB(namespace, restoreClusterFile, tableN
 	})
 
 	By("update user application password for restored cluster and verify connectivity", func() {
-		const newPassword = "eeh2Zahohx" //nolint:gosec
+		const newPassword = "eeh2Zahohx"
 		AssertUpdateSecret("password", newPassword, secretName, namespace, restoredClusterName, 30, env)
 
 		AssertApplicationDatabaseConnection(
@@ -1951,7 +1951,7 @@ func AssertClusterWasRestoredWithPITRAndApplicationDB(namespace, clusterName, ta
 	})
 
 	By("update user application password for restored cluster and verify connectivity", func() {
-		const newPassword = "eeh2Zahohx" //nolint:gosec
+		const newPassword = "eeh2Zahohx"
 		AssertUpdateSecret("password", newPassword, secretName, namespace, clusterName, 30, env)
 		AssertApplicationDatabaseConnection(
 			namespace,
@@ -2847,7 +2847,10 @@ func AssertClusterReplicationSlotsAligned(
 	podList, err := clusterutils.ListPods(env.Ctx, env.Client, namespace, clusterName)
 	Expect(err).ToNot(HaveOccurred())
 	Eventually(func(g Gomega) {
-		var lsnList []string
+		numPods := len(podList.Items)
+		// Capacity calculation: primary has (N-1) HA slots, each of the (N-1) replicas
+		// has (N-2) slots. Total LSNs: (N-1) + (N-1)*(N-2) = (N-1)^2
+		lsnList := make([]string, 0, (numPods-1)*(numPods-1))
 		for _, pod := range podList.Items {
 			out, err := replicationslot.GetReplicationSlotLsnsOnPod(
 				env.Ctx, env.Client, env.Interface, env.RestClientConfig,

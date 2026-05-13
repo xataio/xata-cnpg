@@ -369,7 +369,7 @@ func (ws *remoteWebserverEndpoints) updateInstanceManager(
 	}
 }
 
-// nolint: gocognit
+//nolint:gocognit
 func (ws *remoteWebserverEndpoints) backup(w http.ResponseWriter, req *http.Request) {
 	log.Trace("request method", "method", req.Method)
 	if !ws.ongoingBackupRequest.TryLock() {
@@ -431,6 +431,7 @@ func (ws *remoteWebserverEndpoints) backup(w http.ResponseWriter, req *http.Requ
 			sendUnprocessableEntityJSONResponse(w, "CANNOT_INITIALIZE_CONNECTION", err.Error())
 			return
 		}
+		//nolint:gosec // G118: backup must outlive the HTTP request
 		go ws.currentBackup.startBackup(context.Background(), &ws.ongoingBackupRequest)
 
 		res := Response[BackupResultData]{
@@ -490,6 +491,7 @@ func (ws *remoteWebserverEndpoints) backup(w http.ResponseWriter, req *http.Requ
 
 		ws.currentBackup.data.Phase = Closing
 
+		//nolint:gosec // G118: backup must outlive the HTTP request
 		go ws.currentBackup.stopBackup(context.Background(), &ws.ongoingBackupRequest)
 		sendJSONResponseWithData(w, 200, res)
 		return
@@ -552,7 +554,7 @@ func (ws *remoteWebserverEndpoints) pgArchivePartial(w http.ResponseWriter, req 
 	}()
 
 	options := []string{constants.WalArchiveCommand, partialWalFileRelativePath}
-	walArchiveCmd := exec.Command("/controller/manager", options...) // nolint: gosec
+	walArchiveCmd := exec.Command("/controller/manager", options...) //nolint: gosec
 	walArchiveCmd.Dir = pgData
 	if err := execlog.RunBuffering(walArchiveCmd, "wal-archive-partial"); err != nil {
 		sendBadRequestJSONResponse(w, "ERROR_WHILE_EXECUTING_WAL_ARCHIVE", err.Error())

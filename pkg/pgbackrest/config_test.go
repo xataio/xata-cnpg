@@ -430,7 +430,7 @@ func TestGenerateBaseConfig_TLSAndPaths(t *testing.T) {
 
 	cfg, err := generateBaseConfig(
 		context.Background(), nil, "default",
-		repo, "test-cluster", "/pgdata",
+		repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
 	)
 	if err != nil {
 		t.Fatalf("generateBaseConfig failed: %v", err)
@@ -450,8 +450,8 @@ func TestGenerateBaseConfig_TLSAndPaths(t *testing.T) {
 		{"tls key file", global, "tls-server-key-file", "/controller/certificates/server.key"},
 		{"tls address", global, "tls-server-address", "*"},
 		{"tls auth", global, "tls-server-auth", "streaming_replica=*"},
-		{"spool path", global, "spool-path", SpoolPath},
-		{"pg1 path", stanza, "pg1-path", "/pgdata"},
+		{"spool path", global, "spool-path", "/var/lib/postgresql/data/pgbackrest/spool"},
+		{"pg1 path", stanza, "pg1-path", "/var/lib/postgresql/data/pgdata"},
 	}
 
 	for _, tt := range tests {

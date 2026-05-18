@@ -464,6 +464,11 @@ type BackupStatus struct {
 	// +optional
 	BackupSnapshotStatus BackupSnapshotStatus `json:"snapshotBackupStatus,omitempty"`
 
+	// Progress of the backup, reported during execution
+	// (e.g. "56.73% complete")
+	// +optional
+	Progress string `json:"progress,omitempty"`
+
 	// The backup method being used
 	// +optional
 	Method BackupMethod `json:"method,omitempty"`

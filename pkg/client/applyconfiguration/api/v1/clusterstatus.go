@@ -84,6 +84,10 @@ type ClusterStatusApplyConfiguration struct {
 	//
 	// Deprecated: the field is not set for backup plugins.
 	FirstRecoverabilityPointByMethod map[apiv1.BackupMethod]metav1.Time `json:"firstRecoverabilityPointByMethod,omitempty"`
+	// The latest point in time that can be recovered to, stored as a date
+	// in RFC3339 format. Based on the last successfully archived WAL,
+	// from pg_stat_archiver.last_archived_time on the primary instance.
+	LastRecoverabilityPoint *string `json:"lastRecoverabilityPoint,omitempty"`
 	// Last successful backup, stored as a date in RFC3339 format.
 	// This field is calculated from the content of LastSuccessfulBackupByMethod.
 	//
@@ -395,6 +399,14 @@ func (b *ClusterStatusApplyConfiguration) WithFirstRecoverabilityPointByMethod(e
 	for k, v := range entries {
 		b.FirstRecoverabilityPointByMethod[k] = v
 	}
+	return b
+}
+
+// WithLastRecoverabilityPoint sets the LastRecoverabilityPoint field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the LastRecoverabilityPoint field is set to the value of the last call.
+func (b *ClusterStatusApplyConfiguration) WithLastRecoverabilityPoint(value string) *ClusterStatusApplyConfiguration {
+	b.LastRecoverabilityPoint = &value
 	return b
 }
 

@@ -7297,6 +7297,12 @@ spec:
                   LastPromotionToken is the last verified promotion token that
                   was used to promote a replica cluster
                 type: string
+              lastRecoverabilityPoint:
+                description: |-
+                  The latest point in time that can be recovered to, stored as a date
+                  in RFC3339 format. Based on the last successfully archived WAL,
+                  from pg_stat_archiver.last_archived_time on the primary instance.
+                type: string
               lastSuccessfulBackup:
                 description: |-
                   Last successful backup, stored as a date in RFC3339 format.

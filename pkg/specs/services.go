@@ -27,13 +27,14 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
 	"github.com/xataio/xata-cnpg/pkg/servicespec"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
-func buildInstanceServicePorts() []corev1.ServicePort {
-	return []corev1.ServicePort{
+func buildInstanceServicePorts(cluster apiv1.Cluster) []corev1.ServicePort {
+	ports := []corev1.ServicePort{
 		{
 			Name:       PostgresContainerName,
 			Protocol:   corev1.ProtocolTCP,
@@ -41,6 +42,15 @@ func buildInstanceServicePorts() []corev1.ServicePort {
 			Port:       postgres.ServerPort,
 		},
 	}
+	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		ports = append(ports, corev1.ServicePort{
+			Name:       "pgbackrest",
+			Protocol:   corev1.ProtocolTCP,
+			TargetPort: intstr.FromInt32(pgbackrest.TLSServerPort),
+			Port:       pgbackrest.TLSServerPort,
+		})
+	}
+	return ports
 }
 
 // CreateClusterAnyService create a service insisting on all the pods
@@ -63,7 +73,7 @@ func CreateClusterAnyService(cluster apiv1.Cluster) *corev1.Service {
 		Spec: corev1.ServiceSpec{
 			Type:                     corev1.ServiceTypeClusterIP,
 			PublishNotReadyAddresses: true,
-			Ports:                    buildInstanceServicePorts(),
+			Ports:                    buildInstanceServicePorts(cluster),
 			Selector: map[string]string{
 				utils.ClusterLabelName: cluster.Name,
 				utils.PodRoleLabelName: string(utils.PodRoleInstance),
@@ -91,7 +101,7 @@ func CreateClusterReadService(cluster apiv1.Cluster) *corev1.Service {
 		},
 		Spec: corev1.ServiceSpec{
 			Type:  corev1.ServiceTypeClusterIP,
-			Ports: buildInstanceServicePorts(),
+			Ports: buildInstanceServicePorts(cluster),
 			Selector: map[string]string{
 				utils.ClusterLabelName: cluster.Name,
 				utils.PodRoleLabelName: string(utils.PodRoleInstance),
@@ -119,7 +129,7 @@ func CreateClusterReadOnlyService(cluster apiv1.Cluster) *corev1.Service {
 		},
 		Spec: corev1.ServiceSpec{
 			Type:  corev1.ServiceTypeClusterIP,
-			Ports: buildInstanceServicePorts(),
+			Ports: buildInstanceServicePorts(cluster),
 			Selector: map[string]string{
 				utils.ClusterLabelName:             cluster.Name,
 				utils.ClusterInstanceRoleLabelName: ClusterRoleLabelReplica,
@@ -147,7 +157,7 @@ func CreateClusterReadWriteService(cluster apiv1.Cluster) *corev1.Service {
 		},
 		Spec: corev1.ServiceSpec{
 			Type:  corev1.ServiceTypeClusterIP,
-			Ports: buildInstanceServicePorts(),
+			Ports: buildInstanceServicePorts(cluster),
 			Selector: map[string]string{
 				utils.ClusterLabelName:             cluster.Name,
 				utils.ClusterInstanceRoleLabelName: ClusterRoleLabelPrimary,

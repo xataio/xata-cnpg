@@ -812,7 +812,7 @@ func collectLibraryPaths(extensionList []apiv1.ExtensionConfiguration) []string 
 // PostgreSQL instance is running
 func (instance *Instance) WithActiveInstance(inner func() error) error {
 	// Start the CSV logpipe to redirect log to stdout
-	ctx, ctxCancel := context.WithCancel(context.Background())
+	ctx, ctxCancel := context.WithCancel(context.Background()) //nolint:gosec // G118: ctxCancel is called in defer below
 	csvPipe := logpipe.NewLogPipe()
 
 	go func() {
@@ -1163,11 +1163,12 @@ func (instance *Instance) Rewind(ctx context.Context) error {
 	instance.LogPgControldata(ctx, "before pg_rewind")
 
 	primaryConnInfo := instance.GetPrimaryConnInfo()
-	options := []string{
+	options := make([]string, 0, 6)
+	options = append(options,
 		"-P",
 		"--source-server", primaryConnInfo,
 		"--target-pgdata", instance.PgData,
-	}
+	)
 
 	// make sure restore_command is set in override.conf
 	if _, err := configurePostgresOverrideConfFile(instance.PgData, primaryConnInfo, ""); err != nil {

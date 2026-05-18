@@ -241,16 +241,19 @@ func CreatePostgresVolumeMounts(cluster apiv1.Cluster) []corev1.VolumeMount {
 		},
 		{
 			Name:      "scratch-data",
-			MountPath: "/tmp",
-		},
-		{
-			Name:      "scratch-data",
 			MountPath: postgres.ScratchDataDirectory,
 		},
 		{
 			Name:      "shm",
 			MountPath: "/dev/shm",
 		},
+	}
+
+	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "scratch-data",
+			MountPath: "/tmp",
+		})
 	}
 
 	if cluster.ShouldCreateWalArchiveVolume() {

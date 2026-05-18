@@ -284,6 +284,9 @@ func (r *InstanceReconciler) Reconcile(
 		if err = r.processConfigReloadAndManageRestart(ctx, cluster); err != nil {
 			return reconcile.Result{}, fmt.Errorf("cannot apply new PostgreSQL configuration: %w", err)
 		}
+
+		// Reload pgbackrest TLS server to pick up rotated certificates
+		r.pgBackRestTLSServer.Reload()
 	}
 
 	if err = r.updateFailoverQuorumObject(ctx, cluster); err != nil {
@@ -294,8 +297,11 @@ func (r *InstanceReconciler) Reconcile(
 	// From now on, the database can be assumed as running. Every operation
 	// needing the database to be up should be put below this line.
 
-	if err := r.ensureSuperuserTimeoutProtection(ctx); err != nil {
-		contextLogger.Error(err, "while protecting superuser from timeout settings")
+	// ALTER ROLE is a write operation — skip on replicas (read-only).
+	if r.instance.GetPodName() == cluster.Status.CurrentPrimary {
+		if err := r.ensureSuperuserTimeoutProtection(ctx); err != nil {
+			contextLogger.Error(err, "while protecting superuser from timeout settings")
+		}
 	}
 
 	r.configureSlotReplicator(cluster)
@@ -1120,7 +1126,8 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		})
 	}
 
-	content, err := pgbackrest.GenerateConfig(ctx, r.GetClient(), cluster, r.instance.PgData)
+	isPrimary := r.instance.GetPodName() == cluster.Status.CurrentPrimary
+	content, err := pgbackrest.GenerateConfig(ctx, r.GetClient(), cluster, r.instance.PgData, isPrimary)
 	if err != nil {
 		return fmt.Errorf("generating pgbackrest config: %w", err)
 	}
@@ -1129,12 +1136,22 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		return fmt.Errorf("writing pgbackrest config: %w", err)
 	}
 
-	if !r.pgBackRestStanzaCreated.Load() {
+	// Stanza creation is only needed on the primary — the stanza metadata
+	// lives in S3 and replicas access it directly from there.
+	if isPrimary && !r.pgBackRestStanzaCreated.Load() {
 		if err := pgbackrest.StanzaCreate(ctx, cluster.Name); err != nil {
 			log.FromContext(ctx).Error(err, "Failed to create pgbackrest stanza, will retry on next reconcile")
 			return nil
 		}
 		r.pgBackRestStanzaCreated.Store(true)
+	}
+
+	// Start the pgbackrest TLS server if not already running.
+	// All pods run the server so backup-standby works after switchovers.
+	if !r.pgBackRestTLSServer.IsRunning() {
+		if err := r.pgBackRestTLSServer.Start(ctx); err != nil {
+			log.FromContext(ctx).Error(err, "Failed to start pgbackrest TLS server")
+		}
 	}
 
 	return nil

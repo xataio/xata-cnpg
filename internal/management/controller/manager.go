@@ -36,6 +36,7 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/concurrency"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/metricserver"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	instancecertificate "github.com/xataio/xata-cnpg/pkg/reconciler/instance/certificate"
 )
 
@@ -58,6 +59,7 @@ type InstanceReconciler struct {
 	pluginRepository      repository.Interface
 
 	pgBackRestStanzaCreated atomic.Bool
+	pgBackRestTLSServer     pgbackrest.TLSServer
 }
 
 // NewInstanceReconciler creates a new instance reconciler

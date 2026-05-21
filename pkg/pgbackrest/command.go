@@ -36,9 +36,6 @@ const (
 	// ConfigFilePath is the location of the pgbackrest configuration file.
 	ConfigFilePath = "/controller/pgbackrest/pgbackrest.conf"
 
-	// SpoolPath is the spool directory for pgbackrest async archiving.
-	SpoolPath = "/controller/pgbackrest-spool"
-
 	// pgbackrestBinary is the pgbackrest executable name.
 	pgbackrestBinary = "pgbackrest"
 )

@@ -72,15 +72,6 @@ func TestErrWALNotFound(t *testing.T) {
 	}
 }
 
-func TestConstants(t *testing.T) {
-	if ConfigFilePath != "/controller/pgbackrest/pgbackrest.conf" {
-		t.Errorf("unexpected ConfigFilePath: %s", ConfigFilePath)
-	}
-	if SpoolPath != "/controller/pgbackrest-spool" {
-		t.Errorf("unexpected SpoolPath: %s", SpoolPath)
-	}
-}
-
 func TestArchiveGet_WALNotFound(t *testing.T) {
 	// Simulate a CommandError with exit code 2 (WAL not found)
 	cmdErr := &CommandError{

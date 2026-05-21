@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -256,6 +257,30 @@ func (b *PgBackRestBackupCommand) populateBackupDetails(ctx context.Context) {
 		"beginLSN", backup.LSN.Start,
 		"endLSN", backup.LSN.Stop,
 	)
+
+	// Update FirstRecoverabilityPoint and LastSuccessfulBackup on the cluster
+	var firstRecoverability, lastSuccessful *time.Time
+	if first := stanza.Backup[0]; first.Timestamp.Start > 0 {
+		firstRecoverability = new(time.Unix(first.Timestamp.Start, 0))
+	}
+	if last := stanza.LatestBackup(); last != nil && last.Timestamp.Stop > 0 {
+		lastSuccessful = new(time.Unix(last.Timestamp.Stop, 0))
+	}
+
+	if err = b.retryWithRefreshedCluster(ctx, func() error {
+		origCluster := b.Cluster.DeepCopy()
+		b.Cluster.UpdateBackupTimes(
+			apiv1.BackupMethodPgBackRest,
+			firstRecoverability,
+			lastSuccessful,
+		)
+		if equality.Semantic.DeepEqual(origCluster.Status, b.Cluster.Status) {
+			return nil
+		}
+		return b.Client.Status().Patch(ctx, b.Cluster, client.MergeFrom(origCluster))
+	}); err != nil {
+		b.Log.Error(err, "while setting firstRecoverabilityPoint and lastSuccessfulBackup")
+	}
 }
 
 func (b *PgBackRestBackupCommand) retryWithRefreshedCluster(

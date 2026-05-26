@@ -53,9 +53,10 @@ var _ = Describe("Storage configuration", func() {
 	})
 })
 
-var _ = Describe("Storage source", func() {
+var _ = Describe("Storage source for replica", func() {
 	pgDataSnapshotVolumeName := "pgdata-snapshot"
 	pgWalSnapshotVolumeName := "pgwal-snapshot"
+
 	clusterWithBootstrapSnapshot := &apiv1.Cluster{
 		Spec: apiv1.ClusterSpec{
 			StorageConfiguration: apiv1.StorageConfiguration{},
@@ -135,104 +136,43 @@ var _ = Describe("Storage source", func() {
 		},
 	}
 
-	When("bootstrapping from a VolumeSnapshot", func() {
-		When("we don't have backups", func() {
-			When("there's no source WAL archive", func() {
-				It("should return the correct source when choosing pgdata", func(ctx context.Context) {
-					source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
-						ctx, clusterWithBootstrapSnapshot, apiv1.BackupList{}))
-					Expect(err).ToNot(HaveOccurred())
-					Expect(source).ToNot(BeNil())
-					Expect(source.Name).To(Equal(pgDataSnapshotVolumeName))
-				})
+	// In the xata-cnpg fork, GetCandidateStorageSourceForReplica is disabled
+	// unconditionally so that replicas are always created via streaming
+	// base-backup. The following cases assert this regardless of inputs that
+	// would previously have selected a snapshot source.
 
-				It("should return the correct source when choosing pgwal", func(ctx context.Context) {
-					source, err := NewPgWalCalculator().GetSource(GetCandidateStorageSourceForReplica(
-						ctx, clusterWithBootstrapSnapshot, apiv1.BackupList{}))
-					Expect(err).ToNot(HaveOccurred())
-					Expect(source).ToNot(BeNil())
-					Expect(source.Name).To(Equal(pgWalSnapshotVolumeName))
-				})
-			})
-
-			When("there's a source WAL archive", func() {
-				It("should return an empty storage source", func(ctx context.Context) {
-					clusterSourceWALArchive := clusterWithBootstrapSnapshot.DeepCopy()
-					clusterSourceWALArchive.Spec.Bootstrap.Recovery.Source = "test"
-					source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
-						ctx,
-						clusterSourceWALArchive,
-						apiv1.BackupList{},
-					))
-					Expect(err).ToNot(HaveOccurred())
-					Expect(source).To(BeNil())
-				})
-			})
-		})
-
-		When("we have backups", func() {
-			It("should return the correct backup", func(ctx context.Context) {
-				source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
-					ctx,
-					clusterWithBootstrapSnapshot,
-					backupList,
-				))
-				Expect(err).ToNot(HaveOccurred())
-				Expect(source).ToNot(BeNil())
-				Expect(source.Name).To(Equal("completed-backup"))
-			})
-		})
+	It("returns nil for a cluster bootstrapped from a VolumeSnapshot with WAL archive", func(ctx context.Context) {
+		Expect(GetCandidateStorageSourceForReplica(
+			ctx, clusterWithBootstrapSnapshot, apiv1.BackupList{},
+		)).To(BeNil())
 	})
 
-	When("not bootstrapping from a VolumeSnapshot with no backups", func() {
-		It("should return an empty storage source", func(ctx context.Context) {
-			source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
-				ctx,
-				clusterWithBackupSection,
-				apiv1.BackupList{},
-			))
-			Expect(err).ToNot(HaveOccurred())
-			Expect(source).To(BeNil())
-		})
+	It("returns nil when there are completed VolumeSnapshot backups in the backup list", func(ctx context.Context) {
+		Expect(GetCandidateStorageSourceForReplica(
+			ctx, clusterWithBackupSection, backupList,
+		)).To(BeNil())
 	})
 
-	When("not bootstrapping from a VolumeSnapshot with backups", func() {
-		It("should return the backup as storage source", func(ctx context.Context) {
-			source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
-				ctx,
-				clusterWithBackupSection,
-				backupList,
-			))
-			Expect(err).ToNot(HaveOccurred())
-			Expect(source).ToNot(BeNil())
-			Expect(source.Name).To(Equal("completed-backup"))
-		})
-
-		It("should return the backup as storage source when WAL archiving is via plugin only", func(ctx context.Context) {
-			source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
-				ctx,
-				clusterWithPluginOnly,
-				backupList,
-			))
-			Expect(err).ToNot(HaveOccurred())
-			Expect(source).ToNot(BeNil())
-			Expect(source.Name).To(Equal("completed-backup"))
-		})
+	It("returns nil when WAL archiving is provided by a plugin and backups exist", func(ctx context.Context) {
+		Expect(GetCandidateStorageSourceForReplica(
+			ctx, clusterWithPluginOnly, backupList,
+		)).To(BeNil())
 	})
 
-	When("there's no WAL archiving", func() {
-		It("should return an empty storage source", func(ctx context.Context) {
-			clusterNoWalArchiving := clusterWithBackupSection.DeepCopy()
-			clusterNoWalArchiving.Spec.Backup = nil
+	It("returns nil when an external recovery source is configured", func(ctx context.Context) {
+		clusterSourceWALArchive := clusterWithBootstrapSnapshot.DeepCopy()
+		clusterSourceWALArchive.Spec.Bootstrap.Recovery.Source = "test"
+		Expect(GetCandidateStorageSourceForReplica(
+			ctx, clusterSourceWALArchive, apiv1.BackupList{},
+		)).To(BeNil())
+	})
 
-			source, err := NewPgDataCalculator().GetSource(GetCandidateStorageSourceForReplica(
-				ctx,
-				clusterNoWalArchiving,
-				backupList,
-			))
-			Expect(err).ToNot(HaveOccurred())
-			Expect(source).To(BeNil())
-		})
+	It("returns nil when WAL archiving is not configured", func(ctx context.Context) {
+		clusterNoWalArchiving := clusterWithBackupSection.DeepCopy()
+		clusterNoWalArchiving.Spec.Backup = nil
+		Expect(GetCandidateStorageSourceForReplica(
+			ctx, clusterNoWalArchiving, backupList,
+		)).To(BeNil())
 	})
 })
 

@@ -57,59 +57,22 @@ func GetCandidateStorageSourceForPrimary(
 }
 
 // GetCandidateStorageSourceForReplica gets the candidate storage source
-// to be used to create a replica PVC
+// to be used to create a replica PVC.
+//
+// In this fork it always returns nil. A VolumeSnapshot is confined to the
+// storage node holding its parent volume, so we always create replica PVCs
+// without a snapshot source and let them bootstrap via streaming base-backup.
 func GetCandidateStorageSourceForReplica(
 	ctx context.Context,
 	cluster *apiv1.Cluster,
 	backupList apiv1.BackupList,
 ) *StorageSource {
-	// We can't use a Backup to create a replica when:
-	//
-	// 1. we don't have WAL archiving, because the backup may be old
-	//    and the primary may not have the WAL files needed for the
-	//    new replica to be in-sync
-	//
-	// 2. we need two different WAL object stores, because we cannot
-	//    access them at the same time. This can happen when we have:
-	//
-	//    - the object store where we upload the WAL files
-	//      i.e. `.spec.backup.barmanObjectStore`
-	//
-	//    - the object store where were we aed WAL files to create the
-	//      bootstrap primary instance
-	//      i.e. `.spec.externalClusters[i].barmanObjectStore` and
-	//      `.spec.bootstrap.recovery.source`
-	//
-	//    This is true only for the backup that was used to bootstrap
-	//    the cluster itself. Other backups are fine because the required
-	//    WALs have been archived in the cluster object store.
-
-	// Unless WAL archiving is active (via BarmanObjectStore or a WAL-archiver plugin),
-	// we can't recover a replica from a backup
-	walArchivingActive := (cluster.Spec.Backup != nil && cluster.Spec.Backup.BarmanObjectStore != nil) ||
-		cluster.GetEnabledWALArchivePluginName() != ""
-	if !walArchivingActive {
-		return nil
-	}
-
-	if result := getCandidateSourceFromBackupList(
-		ctx,
-		cluster,
-		backupList,
-	); result != nil {
-		return result
-	}
-
-	// We support one and only one object store, see comment at the beginning
-	// of this function
-	if cluster.Spec.Bootstrap != nil &&
-		cluster.Spec.Bootstrap.Recovery != nil &&
-		len(cluster.Spec.Bootstrap.Recovery.Source) > 0 {
-		return nil
-	}
-
-	// Try using the backup the Cluster has been bootstrapped from
-	return getCandidateSourceFromClusterDefinition(cluster)
+	_ = backupList
+	log.FromContext(ctx).Trace(
+		"VolumeSnapshot-based replica creation is disabled; using streaming base-backup",
+		"cluster", cluster.Name,
+	)
+	return nil
 }
 
 // getCandidateSourceFromBackupList gets a candidate storage source

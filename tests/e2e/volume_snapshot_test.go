@@ -34,6 +34,7 @@ import (
 	k8client "sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/specs"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 	"github.com/xataio/xata-cnpg/tests"
 	"github.com/xataio/xata-cnpg/tests/utils/backups"
@@ -796,6 +797,85 @@ var _ = Describe("Verify Volume Snapshot",
 						TableName:    tableName,
 					}
 					AssertDataExpectedCount(env, tableLocator, 4)
+				})
+			})
+
+			It("should scale up the cluster with volume snapshot", func() {
+				// insert some data after the snapshot is taken, we want to verify the data exists in
+				// the new pod when cluster scaled up
+				By("inserting more test data and creating WALs on the cluster snapshotted", func() {
+					forward, conn, err := postgres.ForwardPSQLConnection(
+						env.Ctx,
+						env.Client,
+						env.Interface,
+						env.RestClientConfig,
+						namespace,
+						clusterToSnapshotName,
+						postgres.AppDBName,
+						apiv1.ApplicationUserSecretSuffix,
+					)
+					defer func() {
+						_ = conn.Close()
+						forward.Close()
+					}()
+					Expect(err).ToNot(HaveOccurred())
+					// Insert 2 more rows which we expect not to be present at the end of the recovery
+					insertRecordIntoTable(tableName, 5, conn)
+					insertRecordIntoTable(tableName, 6, conn)
+
+					// Close and archive the current WAL file
+					AssertArchiveWalOnMinio(namespace, clusterToSnapshotName, clusterToSnapshotName)
+				})
+
+				// reuse the snapshot taken from the clusterToSnapshot cluster
+				By("fetching the volume snapshots", func() {
+					snapshotList, err := getSnapshots(backupTaken.Name, clusterToSnapshotName, namespace)
+					Expect(err).ToNot(HaveOccurred())
+					Expect(snapshotList.Items).To(HaveLen(len(backupTaken.Status.BackupSnapshotStatus.Elements)))
+
+					envVars := storage.EnvVarsForSnapshots{
+						DataSnapshot: snapshotDataEnv,
+						WalSnapshot:  snapshotWalEnv,
+					}
+					err = storage.SetSnapshotNameAsEnv(&snapshotList, backupTaken, envVars)
+					Expect(err).ToNot(HaveOccurred())
+				})
+
+				By("scale up the cluster", func() {
+					err := clusterutils.ScaleSize(env.Ctx, env.Client, namespace, clusterToSnapshotName, 3)
+					Expect(err).ToNot(HaveOccurred())
+				})
+
+				By("checking the cluster is working", func() {
+					// Setting up a cluster with three pods is slow, usually 200-600s
+					AssertClusterIsReady(namespace, clusterToSnapshotName, testTimeouts[timeouts.ClusterIsReady], env)
+				})
+
+				By("checking the new replicas have been created using the snapshot", func() {
+					pvcList, err := storage.GetPVCList(env.Ctx, env.Client, namespace)
+					Expect(err).ToNot(HaveOccurred())
+					for _, pvc := range pvcList.Items {
+						if pvc.Labels[utils.ClusterInstanceRoleLabelName] == specs.ClusterRoleLabelReplica &&
+							pvc.Labels[utils.ClusterLabelName] == clusterToSnapshotName {
+							Expect(pvc.Spec.DataSource.Kind).To(Equal(apiv1.VolumeSnapshotKind))
+							Expect(pvc.Spec.DataSourceRef.Kind).To(Equal(apiv1.VolumeSnapshotKind))
+						}
+					}
+				})
+
+				// we need to verify the streaming replica continue works
+				By("verifying the correct data exists in the new pod of the scaled cluster", func() {
+					podList, err := clusterutils.GetReplicas(env.Ctx, env.Client, namespace,
+						clusterToSnapshotName)
+					Expect(err).ToNot(HaveOccurred())
+					Expect(podList.Items).To(HaveLen(2))
+					tableLocator := TableLocator{
+						Namespace:    namespace,
+						ClusterName:  clusterToSnapshotName,
+						DatabaseName: postgres.AppDBName,
+						TableName:    tableName,
+					}
+					AssertDataExpectedCount(env, tableLocator, 6)
 				})
 			})
 

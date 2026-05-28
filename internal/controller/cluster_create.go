@@ -1246,27 +1246,11 @@ func (r *ClusterReconciler) joinReplicaInstance(
 ) (ctrl.Result, error) {
 	contextLogger := log.FromContext(ctx)
 
-	var backupList apiv1.BackupList
-	if err := r.List(ctx, &backupList,
-		client.MatchingFields{clusterNameField: cluster.Name},
-		client.InNamespace(cluster.Namespace),
-	); err != nil {
-		contextLogger.Error(err, "Error while getting backup list, when bootstrapping a new replica")
-		return ctrl.Result{}, err
-	}
-
 	job := specs.JoinReplicaInstance(*cluster, nodeSerial)
-
-	// If we can bootstrap this replica from a pre-existing source, we do it
-	storageSource := persistentvolumeclaim.GetCandidateStorageSourceForReplica(ctx, cluster, backupList)
-	if storageSource != nil {
-		job = specs.RestoreReplicaInstance(*cluster, nodeSerial)
-	}
 
 	contextLogger.Info("Creating new Job",
 		"job", job.Name,
 		"primary", false,
-		"storageSource", storageSource,
 		"role", job.Spec.Template.Labels[utils.JobRoleLabelName],
 	)
 
@@ -1308,7 +1292,7 @@ func (r *ClusterReconciler) joinReplicaInstance(
 		ctx,
 		r.Client,
 		cluster,
-		storageSource,
+		nil,
 		nodeSerial,
 	); err != nil {
 		return ctrl.Result{}, fmt.Errorf("cannot create replica instance PVCs: %w", err)

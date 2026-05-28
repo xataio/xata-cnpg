@@ -20,9 +20,6 @@ SPDX-License-Identifier: Apache-2.0
 package persistentvolumeclaim
 
 import (
-	"context"
-
-	"github.com/cloudnative-pg/machinery/pkg/log"
 	volumesnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
@@ -54,25 +51,6 @@ func GetCandidateStorageSourceForPrimary(
 		return getCandidateSourceFromBackup(backup)
 	}
 	return getCandidateSourceFromClusterDefinition(cluster)
-}
-
-// GetCandidateStorageSourceForReplica gets the candidate storage source
-// to be used to create a replica PVC.
-//
-// In this fork it always returns nil. A VolumeSnapshot is confined to the
-// storage node holding its parent volume, so we always create replica PVCs
-// without a snapshot source and let them bootstrap via streaming base-backup.
-func GetCandidateStorageSourceForReplica(
-	ctx context.Context,
-	cluster *apiv1.Cluster,
-	backupList apiv1.BackupList,
-) *StorageSource {
-	_ = backupList
-	log.FromContext(ctx).Trace(
-		"VolumeSnapshot-based replica creation is disabled; using streaming base-backup",
-		"cluster", cluster.Name,
-	)
-	return nil
 }
 
 func getCandidateSourceFromBackup(backup *apiv1.Backup) *StorageSource {

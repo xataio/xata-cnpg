@@ -279,6 +279,23 @@ func JoinReplicaInstance(cluster apiv1.Cluster, nodeSerial int) *batchv1.Job {
 	return CreatePrimaryJob(cluster, nodeSerial, jobRoleJoin, initCommand)
 }
 
+// RestoreReplicaInstance creates a new PostgreSQL replica starting from a volume snapshot backup
+func RestoreReplicaInstance(cluster apiv1.Cluster, nodeSerial int) *batchv1.Job {
+	commonFlags := buildCommonInitJobFlags(cluster)
+	initCommand := make([]string, 0, 4+len(commonFlags))
+	initCommand = append(initCommand,
+		"/controller/manager",
+		"instance",
+		"restoresnapshot",
+		"--immediate",
+	)
+
+	initCommand = append(initCommand, commonFlags...)
+
+	job := CreatePrimaryJob(cluster, nodeSerial, jobRoleSnapshotRecovery, initCommand)
+	return job
+}
+
 func buildCommonInitJobFlags(cluster apiv1.Cluster) []string {
 	var flags []string
 

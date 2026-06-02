@@ -1139,7 +1139,7 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 	// Stanza creation is only needed on the primary — the stanza metadata
 	// lives in S3 and replicas access it directly from there.
 	if isPrimary && !r.pgBackRestStanzaCreated.Load() {
-		if err := pgbackrest.StanzaCreate(ctx, cluster.Name); err != nil {
+		if err := pgbackrest.StanzaCreate(ctx, cluster.GetPgBackRestStanzaName()); err != nil {
 			log.FromContext(ctx).Error(err, "Failed to create pgbackrest stanza, will retry on next reconcile")
 			return nil
 		}

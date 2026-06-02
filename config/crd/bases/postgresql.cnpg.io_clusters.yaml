@@ -1576,6 +1576,13 @@ spec:
                         - message: exactly one of s3, gcs, or azure must be specified
                           rule: '(has(self.s3) ? 1 : 0) + (has(self.gcs) ? 1 : 0)
                             + (has(self.azure) ? 1 : 0) == 1'
+                      stanzaName:
+                        description: |-
+                          StanzaName is the pgbackrest stanza this cluster archives to. It is the
+                          logical identity of the backup set in the repository (the repo layout is
+                          <repoPath>/{archive,backup}/<stanza>/). When unset it defaults to the
+                          cluster name.
+                        type: string
                     required:
                     - repository
                     type: object

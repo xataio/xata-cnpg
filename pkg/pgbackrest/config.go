@@ -51,7 +51,7 @@ func GenerateConfig(
 
 	cfg, err := generateBaseConfig(
 		ctx, k8sClient, cluster.Namespace,
-		pgbackrestConfig.Repository, cluster.Name, pgDataPath,
+		pgbackrestConfig.Repository, cluster.GetPgBackRestStanzaName(), pgDataPath,
 	)
 	if err != nil {
 		return "", err
@@ -69,7 +69,10 @@ func GenerateConfig(
 	// the local standby. This enables backup-standby: pgbackrest copies files
 	// locally from the replica while coordinating with the primary over TLS.
 	if !isPrimary {
-		configureReplicaStanza(cfg.Section(cluster.Name), cluster.Name, pgDataPath)
+		// The section key is the stanza identity; the clusterName arg is the
+		// live cluster used to reach the primary (pg1-host: <name>-rw), so it
+		// must stay the actual Cluster name even when the stanza is overridden.
+		configureReplicaStanza(cfg.Section(cluster.GetPgBackRestStanzaName()), cluster.Name, pgDataPath)
 	}
 
 	return renderConfig(cfg)
@@ -251,7 +254,10 @@ func applyOptionDefaults(opts *apiv1.PgBackRestOptions, cluster *apiv1.Cluster) 
 		}
 	}
 	if opts.RepoPath == "" {
-		opts.RepoPath = cluster.Name
+		// Default the repo path to the stanza name so that overriding only the
+		// stanza still keeps the whole backup set (prefix + stanza) under one
+		// stable location.
+		opts.RepoPath = cluster.GetPgBackRestStanzaName()
 	}
 }
 

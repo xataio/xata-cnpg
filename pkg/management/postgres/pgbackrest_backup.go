@@ -135,7 +135,7 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	progressCtx, stopProgress := context.WithCancel(ctx)
 	go b.pollProgress(progressCtx)
 
-	err := pgbackrest.Backup(ctx, b.Cluster.Name, string(backupType), annotation)
+	err := pgbackrest.Backup(ctx, b.Cluster.GetPgBackRestStanzaName(), string(backupType), annotation)
 	stopProgress()
 
 	if err != nil {
@@ -179,7 +179,7 @@ func (b *PgBackRestBackupCommand) pollProgress(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			stanza, err := pgbackrest.Info(ctx, b.Cluster.Name)
+			stanza, err := pgbackrest.Info(ctx, b.Cluster.GetPgBackRestStanzaName())
 			if err != nil {
 				b.Log.Info("Progress poll: pgbackrest info failed", "err", err)
 				continue
@@ -210,7 +210,7 @@ func (b *PgBackRestBackupCommand) populateBackupDetails(ctx context.Context) {
 	var err error
 
 	for attempt := 1; attempt <= 3; attempt++ {
-		stanza, err = pgbackrest.Info(ctx, b.Cluster.Name)
+		stanza, err = pgbackrest.Info(ctx, b.Cluster.GetPgBackRestStanzaName())
 		if err == nil {
 			break
 		}

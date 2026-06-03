@@ -1355,6 +1355,25 @@ func (cluster *Cluster) GetPgBackRestStanzaName() string {
 	return cluster.Name
 }
 
+// IsPgBackRestSuspended reports whether pgbackrest is configured but suspended on
+// this cluster (the PgBackRestSuspended annotation). While suspended, the instance
+// manager no-ops WAL archive-push and skips stanza-create, so the cluster has
+// no pgbackrest footprint in object storage; archive_mode stays "on" so
+// clearing the flag activates archiving without a restart.
+//
+// Transition contract:
+//   - Suspended -> Active on a NEW stanza (warm-pool create): safe — the first
+//     full backup establishes the recovery baseline.
+//   - Suspended -> Active reusing an existing stanza with continuous data
+//     (warm-pool wake-up): safe — the WAL chain stays contiguous.
+//   - Active -> Suspended: WAL produced while suspended is recycled, never
+//     archived (a permanent gap). Only safe for throwaway clusters, or when a
+//     fresh full backup is taken after returning to Active; PITR into the
+//     suspended window is not possible.
+func (cluster *Cluster) IsPgBackRestSuspended() bool {
+	return utils.IsPgBackRestSuspended(&cluster.ObjectMeta)
+}
+
 // IsBarmanEndpointCASet returns true if we have a CA bundle for the endpoint
 // false otherwise
 func (backupConfiguration *BackupConfiguration) IsBarmanEndpointCASet() bool {

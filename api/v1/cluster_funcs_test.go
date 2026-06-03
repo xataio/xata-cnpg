@@ -1851,6 +1851,29 @@ var _ = Describe("pgBackRest stanza name", func() {
 	})
 })
 
+var _ = Describe("pgBackRest suspended", func() {
+	It("is not suspended when the annotation is absent", func() {
+		cluster := &Cluster{ObjectMeta: metav1.ObjectMeta{Name: "c"}}
+		Expect(cluster.IsPgBackRestSuspended()).To(BeFalse())
+	})
+
+	It("is suspended when the annotation is set to enabled", func() {
+		cluster := &Cluster{ObjectMeta: metav1.ObjectMeta{
+			Name:        "c",
+			Annotations: map[string]string{utils.PgBackRestSuspended: "enabled"},
+		}}
+		Expect(cluster.IsPgBackRestSuspended()).To(BeTrue())
+	})
+
+	It("is not suspended for any other annotation value", func() {
+		cluster := &Cluster{ObjectMeta: metav1.ObjectMeta{
+			Name:        "c",
+			Annotations: map[string]string{utils.PgBackRestSuspended: "disabled"},
+		}}
+		Expect(cluster.IsPgBackRestSuspended()).To(BeFalse())
+	})
+})
+
 var _ = Describe("pgBackRest recovery source", func() {
 	It("returns nil when bootstrap is nil", func() {
 		cluster := &Cluster{}

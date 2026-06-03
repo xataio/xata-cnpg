@@ -1151,8 +1151,12 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 	// stanza-create whenever the stanza name changes (not just once), proactively
 	// initializes the new stanza instead of relying on the lazy WAL-archive
 	// recovery path. stanza-create is idempotent.
+	// While suspended, skip stanza-create so the cluster leaves no footprint in
+	// object storage; it runs on the next reconcile once the flag is cleared
+	// (e.g. on warm-pool adoption). archive_mode is untouched, so this is
+	// restart-free.
 	stanza := cluster.GetPgBackRestStanzaName()
-	if isPrimary && stanzaCreateNeeded(r.pgBackRestStanzaCreated.Load(), stanza) {
+	if isPrimary && !cluster.IsPgBackRestSuspended() && stanzaCreateNeeded(r.pgBackRestStanzaCreated.Load(), stanza) {
 		if err := pgbackrest.StanzaCreate(ctx, stanza); err != nil {
 			log.FromContext(ctx).Error(err, "Failed to create pgbackrest stanza, will retry on next reconcile")
 			return nil

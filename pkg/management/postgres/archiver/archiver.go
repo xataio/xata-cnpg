@@ -154,6 +154,48 @@ func Run(
 	return internalRun(ctx, pgData, cluster, walName)
 }
 
+// archiveWALViaPgBackRest archives a single WAL segment to the pgbackrest
+// repository. When the cluster is suspended it reports success without pushing
+// (the WAL is recycled, nothing is written to object storage). If the stanza
+// metadata is missing from the repository it recreates the stanza once and
+// retries the push.
+func archiveWALViaPgBackRest(ctx context.Context, cluster *apiv1.Cluster, pgData, walName string) error {
+	contextLog := log.FromContext(ctx)
+
+	// When suspended, pgbackrest stays configured but archiving is paused:
+	// report success without pushing, so PostgreSQL recycles the WAL and nothing
+	// is written to object storage. archive_mode stays "on", so resuming
+	// (clearing the flag) is restart-free.
+	if cluster.IsPgBackRestSuspended() {
+		contextLog.Debug("pgbackrest is suspended, skipping WAL archive-push", "walName", walName)
+		return nil
+	}
+
+	walPath := filepath.Join(pgData, walName)
+	contextLog.Info("Archiving WAL via pgbackrest", "walName", walName, "walPath", walPath)
+
+	stanza := cluster.GetPgBackRestStanzaName()
+	err := pgbackrest.ArchivePush(ctx, stanza, walPath)
+	if err == nil {
+		return nil
+	}
+
+	// If the stanza metadata (archive.info) was deleted from the repository,
+	// attempt to recreate it. This only succeeds when the S3 path is fully
+	// clean — if partial data remains, stanza-create will fail and the error
+	// is returned for manual intervention.
+	if pgbackrest.IsStanzaMissingFromRepo(err) {
+		contextLog.Warning("Stanza metadata missing from repository, recreating. " +
+			"Previous backups may be unavailable — a new full backup is recommended")
+		if stanzaErr := pgbackrest.StanzaCreate(ctx, stanza); stanzaErr != nil {
+			return fmt.Errorf("failed to recreate stanza after metadata loss: %w", stanzaErr)
+		}
+		return pgbackrest.ArchivePush(ctx, stanza, walPath)
+	}
+
+	return err
+}
+
 func internalRun(
 	ctx context.Context,
 	pgData string,
@@ -178,28 +220,7 @@ func internalRun(
 
 	// Archive via pgbackrest if configured
 	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
-		walPath := filepath.Join(pgData, walName)
-		contextLog.Info("Archiving WAL via pgbackrest", "walName", walName, "walPath", walPath)
-
-		err := pgbackrest.ArchivePush(ctx, cluster.GetPgBackRestStanzaName(), walPath)
-		if err == nil {
-			return nil
-		}
-
-		// If the stanza metadata (archive.info) was deleted from the repository,
-		// attempt to recreate it. This only succeeds when the S3 path is fully
-		// clean — if partial data remains, stanza-create will fail and the error
-		// is returned for manual intervention.
-		if pgbackrest.IsStanzaMissingFromRepo(err) {
-			contextLog.Warning("Stanza metadata missing from repository, recreating. " +
-				"Previous backups may be unavailable — a new full backup is recommended")
-			if stanzaErr := pgbackrest.StanzaCreate(ctx, cluster.GetPgBackRestStanzaName()); stanzaErr != nil {
-				return fmt.Errorf("failed to recreate stanza after metadata loss: %w", stanzaErr)
-			}
-			return pgbackrest.ArchivePush(ctx, cluster.GetPgBackRestStanzaName(), walPath)
-		}
-
-		return err
+		return archiveWALViaPgBackRest(ctx, cluster, pgData, walName)
 	}
 
 	// Request Barman Cloud to archive this WAL

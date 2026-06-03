@@ -1822,6 +1822,35 @@ var _ = Describe("pgBackRest configuration", func() {
 	})
 })
 
+var _ = Describe("pgBackRest stanza name", func() {
+	It("defaults to the cluster name when not configured", func() {
+		cluster := &Cluster{ObjectMeta: metav1.ObjectMeta{Name: "my-cluster"}}
+		Expect(cluster.GetPgBackRestStanzaName()).To(Equal("my-cluster"))
+	})
+
+	It("defaults to the cluster name when pgBackRest has no stanza override", func() {
+		cluster := &Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-cluster"},
+			Spec: ClusterSpec{
+				Backup: &BackupConfiguration{PgBackRest: &PgBackRestConfiguration{}},
+			},
+		}
+		Expect(cluster.GetPgBackRestStanzaName()).To(Equal("my-cluster"))
+	})
+
+	It("uses the override, independent of the live cluster name", func() {
+		cluster := &Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "pool-cluster-xyz"},
+			Spec: ClusterSpec{
+				Backup: &BackupConfiguration{
+					PgBackRest: &PgBackRestConfiguration{StanzaName: "branch-abc"},
+				},
+			},
+		}
+		Expect(cluster.GetPgBackRestStanzaName()).To(Equal("branch-abc"))
+	})
+})
+
 var _ = Describe("pgBackRest recovery source", func() {
 	It("returns nil when bootstrap is nil", func() {
 		cluster := &Cluster{}

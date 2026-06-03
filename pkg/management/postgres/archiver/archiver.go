@@ -181,7 +181,7 @@ func internalRun(
 		walPath := filepath.Join(pgData, walName)
 		contextLog.Info("Archiving WAL via pgbackrest", "walName", walName, "walPath", walPath)
 
-		err := pgbackrest.ArchivePush(ctx, cluster.Name, walPath)
+		err := pgbackrest.ArchivePush(ctx, cluster.GetPgBackRestStanzaName(), walPath)
 		if err == nil {
 			return nil
 		}
@@ -193,10 +193,10 @@ func internalRun(
 		if pgbackrest.IsStanzaMissingFromRepo(err) {
 			contextLog.Warning("Stanza metadata missing from repository, recreating. " +
 				"Previous backups may be unavailable — a new full backup is recommended")
-			if stanzaErr := pgbackrest.StanzaCreate(ctx, cluster.Name); stanzaErr != nil {
+			if stanzaErr := pgbackrest.StanzaCreate(ctx, cluster.GetPgBackRestStanzaName()); stanzaErr != nil {
 				return fmt.Errorf("failed to recreate stanza after metadata loss: %w", stanzaErr)
 			}
-			return pgbackrest.ArchivePush(ctx, cluster.Name, walPath)
+			return pgbackrest.ArchivePush(ctx, cluster.GetPgBackRestStanzaName(), walPath)
 		}
 
 		return err

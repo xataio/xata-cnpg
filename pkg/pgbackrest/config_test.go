@@ -26,6 +26,7 @@ import (
 	"gopkg.in/ini.v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
@@ -489,5 +490,122 @@ func TestConfigureReplicaStanza(t *testing.T) {
 				t.Errorf("expected %s=%s, got %s", tt.key, tt.expected, v)
 			}
 		})
+	}
+}
+
+// TestGenerateConfig_StanzaName verifies that the pgbackrest stanza section and
+// repo1-path follow spec.backup.pgBackRest.stanzaName when set, and otherwise
+// default to the cluster name. This keeps a branch's backups under a stable
+// identity even when the underlying Cluster is recreated (warm-pool wakeups).
+func TestGenerateConfig_StanzaName(t *testing.T) {
+	newCluster := func(name, stanza string) *apiv1.Cluster {
+		return &apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: apiv1.ClusterSpec{
+				Backup: &apiv1.BackupConfiguration{
+					PgBackRest: &apiv1.PgBackRestConfiguration{
+						StanzaName: stanza,
+						Repository: &apiv1.PgBackRestRepository{
+							S3: &apiv1.PgBackRestS3{
+								Bucket:             "test-bucket",
+								Region:             "us-east-1",
+								InheritFromIAMRole: true,
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	tests := map[string]struct {
+		clusterName    string
+		stanzaName     string
+		wantStanza     string
+		wantRepoPath   string
+		absentSections []string
+	}{
+		"defaults to cluster name when stanza unset": {
+			clusterName:  "pool-cluster-xyz",
+			stanzaName:   "",
+			wantStanza:   "pool-cluster-xyz",
+			wantRepoPath: "/pool-cluster-xyz",
+		},
+		"uses stanza override for section and repo path": {
+			clusterName:    "pool-cluster-xyz",
+			stanzaName:     "branch-abc",
+			wantStanza:     "branch-abc",
+			wantRepoPath:   "/branch-abc",
+			absentSections: []string{"pool-cluster-xyz"},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			cluster := newCluster(tt.clusterName, tt.stanzaName)
+
+			content, err := GenerateConfig(
+				context.Background(), nil, cluster, "/pgdata", true,
+			)
+			if err != nil {
+				t.Fatalf("GenerateConfig failed: %v", err)
+			}
+
+			cfg, err := ini.Load([]byte(content))
+			if err != nil {
+				t.Fatalf("parsing rendered config failed: %v", err)
+			}
+
+			if !cfg.HasSection(tt.wantStanza) {
+				t.Errorf("expected a stanza section %q, sections: %v", tt.wantStanza, cfg.SectionStrings())
+			}
+			if v := cfg.Section(tt.wantStanza).Key("pg1-path").String(); v != "/pgdata" {
+				t.Errorf("expected pg1-path /pgdata in stanza %q, got %q", tt.wantStanza, v)
+			}
+			if v := cfg.Section("global").Key("repo1-path").String(); v != tt.wantRepoPath {
+				t.Errorf("expected repo1-path %s, got %s", tt.wantRepoPath, v)
+			}
+			for _, s := range tt.absentSections {
+				if cfg.HasSection(s) {
+					t.Errorf("did not expect a stanza section named after the live cluster %q", s)
+				}
+			}
+		})
+	}
+}
+
+// TestGenerateConfig_ReplicaStanzaUsesLiveClusterHost verifies that on a
+// replica the stanza section follows the stanza override, but pg1-host still
+// points at the live cluster's -rw service (not the stanza name).
+func TestGenerateConfig_ReplicaStanzaUsesLiveClusterHost(t *testing.T) {
+	cluster := &apiv1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "pool-cluster-xyz"},
+		Spec: apiv1.ClusterSpec{
+			Backup: &apiv1.BackupConfiguration{
+				PgBackRest: &apiv1.PgBackRestConfiguration{
+					StanzaName: "branch-abc",
+					Repository: &apiv1.PgBackRestRepository{
+						S3: &apiv1.PgBackRestS3{
+							Bucket:             "test-bucket",
+							Region:             "us-east-1",
+							InheritFromIAMRole: true,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	content, err := GenerateConfig(context.Background(), nil, cluster, "/pgdata", false)
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+	cfg, err := ini.Load([]byte(content))
+	if err != nil {
+		t.Fatalf("parsing rendered config failed: %v", err)
+	}
+
+	if v := cfg.Section("branch-abc").Key("pg1-host").String(); v != "pool-cluster-xyz-rw" {
+		t.Errorf("expected pg1-host pool-cluster-xyz-rw (live cluster), got %q", v)
 	}
 }

@@ -1341,6 +1341,20 @@ func (backupConfiguration *BackupConfiguration) IsPgBackRestConfigured() bool {
 		backupConfiguration.PgBackRest.Repository != nil
 }
 
+// GetPgBackRestStanzaName returns the pgbackrest stanza name used for this
+// cluster's own backups and WAL archiving. It defaults to the cluster name but
+// can be overridden via spec.backup.pgBackRest.stanzaName, so that backups stay
+// under a stable identity even when the underlying Cluster is recreated (e.g.
+// warm-pool wakeups, where the live cluster name changes between incarnations).
+func (cluster *Cluster) GetPgBackRestStanzaName() string {
+	if cluster.Spec.Backup != nil &&
+		cluster.Spec.Backup.PgBackRest != nil &&
+		cluster.Spec.Backup.PgBackRest.StanzaName != "" {
+		return cluster.Spec.Backup.PgBackRest.StanzaName
+	}
+	return cluster.Name
+}
+
 // IsBarmanEndpointCASet returns true if we have a CA bundle for the endpoint
 // false otherwise
 func (backupConfiguration *BackupConfiguration) IsBarmanEndpointCASet() bool {

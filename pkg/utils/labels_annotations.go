@@ -200,6 +200,15 @@ const (
 	// SkipWalArchiving is the name of the annotation which turns off WAL archiving
 	SkipWalArchiving = MetadataNamespace + "/skipWalArchiving"
 
+	// PgBackRestSuspended, when set to "enabled", keeps pgbackrest configured but
+	// suspended: the instance manager no-ops WAL archive-push and skips
+	// stanza-create, so the cluster has no footprint in object storage. Unlike
+	// SkipWalArchiving it does NOT touch archive_mode (which stays "on"), so
+	// toggling suspension never restarts PostgreSQL. Used for warm-pool clusters
+	// (no S3 footprint until adopted) and reusable to suspend archiving during
+	// an initial bulk data load.
+	PgBackRestSuspended = MetadataNamespace + "/pgBackRestSuspended"
+
 	// skipEmptyWalArchiveCheck is the name of the annotation which turns off the checks that ensure that the WAL
 	// archive is empty before writing data
 	skipEmptyWalArchiveCheck = MetadataNamespace + "/skipEmptyWalArchiveCheck"
@@ -530,6 +539,13 @@ func IsPodSpecReconciliationDisabled(object *metav1.ObjectMeta) bool {
 // storage is empty
 func IsEmptyWalArchiveCheckEnabled(object *metav1.ObjectMeta) bool {
 	return object.Annotations[skipEmptyWalArchiveCheck] != string(annotationStatusEnabled)
+}
+
+// IsPgBackRestSuspended returns true when pgbackrest archiving and stanza
+// creation are suspended via the PgBackRestSuspended annotation. archive_mode is
+// unaffected (stays "on"), so toggling suspension does not restart PostgreSQL.
+func IsPgBackRestSuspended(object *metav1.ObjectMeta) bool {
+	return object.Annotations[PgBackRestSuspended] == string(annotationStatusEnabled)
 }
 
 // IsWalArchivingDisabled returns a boolean indicating if PostgreSQL not archive

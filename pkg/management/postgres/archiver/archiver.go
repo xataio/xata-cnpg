@@ -178,6 +178,15 @@ func internalRun(
 
 	// Archive via pgbackrest if configured
 	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		// When suspended, pgbackrest stays configured but archiving is paused:
+		// report success without pushing, so PostgreSQL recycles the WAL and
+		// nothing is written to object storage. archive_mode stays "on", so
+		// resuming (clearing the flag) is restart-free.
+		if cluster.IsPgBackRestSuspended() {
+			contextLog.Debug("pgbackrest is suspended, skipping WAL archive-push", "walName", walName)
+			return nil
+		}
+
 		walPath := filepath.Join(pgData, walName)
 		contextLog.Info("Archiving WAL via pgbackrest", "walName", walName, "walPath", walPath)
 

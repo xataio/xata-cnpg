@@ -1110,6 +1110,16 @@ func (r *InstanceReconciler) ensureSuperuserTimeoutProtection(ctx context.Contex
 }
 
 // reconcilePgBackRestConfig generates and writes the pgbackrest configuration
+// stanzaCreateNeeded reports whether pgbackrest stanza-create must run for the
+// given stanza, based on the stanza this manager last created (nil if none).
+// It returns true when nothing has been created yet or when the stanza name has
+// changed — e.g. after a warm-pool cluster is adopted and its stanza switches
+// from the cluster name to the branch id — so the new stanza is initialized
+// rather than skipped because "a stanza was already created".
+func stanzaCreateNeeded(lastCreated *string, stanza string) bool {
+	return lastCreated == nil || *lastCreated != stanza
+}
+
 // file when pgbackrest is configured. On first write (or config change), it
 // also creates the pgbackrest stanza.
 func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, cluster *apiv1.Cluster) error {
@@ -1137,13 +1147,17 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 	}
 
 	// Stanza creation is only needed on the primary — the stanza metadata
-	// lives in S3 and replicas access it directly from there.
-	if isPrimary && !r.pgBackRestStanzaCreated.Load() {
-		if err := pgbackrest.StanzaCreate(ctx, cluster.GetPgBackRestStanzaName()); err != nil {
+	// lives in S3 and replicas access it directly from there. We re-run
+	// stanza-create whenever the stanza name changes (not just once), proactively
+	// initializes the new stanza instead of relying on the lazy WAL-archive
+	// recovery path. stanza-create is idempotent.
+	stanza := cluster.GetPgBackRestStanzaName()
+	if isPrimary && stanzaCreateNeeded(r.pgBackRestStanzaCreated.Load(), stanza) {
+		if err := pgbackrest.StanzaCreate(ctx, stanza); err != nil {
 			log.FromContext(ctx).Error(err, "Failed to create pgbackrest stanza, will retry on next reconcile")
 			return nil
 		}
-		r.pgBackRestStanzaCreated.Store(true)
+		r.pgBackRestStanzaCreated.Store(&stanza)
 	}
 
 	// Start the pgbackrest TLS server if not already running.

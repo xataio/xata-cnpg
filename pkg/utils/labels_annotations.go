@@ -200,13 +200,13 @@ const (
 	// SkipWalArchiving is the name of the annotation which turns off WAL archiving
 	SkipWalArchiving = MetadataNamespace + "/skipWalArchiving"
 
-	// PgBackRestSuspended, when set to "enabled", keeps pgbackrest configured but
-	// suspended: the instance manager no-ops WAL archive-push and skips
-	// stanza-create, so the cluster has no footprint in object storage. Unlike
-	// SkipWalArchiving it does NOT touch archive_mode (which stays "on"), so
-	// toggling suspension never restarts PostgreSQL. Used for warm-pool clusters
-	// (no S3 footprint until adopted) and reusable to suspend archiving during
-	// an initial bulk data load.
+	// PgBackRestSuspended is the annotation that, when set to "enabled", keeps
+	// pgbackrest configured but suspended: the instance manager no-ops WAL
+	// archive-push and skips stanza-create, so the cluster has no footprint in
+	// object storage. Unlike SkipWalArchiving it does NOT touch archive_mode
+	// (which stays "on"), so toggling suspension never restarts PostgreSQL. Used
+	// for warm-pool clusters (no S3 footprint until adopted) and reusable to
+	// suspend archiving during an initial bulk data load.
 	PgBackRestSuspended = MetadataNamespace + "/pgBackRestSuspended"
 
 	// skipEmptyWalArchiveCheck is the name of the annotation which turns off the checks that ensure that the WAL

@@ -41,6 +41,17 @@ import (
 // backup in the repository to the Kubernetes Backup CR that triggered it.
 const AnnotationKeyBackupCR = "backup-cr"
 
+// backupLockRetryAttempts and backupLockRetryDelay bound how long a backup waits
+// for a competing pgbackrest process to release the shared "backup" lock before
+// giving up. The common case is a backup triggered at cluster adoption racing
+// the stanza-create that runs on the same event; stanza-create releases the lock
+// within a second or two, so a short, bounded retry resolves it while still
+// failing reasonably fast if another backup is genuinely in progress.
+const (
+	backupLockRetryAttempts = 6
+	backupLockRetryDelay    = 5 * time.Second
+)
+
 // PgBackRestBackupCommand represents a pgbackrest backup being executed.
 type PgBackRestBackupCommand struct {
 	Cluster  *apiv1.Cluster
@@ -135,7 +146,7 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	progressCtx, stopProgress := context.WithCancel(ctx)
 	go b.pollProgress(progressCtx)
 
-	err := pgbackrest.Backup(ctx, b.Cluster.GetPgBackRestStanzaName(), string(backupType), annotation)
+	err := b.runBackupWithLockRetry(ctx, b.Cluster.GetPgBackRestStanzaName(), string(backupType), annotation)
 	stopProgress()
 
 	if err != nil {
@@ -166,6 +177,37 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	}); err != nil {
 		b.Log.Error(err, "Can't update the cluster with the completed backup data")
 	}
+}
+
+// runBackupWithLockRetry runs a pgbackrest backup, retrying when it fails
+// because it could not acquire the backup lock. stanza-create and backup share
+// pgbackrest's "backup" lock, so a backup triggered at cluster adoption can race
+// the stanza-create that runs on the same event and fail with a lock-acquire
+// error. That contention is transient — stanza-create releases the lock within a
+// second or two — so we retry a bounded number of times. Any non-lock error
+// (and a still-held lock after all attempts) is returned to fail the backup.
+func (b *PgBackRestBackupCommand) runBackupWithLockRetry(
+	ctx context.Context, stanza, backupType, annotation string,
+) error {
+	var err error
+	for attempt := 1; attempt <= backupLockRetryAttempts; attempt++ {
+		err = pgbackrest.Backup(ctx, stanza, backupType, annotation)
+		if err == nil || !pgbackrest.IsLockBusy(err) {
+			return err
+		}
+
+		if attempt < backupLockRetryAttempts {
+			b.Log.Info("pgbackrest backup could not acquire the lock, retrying",
+				"attempt", attempt, "maxAttempts", backupLockRetryAttempts,
+				"retryDelay", backupLockRetryDelay.String(), "error", err.Error())
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backupLockRetryDelay):
+			}
+		}
+	}
+	return err
 }
 
 // pollProgress periodically checks pgbackrest info for backup progress

@@ -41,6 +41,13 @@ import (
 // backup in the repository to the Kubernetes Backup CR that triggered it.
 const AnnotationKeyBackupCR = "backup-cr"
 
+// backupRetryAttempts and backupRetryInitialDelay bound how aggressively a
+// failed pgbackrest backup is retried.
+const (
+	backupRetryAttempts     = 4
+	backupRetryInitialDelay = 10 * time.Second
+)
+
 // PgBackRestBackupCommand represents a pgbackrest backup being executed.
 type PgBackRestBackupCommand struct {
 	Cluster  *apiv1.Cluster
@@ -135,7 +142,7 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	progressCtx, stopProgress := context.WithCancel(ctx)
 	go b.pollProgress(progressCtx)
 
-	err := pgbackrest.Backup(ctx, b.Cluster.GetPgBackRestStanzaName(), string(backupType), annotation)
+	err := b.runBackupWithRetry(ctx, b.Cluster.GetPgBackRestStanzaName(), string(backupType), annotation)
 	stopProgress()
 
 	if err != nil {
@@ -166,6 +173,45 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	}); err != nil {
 		b.Log.Error(err, "Can't update the cluster with the completed backup data")
 	}
+}
+
+// runBackupWithRetry runs a pgbackrest backup, retrying on any failure up to
+// backupRetryAttempts with exponential backoff. Early backups commonly fail for
+// transient reasons — racing the adoption-time stanza-create (lock contention or
+// the stanza not yet existing), a transient S3 error, a pod rollout. The lockContention
+// flag in the log distinguishes the most common cause. A backup that keeps
+// failing after all attempts (e.g. genuine misconfiguration) is returned so the
+// Backup CR is marked failed.
+func (b *PgBackRestBackupCommand) runBackupWithRetry(
+	ctx context.Context, stanza, backupType, annotation string,
+) error {
+	delay := backupRetryInitialDelay
+	var err error
+	for attempt := 1; attempt <= backupRetryAttempts; attempt++ {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+
+		err = pgbackrest.Backup(ctx, stanza, backupType, annotation)
+		if err == nil {
+			return nil
+		}
+		if attempt == backupRetryAttempts {
+			break
+		}
+
+		b.Log.Info("pgbackrest backup failed, retrying",
+			"attempt", attempt, "maxAttempts", backupRetryAttempts,
+			"retryDelay", delay.String(), "lockContention", pgbackrest.IsLockBusy(err),
+			"error", err.Error())
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+		delay *= 2
+	}
+	return err
 }
 
 // pollProgress periodically checks pgbackrest info for backup progress

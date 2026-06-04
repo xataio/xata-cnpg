@@ -67,6 +67,25 @@ func IsStanzaMissingFromRepo(err error) bool {
 	return cmdErr.ExitCode == 103 && strings.Contains(cmdErr.Stderr, "FileMissingError")
 }
 
+// lockAcquireExitCode is the pgbackrest exit code (LockAcquireError) returned
+// when a command cannot acquire its lock because another pgbackrest process is
+// already holding it.
+const lockAcquireExitCode = 50
+
+// IsLockBusy reports whether a pgbackrest error indicates the command could not
+// acquire its lock because another pgbackrest process holds it. stanza-create,
+// backup and expire all share pgbackrest's "backup" lock, so a backup triggered
+// at cluster adoption can race the stanza-create that runs on the same event and
+// fail with this error. The contention is transient — it clears as soon as the
+// other process releases the lock — so callers can safely retry.
+func IsLockBusy(err error) bool {
+	var cmdErr *CommandError
+	if !errors.As(err, &cmdErr) {
+		return false
+	}
+	return cmdErr.ExitCode == lockAcquireExitCode
+}
+
 // CommandError is returned when a pgbackrest command fails.
 type CommandError struct {
 	// Command is the pgbackrest subcommand that failed (e.g. "archive-push").

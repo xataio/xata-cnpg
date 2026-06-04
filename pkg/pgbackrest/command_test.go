@@ -160,7 +160,7 @@ func TestIsLockBusy(t *testing.T) {
 			&CommandError{
 				Command:  "backup",
 				ExitCode: 50,
-				Stderr:   "ERROR: [050]: unable to acquire lock on file '/.../stanza-backup-1.lock': Resource temporarily unavailable",
+				Stderr:   "ERROR: [050]: unable to acquire lock: Resource temporarily unavailable",
 			},
 			true,
 		},

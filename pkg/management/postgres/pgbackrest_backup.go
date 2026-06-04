@@ -41,15 +41,11 @@ import (
 // backup in the repository to the Kubernetes Backup CR that triggered it.
 const AnnotationKeyBackupCR = "backup-cr"
 
-// backupLockRetryAttempts and backupLockRetryDelay bound how long a backup waits
-// for a competing pgbackrest process to release the shared "backup" lock before
-// giving up. The common case is a backup triggered at cluster adoption racing
-// the stanza-create that runs on the same event; stanza-create releases the lock
-// within a second or two, so a short, bounded retry resolves it while still
-// failing reasonably fast if another backup is genuinely in progress.
+// backupRetryAttempts and backupRetryInitialDelay bound how aggressively a
+// failed pgbackrest backup is retried.
 const (
-	backupLockRetryAttempts = 6
-	backupLockRetryDelay    = 5 * time.Second
+	backupRetryAttempts     = 4
+	backupRetryInitialDelay = 10 * time.Second
 )
 
 // PgBackRestBackupCommand represents a pgbackrest backup being executed.
@@ -146,7 +142,7 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	progressCtx, stopProgress := context.WithCancel(ctx)
 	go b.pollProgress(progressCtx)
 
-	err := b.runBackupWithLockRetry(ctx, b.Cluster.GetPgBackRestStanzaName(), string(backupType), annotation)
+	err := b.runBackupWithRetry(ctx, b.Cluster.GetPgBackRestStanzaName(), string(backupType), annotation)
 	stopProgress()
 
 	if err != nil {
@@ -179,33 +175,41 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	}
 }
 
-// runBackupWithLockRetry runs a pgbackrest backup, retrying when it fails
-// because it could not acquire the backup lock. stanza-create and backup share
-// pgbackrest's "backup" lock, so a backup triggered at cluster adoption can race
-// the stanza-create that runs on the same event and fail with a lock-acquire
-// error. That contention is transient — stanza-create releases the lock within a
-// second or two — so we retry a bounded number of times. Any non-lock error
-// (and a still-held lock after all attempts) is returned to fail the backup.
-func (b *PgBackRestBackupCommand) runBackupWithLockRetry(
+// runBackupWithRetry runs a pgbackrest backup, retrying on any failure up to
+// backupRetryAttempts with exponential backoff. Early backups commonly fail for
+// transient reasons — racing the adoption-time stanza-create (lock contention or
+// the stanza not yet existing), a transient S3 error, a pod rollout. The lockContention
+// flag in the log distinguishes the most common cause. A backup that keeps
+// failing after all attempts (e.g. genuine misconfiguration) is returned so the
+// Backup CR is marked failed.
+func (b *PgBackRestBackupCommand) runBackupWithRetry(
 	ctx context.Context, stanza, backupType, annotation string,
 ) error {
+	delay := backupRetryInitialDelay
 	var err error
-	for attempt := 1; attempt <= backupLockRetryAttempts; attempt++ {
-		err = pgbackrest.Backup(ctx, stanza, backupType, annotation)
-		if err == nil || !pgbackrest.IsLockBusy(err) {
-			return err
+	for attempt := 1; attempt <= backupRetryAttempts; attempt++ {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
 		}
 
-		if attempt < backupLockRetryAttempts {
-			b.Log.Info("pgbackrest backup could not acquire the lock, retrying",
-				"attempt", attempt, "maxAttempts", backupLockRetryAttempts,
-				"retryDelay", backupLockRetryDelay.String(), "error", err.Error())
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backupLockRetryDelay):
-			}
+		err = pgbackrest.Backup(ctx, stanza, backupType, annotation)
+		if err == nil {
+			return nil
 		}
+		if attempt == backupRetryAttempts {
+			break
+		}
+
+		b.Log.Info("pgbackrest backup failed, retrying",
+			"attempt", attempt, "maxAttempts", backupRetryAttempts,
+			"retryDelay", delay.String(), "lockContention", pgbackrest.IsLockBusy(err),
+			"error", err.Error())
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+		delay *= 2
 	}
 	return err
 }

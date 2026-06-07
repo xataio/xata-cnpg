@@ -45,9 +45,12 @@ const AnnotationKeyBackupCR = "backup-cr"
 // for the stanza to be ready before starting. The reconciler creates the stanza
 // asynchronously, and a backup triggered by ScheduledBackup immediate:true can
 // race it.
+//
+// backupRetryAttempts and backupRetryInitialDelay bound how aggressively a
+// failed pgbackrest backup is retried.
 const (
-	stanzaWaitAttempts  = 12
-	stanzaWaitInterval  = 5 * time.Second
+	stanzaWaitAttempts = 12
+	stanzaWaitInterval = 5 * time.Second
 
 	backupRetryAttempts     = 4
 	backupRetryInitialDelay = 10 * time.Second

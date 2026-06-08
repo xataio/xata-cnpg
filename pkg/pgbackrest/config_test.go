@@ -73,16 +73,17 @@ func TestApplyOptionDefaults_PriorityNotOverridden(t *testing.T) {
 
 func TestApplyOptionDefaults_ProcessMax(t *testing.T) {
 	tests := []struct {
-		name       string
-		cpuRequest string
-		expected   int
+		name               string
+		cpuRequest         string
+		expectedBackup     int
+		expectedRestore    int
 	}{
-		{"micro 250m", "250m", 1},
-		{"small 500m", "500m", 1},
-		{"medium 1000m", "1000m", 1},
-		{"large 2000m", "2000m", 2},
-		{"xlarge 4000m", "4000m", 4},
-		{"2xlarge 8000m", "8000m", 8},
+		{"micro 250m", "250m", 1, 1},
+		{"small 500m", "500m", 1, 1},
+		{"medium 1000m", "1000m", 1, 2},
+		{"large 2000m", "2000m", 2, 4},
+		{"xlarge 4000m", "4000m", 4, 8},
+		{"2xlarge 8000m", "8000m", 8, 16},
 	}
 
 	for _, tt := range tests {
@@ -100,8 +101,11 @@ func TestApplyOptionDefaults_ProcessMax(t *testing.T) {
 			opts := &apiv1.PgBackRestOptions{}
 			applyOptionDefaults(opts, cluster)
 
-			if opts.ProcessMax == nil || *opts.ProcessMax != tt.expected {
-				t.Errorf("expected processMax %d for %s, got %v", tt.expected, tt.cpuRequest, opts.ProcessMax)
+			if opts.ProcessMax == nil || *opts.ProcessMax != tt.expectedBackup {
+				t.Errorf("expected backup processMax %d for %s, got %v", tt.expectedBackup, tt.cpuRequest, opts.ProcessMax)
+			}
+			if opts.RestoreProcessMax == nil || *opts.RestoreProcessMax != tt.expectedRestore {
+				t.Errorf("expected restore processMax %d for %s, got %v", tt.expectedRestore, tt.cpuRequest, opts.RestoreProcessMax)
 			}
 		})
 	}
@@ -119,11 +123,15 @@ func TestApplyOptionDefaults_ProcessMaxNotOverridden(t *testing.T) {
 	}
 
 	userMax := 2
-	opts := &apiv1.PgBackRestOptions{ProcessMax: &userMax}
+	userRestoreMax := 6
+	opts := &apiv1.PgBackRestOptions{ProcessMax: &userMax, RestoreProcessMax: &userRestoreMax}
 	applyOptionDefaults(opts, cluster)
 
 	if *opts.ProcessMax != 2 {
 		t.Errorf("expected user processMax 2, got %v", *opts.ProcessMax)
+	}
+	if *opts.RestoreProcessMax != 6 {
+		t.Errorf("expected user restoreProcessMax 6, got %v", *opts.RestoreProcessMax)
 	}
 }
 
@@ -164,62 +172,6 @@ func TestApplyOptionDefaults_RepoPathNotOverridden(t *testing.T) {
 
 	if opts.RepoPath != "custom-path" {
 		t.Errorf("expected repoPath custom-path, got %s", opts.RepoPath)
-	}
-}
-
-func TestApplyOptionDefaults_RestoreProcessMax(t *testing.T) {
-	tests := []struct {
-		name       string
-		cpuRequest string
-		expected   int
-	}{
-		{"micro 250m → 2x floored to 1", "250m", 1},
-		{"small 500m → 2x floored to 1", "500m", 1},
-		{"medium 1000m → 2x = 2", "1000m", 2},
-		{"large 2000m → 2x = 4", "2000m", 4},
-		{"xlarge 4000m → 2x = 8", "4000m", 8},
-		{"2xlarge 8000m → 2x = 16", "8000m", 16},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cluster := &apiv1.Cluster{
-				Spec: apiv1.ClusterSpec{
-					Resources: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU: resource.MustParse(tt.cpuRequest),
-						},
-					},
-				},
-			}
-
-			opts := &apiv1.PgBackRestOptions{}
-			applyOptionDefaults(opts, cluster)
-
-			if opts.RestoreProcessMax == nil || *opts.RestoreProcessMax != tt.expected {
-				t.Errorf("expected restoreProcessMax %d for %s, got %v", tt.expected, tt.cpuRequest, opts.RestoreProcessMax)
-			}
-		})
-	}
-}
-
-func TestApplyOptionDefaults_RestoreProcessMaxNotOverridden(t *testing.T) {
-	cluster := &apiv1.Cluster{
-		Spec: apiv1.ClusterSpec{
-			Resources: corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceCPU: resource.MustParse("4000m"),
-				},
-			},
-		},
-	}
-
-	userMax := 6
-	opts := &apiv1.PgBackRestOptions{RestoreProcessMax: &userMax}
-	applyOptionDefaults(opts, cluster)
-
-	if *opts.RestoreProcessMax != 6 {
-		t.Errorf("expected user restoreProcessMax 6, got %v", *opts.RestoreProcessMax)
 	}
 }
 

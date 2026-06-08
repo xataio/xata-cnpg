@@ -167,6 +167,75 @@ func TestApplyOptionDefaults_RepoPathNotOverridden(t *testing.T) {
 	}
 }
 
+func TestApplyOptionDefaults_RestoreProcessMax(t *testing.T) {
+	tests := []struct {
+		name       string
+		cpuRequest string
+		expected   int
+	}{
+		{"micro 250m → 2x floored to 1", "250m", 1},
+		{"small 500m → 2x floored to 1", "500m", 1},
+		{"medium 1000m → 2x = 2", "1000m", 2},
+		{"large 2000m → 2x = 4", "2000m", 4},
+		{"xlarge 4000m → 2x = 8", "4000m", 8},
+		{"2xlarge 8000m → 2x = 16", "8000m", 16},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cluster := &apiv1.Cluster{
+				Spec: apiv1.ClusterSpec{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse(tt.cpuRequest),
+						},
+					},
+				},
+			}
+
+			opts := &apiv1.PgBackRestOptions{}
+			applyOptionDefaults(opts, cluster)
+
+			if opts.RestoreProcessMax == nil || *opts.RestoreProcessMax != tt.expected {
+				t.Errorf("expected restoreProcessMax %d for %s, got %v", tt.expected, tt.cpuRequest, opts.RestoreProcessMax)
+			}
+		})
+	}
+}
+
+func TestApplyOptionDefaults_RestoreProcessMaxNotOverridden(t *testing.T) {
+	cluster := &apiv1.Cluster{
+		Spec: apiv1.ClusterSpec{
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("4000m"),
+				},
+			},
+		},
+	}
+
+	userMax := 6
+	opts := &apiv1.PgBackRestOptions{RestoreProcessMax: &userMax}
+	applyOptionDefaults(opts, cluster)
+
+	if *opts.RestoreProcessMax != 6 {
+		t.Errorf("expected user restoreProcessMax 6, got %v", *opts.RestoreProcessMax)
+	}
+}
+
+func TestConfigureRestoreOptions_ProcessMax(t *testing.T) {
+	cfg := ini.Empty()
+	section := cfg.Section("global:restore")
+
+	restoreMax := 4
+	opts := &apiv1.PgBackRestOptions{RestoreProcessMax: &restoreMax}
+	configureRestoreOptions(opts, section)
+
+	if v := section.Key("process-max").String(); v != "4" {
+		t.Errorf("expected restore process-max 4, got %s", v)
+	}
+}
+
 func TestConfigureGlobalOptions_RepoPath(t *testing.T) {
 	cfg := ini.Empty()
 	section := cfg.Section("global")
@@ -361,15 +430,16 @@ func TestConfigureOptions_CommandScoping(t *testing.T) {
 	cfg := ini.Empty()
 
 	opts := &apiv1.PgBackRestOptions{
-		CompressType:     "lz4",
-		ProcessMax:       ptr.To(2),
-		Priority:         ptr.To(19),
-		ArchiveAsync:     ptr.To(true),
-		StartFast:        ptr.To(true),
-		BackupStandby:    ptr.To(true),
-		Bundle:           ptr.To(true),
-		BlockIncremental: ptr.To(true),
-		Delta:            ptr.To(true),
+		CompressType:      "lz4",
+		ProcessMax:        ptr.To(2),
+		RestoreProcessMax: ptr.To(4),
+		Priority:          ptr.To(19),
+		ArchiveAsync:      ptr.To(true),
+		StartFast:         ptr.To(true),
+		BackupStandby:     ptr.To(true),
+		Bundle:            ptr.To(true),
+		BlockIncremental:  ptr.To(true),
+		Delta:             ptr.To(true),
 	}
 
 	configureOptions(opts, cfg)
@@ -412,6 +482,11 @@ func TestConfigureOptions_CommandScoping(t *testing.T) {
 	restore := cfg.Section("global:restore")
 	if v := restore.Key("delta").String(); v != "y" {
 		t.Errorf("expected delta in restore section, got %s", v)
+	}
+
+	// Restore section should have its own process-max (different from global)
+	if v := restore.Key("process-max").String(); v != "4" {
+		t.Errorf("expected process-max 4 in restore section, got %s", v)
 	}
 
 	// Restore section should NOT have other options

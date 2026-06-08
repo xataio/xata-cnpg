@@ -11,8 +11,12 @@ type PgBackRestOptionsApplyConfiguration struct {
 	CompressType *string `json:"compressType,omitempty"`
 	// Compression level (0-9). The meaning depends on the algorithm.
 	CompressLevel *int `json:"compressLevel,omitempty"`
-	// Maximum number of parallel processes for backup/restore.
+	// Maximum number of parallel processes for backup and archiving.
 	ProcessMax *int `json:"processMax,omitempty"`
+	// Maximum number of parallel processes for restore. Defaults to a higher
+	// value than ProcessMax because PostgreSQL is not running during restore,
+	// so the full CPU is available for pgbackrest.
+	RestoreProcessMax *int `json:"restoreProcessMax,omitempty"`
 	// Force an immediate checkpoint at backup start instead of
 	// waiting for the next scheduled checkpoint.
 	StartFast *bool `json:"startFast,omitempty"`
@@ -80,6 +84,14 @@ func (b *PgBackRestOptionsApplyConfiguration) WithCompressLevel(value int) *PgBa
 // If called multiple times, the ProcessMax field is set to the value of the last call.
 func (b *PgBackRestOptionsApplyConfiguration) WithProcessMax(value int) *PgBackRestOptionsApplyConfiguration {
 	b.ProcessMax = &value
+	return b
+}
+
+// WithRestoreProcessMax sets the RestoreProcessMax field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RestoreProcessMax field is set to the value of the last call.
+func (b *PgBackRestOptionsApplyConfiguration) WithRestoreProcessMax(value int) *PgBackRestOptionsApplyConfiguration {
+	b.RestoreProcessMax = &value
 	return b
 }
 

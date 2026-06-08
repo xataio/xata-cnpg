@@ -222,10 +222,16 @@ type PgBackRestOptions struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=9
 	CompressLevel *int `json:"compressLevel,omitempty"`
-	// Maximum number of parallel processes for backup/restore.
+	// Maximum number of parallel processes for backup and archiving.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	ProcessMax *int `json:"processMax,omitempty"`
+	// Maximum number of parallel processes for restore. Defaults to a higher
+	// value than ProcessMax because PostgreSQL is not running during restore,
+	// so the full CPU is available for pgbackrest.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	RestoreProcessMax *int `json:"restoreProcessMax,omitempty"`
 	// Force an immediate checkpoint at backup start instead of
 	// waiting for the next scheduled checkpoint.
 	// +optional

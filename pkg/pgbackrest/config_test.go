@@ -73,10 +73,10 @@ func TestApplyOptionDefaults_PriorityNotOverridden(t *testing.T) {
 
 func TestApplyOptionDefaults_ProcessMax(t *testing.T) {
 	tests := []struct {
-		name               string
-		cpuRequest         string
-		expectedBackup     int
-		expectedRestore    int
+		name            string
+		cpuRequest      string
+		expectedBackup  int
+		expectedRestore int
 	}{
 		{"micro 250m", "250m", 1, 1},
 		{"small 500m", "500m", 1, 1},

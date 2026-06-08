@@ -222,7 +222,7 @@ type PgBackRestOptions struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=9
 	CompressLevel *int `json:"compressLevel,omitempty"`
-	// Maximum number of parallel processes for backup and archiving.
+	// Maximum number of parallel processes for backup.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	ProcessMax *int `json:"processMax,omitempty"`

@@ -2007,7 +2007,7 @@ spec:
                             type: integer
                           processMax:
                             description: Maximum number of parallel processes for
-                              backup and archiving.
+                              backup.
                             minimum: 1
                             type: integer
                           repoPath:
@@ -3844,7 +3844,7 @@ spec:
                               type: integer
                             processMax:
                               description: Maximum number of parallel processes for
-                                backup and archiving.
+                                backup.
                               minimum: 1
                               type: integer
                             repoPath:

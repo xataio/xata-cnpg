@@ -21,6 +21,7 @@ package pgbackrest
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"gopkg.in/ini.v1"
@@ -459,6 +460,102 @@ func TestGenerateBaseConfig_TLSAndPaths(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if v := tt.section.Key(tt.key).String(); v != tt.expected {
 				t.Errorf("expected %s=%s, got %s", tt.key, tt.expected, v)
+			}
+		})
+	}
+}
+
+func TestGenerateBaseConfig_GCS(t *testing.T) {
+	tests := map[string]struct {
+		gcs        *apiv1.PgBackRestGCS
+		wantKeys   map[string]string
+		absentKeys []string
+	}{
+		"defaults to auto key type": {
+			gcs: &apiv1.PgBackRestGCS{
+				Bucket: "test-gcs-bucket",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":         "gcs",
+				"repo1-gcs-bucket":   "test-gcs-bucket",
+				"repo1-gcs-key-type": "auto",
+			},
+			absentKeys: []string{"repo1-gcs-endpoint"},
+		},
+		"explicit auto key type": {
+			gcs: &apiv1.PgBackRestGCS{
+				Bucket:  "test-gcs-bucket",
+				KeyType: "auto",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":         "gcs",
+				"repo1-gcs-bucket":   "test-gcs-bucket",
+				"repo1-gcs-key-type": "auto",
+			},
+		},
+		"endpoint override": {
+			gcs: &apiv1.PgBackRestGCS{
+				Bucket:   "test-gcs-bucket",
+				Endpoint: "fake-gcs:4443",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":         "gcs",
+				"repo1-gcs-bucket":   "test-gcs-bucket",
+				"repo1-gcs-key-type": "auto",
+				"repo1-gcs-endpoint": "fake-gcs:4443",
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			repo := &apiv1.PgBackRestRepository{GCS: tt.gcs}
+
+			cfg, err := generateBaseConfig(
+				context.Background(), nil, "default",
+				repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+			)
+			if err != nil {
+				t.Fatalf("generateBaseConfig failed: %v", err)
+			}
+
+			global := cfg.Section("global")
+			for key, expected := range tt.wantKeys {
+				if v := global.Key(key).String(); v != expected {
+					t.Errorf("expected %s=%s, got %q", key, expected, v)
+				}
+			}
+			for _, key := range tt.absentKeys {
+				if global.HasKey(key) {
+					t.Errorf("%s should not be set", key)
+				}
+			}
+			for _, key := range global.KeyStrings() {
+				if strings.HasPrefix(key, "repo1-s3-") {
+					t.Errorf("no repo1-s3-* keys expected for a GCS repository, found %s", key)
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateBaseConfig_GCSUnsupportedKeyTypes(t *testing.T) {
+	for _, keyType := range []string{"service", "token"} {
+		t.Run(keyType, func(t *testing.T) {
+			repo := &apiv1.PgBackRestRepository{
+				GCS: &apiv1.PgBackRestGCS{
+					Bucket:  "test-gcs-bucket",
+					KeyType: keyType,
+					KeyRef:  &apiv1.SecretKeySelector{},
+				},
+			}
+
+			_, err := generateBaseConfig(
+				context.Background(), nil, "default",
+				repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+			)
+			if err == nil {
+				t.Fatalf("expected an error for unsupported key type %q", keyType)
 			}
 		})
 	}

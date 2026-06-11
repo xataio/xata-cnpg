@@ -2211,6 +2211,11 @@ func (in *PgBackRestOptions) DeepCopyInto(out *PgBackRestOptions) {
 		*out = new(int)
 		**out = **in
 	}
+	if in.RestoreProcessMax != nil {
+		in, out := &in.RestoreProcessMax, &out.RestoreProcessMax
+		*out = new(int)
+		**out = **in
+	}
 	if in.StartFast != nil {
 		in, out := &in.StartFast, &out.StartFast
 		*out = new(bool)

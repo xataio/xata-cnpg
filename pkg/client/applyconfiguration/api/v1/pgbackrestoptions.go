@@ -11,7 +11,7 @@ type PgBackRestOptionsApplyConfiguration struct {
 	CompressType *string `json:"compressType,omitempty"`
 	// Compression level (0-9). The meaning depends on the algorithm.
 	CompressLevel *int `json:"compressLevel,omitempty"`
-	// Maximum number of parallel processes for backup and archiving.
+	// Maximum number of parallel processes for backup.
 	ProcessMax *int `json:"processMax,omitempty"`
 	// Maximum number of parallel processes for restore. Defaults to a higher
 	// value than ProcessMax because PostgreSQL is not running during restore,

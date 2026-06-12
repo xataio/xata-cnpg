@@ -41,9 +41,17 @@ import (
 // backup in the repository to the Kubernetes Backup CR that triggered it.
 const AnnotationKeyBackupCR = "backup-cr"
 
+// stanzaWaitAttempts and stanzaWaitInterval control how long the backup waits
+// for the stanza to be ready before starting. The reconciler creates the stanza
+// asynchronously, and a backup triggered by ScheduledBackup immediate:true can
+// race it.
+//
 // backupRetryAttempts and backupRetryInitialDelay bound how aggressively a
 // failed pgbackrest backup is retried.
 const (
+	stanzaWaitAttempts = 12
+	stanzaWaitInterval = 5 * time.Second
+
 	backupRetryAttempts     = 4
 	backupRetryInitialDelay = 10 * time.Second
 )
@@ -142,7 +150,17 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	progressCtx, stopProgress := context.WithCancel(ctx)
 	go b.pollProgress(progressCtx)
 
-	err := b.runBackupWithRetry(ctx, b.Cluster.GetPgBackRestStanzaName(), string(backupType), annotation)
+	stanza := b.Cluster.GetPgBackRestStanzaName()
+
+	if err := b.waitForStanza(ctx, stanza); err != nil {
+		stopProgress()
+		b.Log.Error(err, "Backup failed: stanza not ready")
+		b.Recorder.Event(b.Backup, "Normal", "Failed", "Stanza not ready after waiting")
+		_ = status.FlagBackupAsFailed(ctx, b.Client, b.Backup, b.Cluster, err)
+		return
+	}
+
+	err := b.runBackupWithRetry(ctx, stanza, string(backupType), annotation)
 	stopProgress()
 
 	if err != nil {
@@ -173,6 +191,31 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	}); err != nil {
 		b.Log.Error(err, "Can't update the cluster with the completed backup data")
 	}
+}
+
+// waitForStanza polls pgbackrest info until the stanza exists or the timeout
+// is reached. The reconciler creates the stanza asynchronously, and a backup
+// triggered at cluster adoption (ScheduledBackup immediate:true) can race it.
+// Waiting here instead of retrying the backup avoids wasting time on a backup
+// that would fail immediately due to a missing stanza or lock contention.
+func (b *PgBackRestBackupCommand) waitForStanza(ctx context.Context, stanza string) error {
+	for attempt := 1; attempt <= stanzaWaitAttempts; attempt++ {
+		_, err := pgbackrest.Info(ctx, stanza)
+		if err == nil {
+			return nil
+		}
+
+		b.Log.Info("Waiting for stanza to be ready",
+			"stanza", stanza, "attempt", attempt, "maxAttempts", stanzaWaitAttempts,
+			"error", err.Error())
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(stanzaWaitInterval):
+		}
+	}
+	return fmt.Errorf("stanza %s not ready after %d attempts", stanza, stanzaWaitAttempts)
 }
 
 // runBackupWithRetry runs a pgbackrest backup, retrying on any failure up to

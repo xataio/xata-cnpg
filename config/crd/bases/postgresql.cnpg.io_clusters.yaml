@@ -1457,7 +1457,7 @@ spec:
                             type: integer
                           processMax:
                             description: Maximum number of parallel processes for
-                              backup/restore.
+                              backup.
                             minimum: 1
                             type: integer
                           repoPath:
@@ -1468,6 +1468,13 @@ spec:
                               incarnation from existing data under the default path, or to restore
                               from a custom path.
                             type: string
+                          restoreProcessMax:
+                            description: |-
+                              Maximum number of parallel processes for restore. Defaults to a higher
+                              value than ProcessMax because PostgreSQL is not running during restore,
+                              so the full CPU is available for pgbackrest.
+                            minimum: 1
+                            type: integer
                           retention:
                             description: Backup retention policy.
                             properties:
@@ -3287,7 +3294,7 @@ spec:
                               type: integer
                             processMax:
                               description: Maximum number of parallel processes for
-                                backup/restore.
+                                backup.
                               minimum: 1
                               type: integer
                             repoPath:
@@ -3298,6 +3305,13 @@ spec:
                                 incarnation from existing data under the default path, or to restore
                                 from a custom path.
                               type: string
+                            restoreProcessMax:
+                              description: |-
+                                Maximum number of parallel processes for restore. Defaults to a higher
+                                value than ProcessMax because PostgreSQL is not running during restore,
+                                so the full CPU is available for pgbackrest.
+                              minimum: 1
+                              type: integer
                             retention:
                               description: Backup retention policy.
                               properties:

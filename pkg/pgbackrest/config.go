@@ -253,6 +253,20 @@ func applyOptionDefaults(opts *apiv1.PgBackRestOptions, cluster *apiv1.Cluster) 
 			opts.ProcessMax = &processMax
 		}
 	}
+	if opts.RestoreProcessMax == nil {
+		cpuRequest := cluster.Spec.Resources.Requests.Cpu()
+		if cpuRequest != nil && !cpuRequest.IsZero() {
+			// During restore PostgreSQL is not running, so shared_buffers and
+			// other PG memory is free. We use 2x the backup process-max. Each
+			// process uses ~230MB; the freed shared_buffers (~25% of RAM) more
+			// than covers the extra memory at every instance size.
+			restoreMax := int(cpuRequest.MilliValue()/1000) * 2
+			if restoreMax < 1 {
+				restoreMax = 1
+			}
+			opts.RestoreProcessMax = &restoreMax
+		}
+	}
 	if opts.RepoPath == "" {
 		// Default the repo path to the stanza name so that overriding only the
 		// stanza still keeps the whole backup set (prefix + stanza) under one
@@ -337,6 +351,9 @@ func configureBackupOptions(opts *apiv1.PgBackRestOptions, section *ini.Section)
 func configureRestoreOptions(opts *apiv1.PgBackRestOptions, section *ini.Section) {
 	if opts.Delta != nil && *opts.Delta {
 		section.Key("delta").SetValue("y")
+	}
+	if opts.RestoreProcessMax != nil {
+		section.Key("process-max").SetValue(strconv.Itoa(*opts.RestoreProcessMax))
 	}
 }
 

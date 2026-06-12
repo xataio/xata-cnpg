@@ -390,6 +390,39 @@ jobs:
             exit 1
           fi
 
+  generated-code:
+    name: Verify generated code is up to date
+    needs:
+      - duplicate_runs
+      - change-triage
+    # Run make generate if Go code has changed
+    if: |
+      needs.duplicate_runs.outputs.should_skip != 'true' &&
+      needs.change-triage.outputs.go-code-changed == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
+
+      - name: Install Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6
+        with:
+          go-version: ${{ env.GOLANG_VERSION }}
+          check-latest: true
+
+      - name: Run make generate
+        run: |
+          make generate
+
+      - name: Check generated code is up to date
+        run: |
+          generated_paths='api/v1/zz_generated.deepcopy.go pkg/client/applyconfiguration'
+          if [ -n "$(git status --porcelain -- $generated_paths)" ]; then
+            echo "The generated code does not reflect the current API. Please run make generate."
+            git status --porcelain -- $generated_paths
+            exit 1
+          fi
+
   buildx:
     name: Build containers
     needs:
@@ -398,6 +431,7 @@ jobs:
       - tests
       - apidoc
       - crd
+      - generated-code
       - duplicate_runs
       - change-triage
     # Build containers:
@@ -419,7 +453,8 @@ jobs:
       (needs.shellcheck.result == 'success' || needs.shellcheck.result == 'skipped') &&
       (needs.tests.result == 'success' || needs.tests.result == 'skipped') &&
       (needs.apidoc.result == 'success' || needs.apidoc.result == 'skipped') &&
-      (needs.crd.result == 'success' || needs.crd.result == 'skipped')
+      (needs.crd.result == 'success' || needs.crd.result == 'skipped') &&
+      (needs.generated-code.result == 'success' || needs.generated-code.result == 'skipped')
     runs-on: ubuntu-24.04
     permissions:
       actions: read

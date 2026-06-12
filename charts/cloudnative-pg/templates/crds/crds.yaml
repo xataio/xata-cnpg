@@ -2072,7 +2072,51 @@ spec:
                           gcs:
                             description: PgBackRestGCS defines the Google Cloud Storage
                               configuration for pgbackrest.
+                            properties:
+                              bucket:
+                                description: The GCS bucket name
+                                type: string
+                              endpoint:
+                                description: |-
+                                  The GCS endpoint, overriding the automatic endpoint discovery.
+                                  Rarely needed, mostly for testing against GCS emulators.
+                                type: string
+                              keyRef:
+                                description: |-
+                                  The reference to a Secret holding the service account JSON key when
+                                  keyType is "service", or a bearer token when keyType is "token".
+                                  Required for those key types, must be unset for "auto".
+                                properties:
+                                  key:
+                                    description: The key to select
+                                    type: string
+                                  name:
+                                    description: Name of the referent.
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              keyType:
+                                default: auto
+                                description: |-
+                                  KeyType selects the authentication method. "auto" uses Workload
+                                  Identity / Application Default Credentials (the GKE path). "service"
+                                  reads a service account JSON key from KeyRef. "token" uses a bearer
+                                  token from KeyRef.
+                                enum:
+                                - auto
+                                - service
+                                - token
+                                type: string
+                            required:
+                            - bucket
                             type: object
+                            x-kubernetes-validations:
+                            - message: keyRef must be set when keyType is service
+                                or token, and must not be set when keyType is auto
+                              rule: (has(self.keyType) && (self.keyType == 'service'
+                                || self.keyType == 'token')) == has(self.keyRef)
                           s3:
                             description: PgBackRestS3 defines the S3-compatible storage
                               configuration for pgbackrest.
@@ -3909,7 +3953,51 @@ spec:
                             gcs:
                               description: PgBackRestGCS defines the Google Cloud
                                 Storage configuration for pgbackrest.
+                              properties:
+                                bucket:
+                                  description: The GCS bucket name
+                                  type: string
+                                endpoint:
+                                  description: |-
+                                    The GCS endpoint, overriding the automatic endpoint discovery.
+                                    Rarely needed, mostly for testing against GCS emulators.
+                                  type: string
+                                keyRef:
+                                  description: |-
+                                    The reference to a Secret holding the service account JSON key when
+                                    keyType is "service", or a bearer token when keyType is "token".
+                                    Required for those key types, must be unset for "auto".
+                                  properties:
+                                    key:
+                                      description: The key to select
+                                      type: string
+                                    name:
+                                      description: Name of the referent.
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                keyType:
+                                  default: auto
+                                  description: |-
+                                    KeyType selects the authentication method. "auto" uses Workload
+                                    Identity / Application Default Credentials (the GKE path). "service"
+                                    reads a service account JSON key from KeyRef. "token" uses a bearer
+                                    token from KeyRef.
+                                  enum:
+                                  - auto
+                                  - service
+                                  - token
+                                  type: string
+                              required:
+                              - bucket
                               type: object
+                              x-kubernetes-validations:
+                              - message: keyRef must be set when keyType is service
+                                  or token, and must not be set when keyType is auto
+                                rule: (has(self.keyType) && (self.keyType == 'service'
+                                  || self.keyType == 'token')) == has(self.keyRef)
                             s3:
                               description: PgBackRestS3 defines the S3-compatible
                                 storage configuration for pgbackrest.

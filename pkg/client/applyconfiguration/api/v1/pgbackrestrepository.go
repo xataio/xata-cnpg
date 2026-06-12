@@ -12,9 +12,9 @@ import (
 // PgBackRestRepository defines the storage repository for pgbackrest.
 // Exactly one of s3, gcs, or azure must be specified.
 type PgBackRestRepositoryApplyConfiguration struct {
-	S3    *PgBackRestS3ApplyConfiguration `json:"s3,omitempty"`
-	GCS   *apiv1.PgBackRestGCS            `json:"gcs,omitempty"`
-	Azure *apiv1.PgBackRestAzure          `json:"azure,omitempty"`
+	S3    *PgBackRestS3ApplyConfiguration  `json:"s3,omitempty"`
+	GCS   *PgBackRestGCSApplyConfiguration `json:"gcs,omitempty"`
+	Azure *apiv1.PgBackRestAzure           `json:"azure,omitempty"`
 }
 
 // PgBackRestRepositoryApplyConfiguration constructs a declarative configuration of the PgBackRestRepository type for use with
@@ -34,8 +34,8 @@ func (b *PgBackRestRepositoryApplyConfiguration) WithS3(value *PgBackRestS3Apply
 // WithGCS sets the GCS field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the GCS field is set to the value of the last call.
-func (b *PgBackRestRepositoryApplyConfiguration) WithGCS(value apiv1.PgBackRestGCS) *PgBackRestRepositoryApplyConfiguration {
-	b.GCS = &value
+func (b *PgBackRestRepositoryApplyConfiguration) WithGCS(value *PgBackRestGCSApplyConfiguration) *PgBackRestRepositoryApplyConfiguration {
+	b.GCS = value
 	return b
 }
 

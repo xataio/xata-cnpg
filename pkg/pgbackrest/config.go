@@ -115,10 +115,16 @@ func generateBaseConfig(
 	cfg := ini.Empty()
 	global := cfg.Section("global")
 
-	// S3 configuration
+	// Repository storage configuration. The CRD guarantees exactly one
+	// backend is set; the checks are independent as a defensive measure.
 	if repo.S3 != nil {
 		if err := configureS3(ctx, k8sClient, namespace, repo.S3, global); err != nil {
 			return nil, fmt.Errorf("configuring S3: %w", err)
+		}
+	}
+	if repo.GCS != nil {
+		if err := configureGCS(repo.GCS, global); err != nil {
+			return nil, fmt.Errorf("configuring GCS: %w", err)
 		}
 	}
 
@@ -213,6 +219,34 @@ func configureS3(
 		}
 		section.Key("repo1-s3-key").SetValue(accessKey)
 		section.Key("repo1-s3-key-secret").SetValue(secretKey)
+	}
+
+	return nil
+}
+
+// configureGCS sets GCS-specific keys in the [global] section.
+func configureGCS(gcs *apiv1.PgBackRestGCS, section *ini.Section) error {
+	section.Key("repo1-type").SetValue("gcs")
+	section.Key("repo1-gcs-bucket").SetValue(gcs.Bucket)
+
+	if gcs.Endpoint != "" {
+		section.Key("repo1-gcs-endpoint").SetValue(gcs.Endpoint)
+	}
+
+	keyType := gcs.KeyType
+	if keyType == "" {
+		// pgbackrest defaults repo1-gcs-key-type to "service", so "auto"
+		// (workload identity / ADC) must be set explicitly.
+		keyType = "auto"
+	}
+	section.Key("repo1-gcs-key-type").SetValue(keyType)
+
+	if keyType != "auto" {
+		// The "service" and "token" key types need repo1-gcs-key to point at
+		// a file on disk holding the service account JSON or bearer token.
+		// Plumbing the KeyRef secret to a file on the pod is not wired up
+		// yet, so only "auto" is supported for now.
+		return fmt.Errorf("GCS key type %q is not supported yet, only \"auto\" is", keyType)
 	}
 
 	return nil

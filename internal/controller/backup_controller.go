@@ -124,7 +124,24 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	switch backup.Status.Phase {
 	case apiv1.BackupPhaseFailed, apiv1.BackupPhaseCompleted:
-		return ctrl.Result{}, nil
+		// TTL: delete the Backup CR 2 hours after completion/failure
+		const backupTTL = 2 * time.Hour
+		var finishedAt time.Time
+		if backup.Status.StoppedAt != nil {
+			finishedAt = backup.Status.StoppedAt.Time
+		} else {
+			finishedAt = backup.CreationTimestamp.Time
+		}
+		age := time.Since(finishedAt)
+		if age >= backupTTL {
+			contextLogger.Info("Deleting expired backup CR",
+				"backup", backup.Name, "phase", backup.Status.Phase, "age", age)
+			if err := r.Delete(ctx, &backup); err != nil && !apierrs.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{RequeueAfter: backupTTL - age}, nil
 	}
 
 	var cluster apiv1.Cluster

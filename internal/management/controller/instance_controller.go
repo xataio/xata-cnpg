@@ -163,11 +163,6 @@ func (r *InstanceReconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	// Reconcile pgbackrest configuration if configured
-	if err := r.reconcilePgBackRestConfig(ctx, cluster); err != nil {
-		return reconcile.Result{}, err
-	}
-
 	// Refresh the cache
 	requeueOnMissingPermissions := r.updateCacheFromCluster(ctx, cluster)
 
@@ -208,6 +203,15 @@ func (r *InstanceReconciler) Reconcile(
 			return handleErrNextLoop(err)
 		}
 		r.firstReconcileDone.Store(true)
+	}
+
+	// Reconcile pgbackrest configuration if configured.
+	// This runs after initialize so that ArchiveAllReadyWALs (called during
+	// initialization of a former primary) can flush leftover WAL files using
+	// the primary config still on disk, before it gets overwritten with the
+	// replica config that includes pg1-host.
+	if err := r.reconcilePgBackRestConfig(ctx, cluster); err != nil {
+		return reconcile.Result{}, err
 	}
 
 	// Reconcile cluster role without DB

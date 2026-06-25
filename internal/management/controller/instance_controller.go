@@ -163,6 +163,11 @@ func (r *InstanceReconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
+	// Reconcile pgbackrest configuration if configured
+	if err := r.reconcilePgBackRestConfig(ctx, cluster); err != nil {
+		return reconcile.Result{}, err
+	}
+
 	// Refresh the cache
 	requeueOnMissingPermissions := r.updateCacheFromCluster(ctx, cluster)
 
@@ -203,15 +208,6 @@ func (r *InstanceReconciler) Reconcile(
 			return handleErrNextLoop(err)
 		}
 		r.firstReconcileDone.Store(true)
-	}
-
-	// Reconcile pgbackrest configuration if configured.
-	// This runs after initialize so that ArchiveAllReadyWALs (called during
-	// initialization of a former primary) can flush leftover WAL files using
-	// the primary config still on disk, before it gets overwritten with the
-	// replica config that includes pg1-host.
-	if err := r.reconcilePgBackRestConfig(ctx, cluster); err != nil {
-		return reconcile.Result{}, err
 	}
 
 	// Reconcile cluster role without DB
@@ -1141,6 +1137,16 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 	}
 
 	isPrimary := r.instance.GetPodName() == cluster.Status.CurrentPrimary
+	// Before initialization completes, check if PGDATA is still a primary.
+	// This happens during switchover: the cluster status already points to the
+	// new primary, but this pod's PGDATA is still a primary that needs to flush
+	// leftover WAL files via ArchiveAllReadyWALs. Writing the config as primary
+	// (without pg1-host) allows archive-push to run locally.
+	if !isPrimary && !r.firstReconcileDone.Load() {
+		if pgPrimary, _ := r.instance.IsPrimary(); pgPrimary {
+			isPrimary = true
+		}
+	}
 	content, err := pgbackrest.GenerateConfig(ctx, r.GetClient(), cluster, r.instance.PgData, isPrimary)
 	if err != nil {
 		return fmt.Errorf("generating pgbackrest config: %w", err)

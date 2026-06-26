@@ -1137,6 +1137,16 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 	}
 
 	isPrimary := r.instance.GetPodName() == cluster.Status.CurrentPrimary
+	// Before initialization completes, check if PGDATA is still a primary.
+	// This happens during switchover: the cluster status already points to the
+	// new primary, but this pod's PGDATA is still a primary that needs to flush
+	// leftover WAL files via ArchiveAllReadyWALs. Writing the config as primary
+	// (without pg1-host) allows archive-push to run locally.
+	if !isPrimary && !r.firstReconcileDone.Load() {
+		if pgPrimary, _ := r.instance.IsPrimary(); pgPrimary {
+			isPrimary = true
+		}
+	}
 	content, err := pgbackrest.GenerateConfig(ctx, r.GetClient(), cluster, r.instance.PgData, isPrimary)
 	if err != nil {
 		return fmt.Errorf("generating pgbackrest config: %w", err)

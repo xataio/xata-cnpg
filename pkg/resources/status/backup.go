@@ -26,6 +26,7 @@ import (
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	pgTime "github.com/cloudnative-pg/machinery/pkg/postgres/time"
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -116,8 +117,10 @@ func FlagBackupAsFailed(
 			cluster.Status.LastFailedBackup = pgTime.GetCurrentTimestampWithFormat(time.RFC3339) //nolint:staticcheck
 		},
 	); err != nil {
-		contextLogger.Error(err, "while patching cluster status with last failed backup")
-		flagErr.clusterStatusErr = err
+		if !apierrs.IsNotFound(err) {
+			contextLogger.Error(err, "while patching cluster status with last failed backup")
+			flagErr.clusterStatusErr = err
+		}
 	}
 
 	if err := PatchConditionsWithOptimisticLock(
@@ -126,8 +129,10 @@ func FlagBackupAsFailed(
 		cluster,
 		apiv1.BuildClusterBackupFailedCondition(err),
 	); err != nil {
-		contextLogger.Error(err, "while patching backup condition in the cluster status (backup failed)")
-		flagErr.clusterConditionErr = err
+		if !apierrs.IsNotFound(err) {
+			contextLogger.Error(err, "while patching backup condition in the cluster status (backup failed)")
+			flagErr.clusterConditionErr = err
+		}
 	}
 
 	return flagErr.toError()

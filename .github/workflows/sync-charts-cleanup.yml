@@ -1,0 +1,24 @@
+name: Sync Charts Cleanup
+
+on:
+  pull_request:
+    types: [closed, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup-preview:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.base.ref == 'release-1.28'
+      && (
+        (github.event.action == 'closed'
+          && contains(github.event.pull_request.labels.*.name, 'preview'))
+        || (github.event.action == 'unlabeled' && github.event.label.name == 'preview')
+      )
+    uses: ./.github/workflows/sync-charts.yml
+    with:
+      action: cleanup
+      sync_key: ${{ github.repository }}#${{ github.event.pull_request.number }}
+    secrets: inherit

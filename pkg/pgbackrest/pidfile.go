@@ -34,7 +34,7 @@ import (
 const TLSServerPIDFile = dataDirectory + "/server.pid"
 
 func checkForExistingTLSServer(pidFile string, serverExecutables ...string) (*os.Process, error) {
-	contents, err := os.ReadFile(pidFile)
+	contents, err := os.ReadFile(pidFile) //nolint:gosec // Production uses a fixed path; tests use temporary paths.
 	if err == nil {
 		pid, parseErr := strconv.Atoi(string(bytes.TrimSpace(contents)))
 		if parseErr == nil {

@@ -21,6 +21,11 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"sync"
+	"time"
+
+	"github.com/jackc/puddle/v2"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -78,4 +83,85 @@ var _ = Describe("Set Plugin Protocol", func() {
 		Expect(second.mockHandlers).To(HaveLen(1))
 		Expect(second.mockHandlers[0].closed).To(BeFalse())
 	})
+})
+
+var _ = Describe("GetConnection", func() {
+	var repository *data
+
+	BeforeEach(func() {
+		repository = &data{}
+	})
+
+	It("returns ErrUnknownPlugin for a plugin that was never registered", func(ctx SpecContext) {
+		_, err := repository.GetConnection(ctx, "no-such-plugin")
+		var errUnknownPlugin *ErrUnknownPlugin
+		Expect(errors.As(err, &errUnknownPlugin)).To(BeTrue())
+		Expect(errUnknownPlugin.Name).To(Equal("no-such-plugin"))
+	})
+
+	It("returns a working connection for a registered plugin", func(ctx SpecContext) {
+		err := repository.setPluginProtocol("plugin1", newUnitTestProtocol("test"), pluginSetupOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		conn, err := repository.GetConnection(ctx, "plugin1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(conn.Name()).To(Equal("testing-service"))
+		Expect(conn.Close()).To(Succeed())
+	})
+
+	It("fails with the closed pool error when the registered pool has been closed", func(ctx SpecContext) {
+		err := repository.setPluginProtocol("plugin1", newUnitTestProtocol("test"), pluginSetupOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		repository.pluginConnectionPool["plugin1"].Close()
+
+		_, err = repository.GetConnection(ctx, "plugin1")
+		Expect(errors.Is(err, puddle.ErrClosedPool)).To(BeTrue())
+	})
+
+	It("recovers when the plugin is re-registered while connections are being acquired", func(ctx SpecContext) {
+		err := repository.setPluginProtocol("plugin1", newUnitTestProtocol("test"), pluginSetupOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Exercise concurrent GetConnection and forced re-registration:
+		// the acquisitions must never observe a missing plugin, and the
+		// map accesses must be race-free (this test is meaningful under
+		// the -race detector).
+		var wg sync.WaitGroup
+		errored := make(chan error, 16)
+		for range 8 {
+			wg.Go(func() {
+				defer GinkgoRecover()
+				conn, err := repository.GetConnection(ctx, "plugin1")
+				if err != nil {
+					errored <- err
+					return
+				}
+				errored <- conn.Close()
+			})
+		}
+		for range 4 {
+			wg.Go(func() {
+				defer GinkgoRecover()
+				err := repository.setPluginProtocol(
+					"plugin1", newUnitTestProtocol("test"), pluginSetupOptions{forceRegistration: true})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		}
+		wg.Wait()
+		close(errored)
+
+		// Connections may transiently fail while a pool is being replaced
+		// (that is the retried "closed pool" window), but no goroutine may
+		// see the plugin as unknown, since it stays registered throughout.
+		for err := range errored {
+			if err != nil {
+				var errUnknownPlugin *ErrUnknownPlugin
+				Expect(errors.As(err, &errUnknownPlugin)).To(BeFalse())
+			}
+		}
+
+		conn, err := repository.GetConnection(ctx, "plugin1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(conn.Close()).To(Succeed())
+	}, NodeTimeout(time.Minute))
 })

@@ -21,6 +21,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -58,8 +59,9 @@ func (r *data) GetConnection(ctx context.Context, name string) (connection.Inter
 
 	var resource *puddle.Resource[connection.Interface]
 
+	closedPoolLogged := false
 	if err := retry.OnError(connectionBackoff, func(_ error) bool { return true }, func() error {
-		pool, ok := r.pluginConnectionPool[name]
+		pool, ok := r.getPool(name)
 		if !ok {
 			return &ErrUnknownPlugin{Name: name}
 		}
@@ -69,8 +71,23 @@ func (r *data) GetConnection(ctx context.Context, name string) (connection.Inter
 		var err error
 
 		contextLogger.Trace("try getting connection")
+		r.inFlightAcquisitions.Add(1)
 		resource, err = pool.Acquire(ctx)
+		r.inFlightAcquisitions.Add(-1)
 		if err != nil {
+			// A closed pool should be a transient condition, replaced by
+			// a fresh pool on the next plugin re-registration. It has been
+			// observed to persist indefinitely instead, wedging every
+			// reconciliation. Log it explicitly, with the pool identity,
+			// so recurrences can be traced back to the close that caused
+			// them (see the "Closing plugin connection pool" log entries).
+			if errors.Is(err, puddle.ErrClosedPool) && !closedPoolLogged {
+				closedPoolLogged = true
+				contextLogger.Warning(
+					"Acquired a closed plugin connection pool, retrying",
+					"pool", fmt.Sprintf("%p", pool),
+				)
+			}
 			return err
 		}
 

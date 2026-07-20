@@ -30,11 +30,15 @@ import (
 	"strings"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
+
+	"github.com/xataio/xata-cnpg/pkg/postgres"
 )
 
 const (
+	dataDirectory = postgres.ScratchDataDirectory + "/pgbackrest"
+
 	// ConfigFilePath is the location of the pgbackrest configuration file.
-	ConfigFilePath = "/controller/pgbackrest/pgbackrest.conf"
+	ConfigFilePath = dataDirectory + "/pgbackrest.conf"
 
 	// pgbackrestBinary is the pgbackrest executable name.
 	pgbackrestBinary = "pgbackrest"

@@ -21,6 +21,8 @@ package pgbackrest
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -36,7 +38,7 @@ const TLSServerPort = 8432
 // operations, replacing SSH as the transport mechanism.
 type TLSServer struct {
 	mu      sync.Mutex
-	cmd     *exec.Cmd
+	process *os.Process
 	running bool
 }
 
@@ -52,6 +54,29 @@ func (s *TLSServer) Start(ctx context.Context) error {
 	}
 
 	contextLog := log.FromContext(ctx)
+	process, err := checkForExistingTLSServer(TLSServerPIDFile, pgbackrestBinary)
+	if err != nil {
+		return err
+	}
+	if process != nil {
+		// An online instance manager upgrade uses syscall.Exec, which leaves the
+		// pgbackrest child running while replacing all manager state. Adopt that
+		// process just as the new manager adopts an existing PostgreSQL postmaster.
+		s.process = process
+		s.running = true
+		contextLog.Info("adopted running pgbackrest TLS server", "pid", process.Pid)
+		go s.monitor(contextLog, process, func() error {
+			state, err := process.Wait()
+			if err != nil {
+				return err
+			}
+			if !state.Success() {
+				return &exec.ExitError{ProcessState: state}
+			}
+			return nil
+		})
+		return nil
+	}
 
 	args := []string{"--config=" + ConfigFilePath, "server"}
 
@@ -59,28 +84,38 @@ func (s *TLSServer) Start(ctx context.Context) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	if err := writeTLSServerPIDFile(cmd.Process.Pid); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("writing pgbackrest TLS server PID file: %w", err)
+	}
 
-	s.cmd = cmd
+	s.process = cmd.Process
 	s.running = true
 
 	contextLog.Info("pgbackrest TLS server started", "pid", cmd.Process.Pid)
 
-	// Monitor the process in a goroutine — if it exits, mark as not running
-	// so the reconciler can restart it.
-	go func() {
-		err := cmd.Wait()
-		s.mu.Lock()
-		s.running = false
-		s.mu.Unlock()
-
-		if err != nil {
-			contextLog.Info("pgbackrest TLS server exited", "err", err)
-		} else {
-			contextLog.Info("pgbackrest TLS server exited cleanly")
-		}
-	}()
+	go s.monitor(contextLog, cmd.Process, cmd.Wait)
 
 	return nil
+}
+
+func (s *TLSServer) monitor(contextLog log.Logger, process *os.Process, wait func() error) {
+	err := wait()
+
+	s.mu.Lock()
+	if s.process == process {
+		s.process = nil
+		s.running = false
+		removeTLSServerPIDFile(process.Pid)
+	}
+	s.mu.Unlock()
+
+	if err != nil {
+		contextLog.Info("pgbackrest TLS server exited", "err", err)
+	} else {
+		contextLog.Info("pgbackrest TLS server exited cleanly")
+	}
 }
 
 // Stop sends SIGTERM to the pgbackrest server for graceful shutdown.
@@ -88,12 +123,11 @@ func (s *TLSServer) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.running || s.cmd == nil || s.cmd.Process == nil {
+	if !s.running || s.process == nil {
 		return
 	}
 
-	_ = s.cmd.Process.Signal(syscall.SIGTERM)
-	s.running = false
+	_ = s.process.Signal(syscall.SIGTERM)
 }
 
 // Reload sends SIGHUP to the pgbackrest server, causing it to re-read
@@ -102,11 +136,11 @@ func (s *TLSServer) Reload() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.running || s.cmd == nil || s.cmd.Process == nil {
+	if !s.running || s.process == nil {
 		return
 	}
 
-	_ = s.cmd.Process.Signal(syscall.SIGHUP)
+	_ = s.process.Signal(syscall.SIGHUP)
 }
 
 // IsRunning returns true if the TLS server process is alive.

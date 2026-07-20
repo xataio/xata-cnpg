@@ -35,23 +35,26 @@ const TLSServerPIDFile = dataDirectory + "/server.pid"
 
 func checkForExistingTLSServer(pidFile string, serverExecutables ...string) (*os.Process, error) {
 	contents, err := os.ReadFile(pidFile) //nolint:gosec // Production uses a fixed path; tests use temporary paths.
-	if err == nil {
-		pid, parseErr := strconv.Atoi(string(bytes.TrimSpace(contents)))
-		if parseErr == nil {
-			process, findErr := ps.FindProcess(pid)
-			if findErr != nil {
-				return nil, findErr
-			}
-			if process != nil && slices.Contains(serverExecutables, process.Executable()) {
-				return os.FindProcess(pid)
-			}
-		}
-
-		if removeErr := os.Remove(pidFile); removeErr != nil && !os.IsNotExist(removeErr) {
-			return nil, removeErr
-		}
-	} else if !os.IsNotExist(err) {
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, err
+	}
+
+	pid, parseErr := strconv.Atoi(string(bytes.TrimSpace(contents)))
+	if parseErr == nil {
+		process, findErr := ps.FindProcess(pid)
+		if findErr != nil {
+			return nil, findErr
+		}
+		if process != nil && slices.Contains(serverExecutables, process.Executable()) {
+			return os.FindProcess(pid)
+		}
+	}
+
+	if removeErr := os.Remove(pidFile); removeErr != nil && !os.IsNotExist(removeErr) {
+		return nil, removeErr
 	}
 
 	return nil, nil

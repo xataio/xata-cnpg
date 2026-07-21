@@ -49,6 +49,10 @@ var errLogShippingReplicaElected = errors.New("log shipping replica elected as a
 // of the operator configuration
 var errRolloutDelayed = errors.New("pod rollout delayed")
 
+// errBackupInProgress is raised when a pod rollout is delayed because
+// a backup is running on the target pod
+var errBackupInProgress = errors.New("backup in progress on target pod")
+
 type rolloutReason = string
 
 func (r *ClusterReconciler) rolloutRequiredInstances(
@@ -98,7 +102,13 @@ func (r *ClusterReconciler) rolloutRequiredInstances(
 			return false, fmt.Errorf("postgresqlStatus pod name: %s, %w", postgresqlStatus.Pod.Name, err)
 		}
 
-		return true, r.upgradePod(ctx, cluster, postgresqlStatus.Pod, restartMessage)
+		if err := r.upgradePod(ctx, cluster, postgresqlStatus.Pod, restartMessage); err != nil {
+			if errors.Is(err, errBackupInProgress) {
+				continue
+			}
+			return true, err
+		}
+		return true, nil
 	}
 
 	// report an error if there is no primary. This condition should never happen because
@@ -663,6 +673,16 @@ func (r *ClusterReconciler) upgradePod(
 	pod *corev1.Pod,
 	reason rolloutReason,
 ) error {
+	hasBackup, err := r.hasBackupRunningOnPod(ctx, cluster, pod.Name)
+	if err != nil {
+		return err
+	}
+	if hasBackup {
+		r.Recorder.Eventf(cluster, "Normal", "RolloutDelayed",
+			"Delaying rollout of pod %s because a backup is in progress", pod.Name)
+		return errBackupInProgress
+	}
+
 	log.FromContext(ctx).Info("Recreating instance pod",
 		"pod", pod.Name,
 		"to", cluster.Status.Image,
@@ -681,6 +701,35 @@ func (r *ClusterReconciler) upgradePod(
 	}
 
 	return nil
+}
+
+// hasBackupRunningOnPod checks if there is a backup in progress targeting the given pod
+func (r *ClusterReconciler) hasBackupRunningOnPod(
+	ctx context.Context,
+	cluster *apiv1.Cluster,
+	podName string,
+) (bool, error) {
+	var backups apiv1.BackupList
+	if err := r.List(
+		ctx,
+		&backups,
+		client.InNamespace(cluster.Namespace),
+		client.MatchingFields{clusterNameField: cluster.Name},
+	); err != nil {
+		return false, err
+	}
+
+	for i := range backups.Items {
+		backup := &backups.Items[i]
+		if !backup.Status.IsInProgress() {
+			continue
+		}
+		if backup.Status.InstanceID != nil && backup.Status.InstanceID.PodName == podName {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // upgradeInstanceManager upgrades the instance managers of each Pod running in this cluster

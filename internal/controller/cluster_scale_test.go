@@ -159,6 +159,57 @@ var _ = Describe("scale down", func() {
 			)).To(BeFalse())
 		})
 	})
+
+	When("a backup is running on the target instance", func() {
+		It("delays the scale-down", func() {
+			ctx := context.Background()
+			namespace := newFakeNamespace(env.client)
+			cluster := newFakeCNPGCluster(env.client, namespace)
+
+			resources := &managedResources{
+				pvcs: corev1.PersistentVolumeClaimList{
+					Items: generateClusterPVC(env.client, cluster, persistentvolumeclaim.StatusReady),
+				},
+				jobs: batchv1.JobList{Items: generateFakeInitDBJobsWithDefaultClient(env.client, cluster)},
+				instances: corev1.PodList{
+					Items: generateFakeClusterPodsWithDefaultClient(env.client, cluster, true),
+				},
+			}
+
+			instanceName := findDeletableInstance(cluster, resources.instances.Items)
+
+			backup := &apiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "backup-running",
+					Namespace: namespace,
+				},
+				Spec: apiv1.BackupSpec{
+					Cluster: apiv1.LocalObjectReference{Name: cluster.Name},
+				},
+				Status: apiv1.BackupStatus{
+					Phase: apiv1.BackupPhaseRunning,
+					InstanceID: &apiv1.InstanceID{
+						PodName: instanceName,
+					},
+				},
+			}
+			Expect(env.client.Create(ctx, backup)).To(Succeed())
+
+			Expect(env.clusterReconciler.scaleDownCluster(
+				ctx,
+				cluster,
+				resources,
+			)).To(Succeed())
+
+			// Instance should still exist
+			Expect(isResourceExisting(
+				ctx,
+				env.client,
+				&corev1.Pod{},
+				types.NamespacedName{Name: instanceName, Namespace: cluster.Namespace},
+			)).To(BeTrue())
+		})
+	})
 })
 
 var _ = Describe("cluster scale pod and job deletion logic", func() {

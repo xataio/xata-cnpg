@@ -22,10 +22,13 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	k8client "sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
@@ -917,5 +920,106 @@ var _ = Describe("checkPodSpec with plugins", Ordered, func() {
 		Expect(rollout.required).To(BeTrue())
 		Expect(rollout.reason).To(Equal(
 			"original and target PodSpec differ in containers: container postgres differs in environment"))
+	})
+})
+
+var _ = Describe("upgradePod backup guard", func() {
+	var env *testingEnvironment
+	BeforeEach(func() { env = buildTestEnvironment() })
+
+	It("delays rollout when a backup is running on the pod", func(ctx context.Context) {
+		ns := newFakeNamespace(env.client)
+		cluster := newFakeCNPGCluster(env.client, ns)
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cluster.Name + "-1",
+				Namespace: ns,
+			},
+		}
+		Expect(env.client.Create(ctx, pod)).To(Succeed())
+
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "backup-running",
+				Namespace: ns,
+			},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: cluster.Name},
+			},
+			Status: apiv1.BackupStatus{
+				Phase: apiv1.BackupPhaseRunning,
+				InstanceID: &apiv1.InstanceID{
+					PodName: pod.Name,
+				},
+			},
+		}
+		Expect(env.client.Create(ctx, backup)).To(Succeed())
+
+		err := env.clusterReconciler.upgradePod(ctx, cluster, pod, "test reason")
+		Expect(errors.Is(err, errBackupInProgress)).To(BeTrue())
+
+		// Pod should still exist
+		var existingPod corev1.Pod
+		Expect(env.client.Get(ctx, client.ObjectKeyFromObject(pod), &existingPod)).To(Succeed())
+	})
+
+	It("deletes the pod when no backup is running", func(ctx context.Context) {
+		ns := newFakeNamespace(env.client)
+		cluster := newFakeCNPGCluster(env.client, ns)
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cluster.Name + "-1",
+				Namespace: ns,
+			},
+		}
+		Expect(env.client.Create(ctx, pod)).To(Succeed())
+
+		err := env.clusterReconciler.upgradePod(ctx, cluster, pod, "test reason")
+		Expect(err).ToNot(HaveOccurred())
+
+		// Pod should be deleted
+		var existingPod corev1.Pod
+		err = env.client.Get(ctx, client.ObjectKeyFromObject(pod), &existingPod)
+		Expect(apierrs.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("ignores completed backups on the pod", func(ctx context.Context) {
+		ns := newFakeNamespace(env.client)
+		cluster := newFakeCNPGCluster(env.client, ns)
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cluster.Name + "-1",
+				Namespace: ns,
+			},
+		}
+		Expect(env.client.Create(ctx, pod)).To(Succeed())
+
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "backup-completed",
+				Namespace: ns,
+			},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: cluster.Name},
+			},
+			Status: apiv1.BackupStatus{
+				Phase: apiv1.BackupPhaseCompleted,
+				InstanceID: &apiv1.InstanceID{
+					PodName: pod.Name,
+				},
+			},
+		}
+		Expect(env.client.Create(ctx, backup)).To(Succeed())
+
+		err := env.clusterReconciler.upgradePod(ctx, cluster, pod, "test reason")
+		Expect(err).ToNot(HaveOccurred())
+
+		// Pod should be deleted
+		var existingPod corev1.Pod
+		err = env.client.Get(ctx, client.ObjectKeyFromObject(pod), &existingPod)
+		Expect(apierrs.IsNotFound(err)).To(BeTrue())
 	})
 })

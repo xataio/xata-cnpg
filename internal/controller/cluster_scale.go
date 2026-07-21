@@ -65,6 +65,16 @@ func (r *ClusterReconciler) scaleDownCluster(
 		return nil
 	}
 
+	hasBackup, err := r.hasBackupRunningOnPod(ctx, cluster, instanceName)
+	if err != nil {
+		return err
+	}
+	if hasBackup {
+		r.Recorder.Eventf(cluster, "Normal", "ScaleDownDelayed",
+			"Delaying scale-down of instance %s because a backup is in progress", instanceName)
+		return nil
+	}
+
 	message := fmt.Sprintf("Scaling down - removing instance: %v", instanceName)
 	r.Recorder.Event(cluster, "Normal", "ScaleDown", message)
 	contextLogger.Info(message)

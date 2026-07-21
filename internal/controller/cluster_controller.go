@@ -1105,6 +1105,8 @@ func (r *ClusterReconciler) handleRollingUpdate(
 		}
 
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	case errors.Is(err, errBackupInProgress):
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	case err != nil:
 		return ctrl.Result{}, err
 	case done:

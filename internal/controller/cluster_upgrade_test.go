@@ -28,7 +28,6 @@ import (
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	k8client "sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
@@ -961,7 +960,7 @@ var _ = Describe("upgradePod backup guard", func() {
 
 		// Pod should still exist
 		var existingPod corev1.Pod
-		Expect(env.client.Get(ctx, client.ObjectKeyFromObject(pod), &existingPod)).To(Succeed())
+		Expect(env.client.Get(ctx, k8client.ObjectKeyFromObject(pod), &existingPod)).To(Succeed())
 	})
 
 	It("deletes the pod when no backup is running", func(ctx context.Context) {
@@ -981,7 +980,7 @@ var _ = Describe("upgradePod backup guard", func() {
 
 		// Pod should be deleted
 		var existingPod corev1.Pod
-		err = env.client.Get(ctx, client.ObjectKeyFromObject(pod), &existingPod)
+		err = env.client.Get(ctx, k8client.ObjectKeyFromObject(pod), &existingPod)
 		Expect(apierrs.IsNotFound(err)).To(BeTrue())
 	})
 
@@ -1019,7 +1018,7 @@ var _ = Describe("upgradePod backup guard", func() {
 
 		// Pod should be deleted
 		var existingPod corev1.Pod
-		err = env.client.Get(ctx, client.ObjectKeyFromObject(pod), &existingPod)
+		err = env.client.Get(ctx, k8client.ObjectKeyFromObject(pod), &existingPod)
 		Expect(apierrs.IsNotFound(err)).To(BeTrue())
 	})
 })

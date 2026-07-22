@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 // BackupTransaction is a function that modifies a Backup object.
@@ -65,7 +66,12 @@ func (f flagBackupErrors) toError() error {
 	return nil
 }
 
-// FlagBackupAsFailed updates the status of a Backup object to indicate that it has failed.
+// FlagBackupAsFailed updates the status of a Backup object to indicate that it
+// has failed. When the failure is a consequence of the target cluster being
+// hibernated or deleted, the backup is flagged as cancelled instead: the
+// interruption is the result of a deliberate platform action, not a backup
+// problem, so the cluster status (LastFailedBackup, failed condition) is left
+// untouched and no alert is raised.
 func FlagBackupAsFailed(
 	ctx context.Context,
 	cli client.Client,
@@ -75,6 +81,12 @@ func FlagBackupAsFailed(
 	transactions ...BackupTransaction,
 ) error {
 	contextLogger := log.FromContext(ctx)
+
+	if reason, cancel := backupCancellationReason(ctx, cli, backup); cancel {
+		contextLogger.Info("Backup interrupted by hibernation or cluster deletion, flagging as cancelled",
+			"backupName", backup.Name, "reason", reason)
+		return flagBackupAsCancelled(ctx, cli, backup, reason, err, transactions...)
+	}
 
 	var flagErr flagBackupErrors
 
@@ -136,4 +148,81 @@ func FlagBackupAsFailed(
 	}
 
 	return flagErr.toError()
+}
+
+// backupCancellationReason inspects the live state of the backup's target
+// cluster and returns the reason the backup should be flagged as cancelled
+// instead of failed: the cluster is gone, being deleted, or hibernated. The
+// cluster is fetched fresh rather than taken from the caller because the
+// caller may hold a stale copy that predates the hibernation annotation
+// (notably the instance manager, whose backup fails as a consequence of
+// hibernation shutting the pod down).
+func backupCancellationReason(
+	ctx context.Context,
+	cli client.Client,
+	backup *apiv1.Backup,
+) (string, bool) {
+	var cluster apiv1.Cluster
+	err := cli.Get(ctx, client.ObjectKey{
+		Namespace: backup.Namespace,
+		Name:      backup.Spec.Cluster.Name,
+	}, &cluster)
+	switch {
+	case apierrs.IsNotFound(err):
+		return "cluster has been deleted", true
+	case err != nil:
+		// we cannot assess the cluster state, proceed with the failure path
+		return "", false
+	case !cluster.DeletionTimestamp.IsZero():
+		return "cluster is being deleted", true
+	case cluster.Annotations[utils.HibernationAnnotationName] == string(utils.HibernationAnnotationValueOn):
+		return "cluster is hibernated", true
+	default:
+		return "", false
+	}
+}
+
+// flagBackupAsCancelled marks the backup as cancelled, recording the reason
+// and the error that interrupted it. The cluster status is deliberately not
+// updated: a cancelled backup is not a failure.
+func flagBackupAsCancelled(
+	ctx context.Context,
+	cli client.Client,
+	backup *apiv1.Backup,
+	reason string,
+	cause error,
+	transactions ...BackupTransaction,
+) error {
+	contextLogger := log.FromContext(ctx)
+
+	message := reason
+	if cause != nil {
+		message = fmt.Sprintf("%s (interrupted: %v)", reason, cause)
+	}
+
+	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		var livingBackup apiv1.Backup
+		if err := cli.Get(ctx, client.ObjectKeyFromObject(backup), &livingBackup); err != nil {
+			return err
+		}
+		origBackup := livingBackup.DeepCopy()
+		livingBackup.Status.SetAsCancelled(message)
+		livingBackup.Status.Method = livingBackup.Spec.Method
+		for _, transaction := range transactions {
+			transaction(&livingBackup)
+		}
+
+		if err := cli.Status().Patch(ctx, &livingBackup, client.MergeFrom(origBackup)); err != nil {
+			return err
+		}
+		// we mutate the original object
+		backup.Status = livingBackup.Status
+
+		return nil
+	}); err != nil {
+		contextLogger.Error(err, "while flagging backup as cancelled")
+		return err
+	}
+
+	return nil
 }

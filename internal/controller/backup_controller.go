@@ -123,7 +123,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	switch backup.Status.Phase {
-	case apiv1.BackupPhaseFailed, apiv1.BackupPhaseCompleted:
+	case apiv1.BackupPhaseFailed, apiv1.BackupPhaseCompleted, apiv1.BackupPhaseCancelled:
 		return ctrl.Result{}, nil
 	}
 

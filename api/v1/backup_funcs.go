@@ -49,6 +49,14 @@ func (backupStatus *BackupStatus) SetAsFailed(
 	}
 }
 
+// SetAsCancelled marks a certain backup as cancelled, recording the reason
+// the backup was interrupted (e.g. cluster hibernated or deleted)
+func (backupStatus *BackupStatus) SetAsCancelled(reason string) {
+	backupStatus.Phase = BackupPhaseCancelled
+	backupStatus.Error = reason
+	backupStatus.StoppedAt = ptr.To(metav1.Now())
+}
+
 // SetAsFinalizing marks a certain backup as finalizing
 func (backupStatus *BackupStatus) SetAsFinalizing() {
 	backupStatus.Phase = BackupPhaseFinalizing
@@ -88,7 +96,9 @@ func (snapshotStatus *BackupSnapshotStatus) SetSnapshotElements(snapshots []volu
 
 // IsDone check if a backup is completed or still in progress
 func (backupStatus *BackupStatus) IsDone() bool {
-	return backupStatus.Phase == BackupPhaseCompleted || backupStatus.Phase == BackupPhaseFailed
+	return backupStatus.Phase == BackupPhaseCompleted ||
+		backupStatus.Phase == BackupPhaseFailed ||
+		backupStatus.Phase == BackupPhaseCancelled
 }
 
 // GetOnline tells whether this backup was taken while the database

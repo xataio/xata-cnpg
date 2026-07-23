@@ -49,8 +49,8 @@ jobs:
               }'
             )"
           else
-            version="$(make -C charts version)"
-            registry="$(make -C charts registry)"
+            version="$(make --no-print-directory -C charts version)"
+            registry="$(make --no-print-directory -C charts registry)"
 
             payload="$(jq -cn \
               --arg action "$action" \

@@ -1,0 +1,92 @@
+name: Sync Charts
+
+on:
+  workflow_call:
+    inputs:
+      sync_key:
+        description: "Sync key for upserts"
+        required: true
+        type: string
+      action:
+        description: "Sync action (preview, deploy, or cleanup)"
+        required: true
+        type: string
+      source_pr:
+        description: "Source PR number (optional)"
+        required: false
+        type: string
+        default: ""
+      ref:
+        description: "Git ref to checkout"
+        required: false
+        type: string
+        default: ${{ github.sha }}
+
+jobs:
+  sync-charts:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        if: inputs.action != 'cleanup'
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Build payload
+        id: payload
+        run: |
+          set -euo pipefail
+
+          action="${{ inputs.action }}"
+
+          if [[ "$action" == "cleanup" ]]; then
+            payload="$(jq -cn \
+              --arg action "$action" \
+              --arg sync_key "${{ inputs.sync_key }}" \
+              '{
+                action: $action,
+                sync_key: $sync_key
+              }'
+            )"
+          else
+            version="$(make -C charts version)"
+            registry="$(make -C charts registry)"
+
+            payload="$(jq -cn \
+              --arg action "$action" \
+              --arg sync_key "${{ inputs.sync_key }}" \
+              --arg repo "$GITHUB_REPOSITORY" \
+              --arg source_pr "${{ inputs.source_pr || '' }}" \
+              --arg actor "$GITHUB_ACTOR" \
+              --arg source_ref "${{ inputs.ref || github.sha }}" \
+              --arg chart_repo "$registry" \
+              --arg chart_version "$version" \
+              '{
+                action: $action,
+                sync_key: $sync_key,
+                source: {
+                  repo: $repo,
+                  actor: $actor,
+                  ref: $source_ref,
+                  pr: $source_pr
+                },
+                charts: [
+                  {name: "cloudnative-pg", repo: $chart_repo, version: $chart_version}
+                ]
+              }'
+            )"
+          fi
+
+          {
+            echo "json<<EOF"
+            echo "$payload"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch sync
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4
+        with:
+          token: ${{ secrets.GIT_TOKEN }}
+          repository: xataio/infra-new
+          event-type: sync-charts
+          client-payload: ${{ steps.payload.outputs.json }}

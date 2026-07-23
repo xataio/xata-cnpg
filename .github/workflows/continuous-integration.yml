@@ -10,6 +10,8 @@ on:
       - main
       - release-*
   pull_request:
+    # XATA: Re-run publication before dispatch when the preview label is added.
+    types: [opened, reopened, synchronize, labeled]
   workflow_dispatch:
   # DISABLED: scheduled runs
   # schedule:
@@ -19,6 +21,8 @@ permissions: read-all
 
 # set up environment variables to be used across all the jobs
 env:
+  # XATA: Release branch
+  DEPLOY_BRANCH: "release-1.28"
   # renovate: datasource=golang-version depName=golang versioning=loose
   GOLANG_VERSION: "1.26.5"
   # renovate: datasource=github-releases depName=golangci/golangci-lint versioning=loose
@@ -120,6 +124,8 @@ jobs:
               - '.wordlist-en-custom.txt'
             operator-changed:
               - 'api/**'
+              # XATA: Chart and sync changes must rebuild publishable artifacts.
+              - 'charts/**'
               - 'cmd/**'
               - 'config/**'
               - 'internal/**'
@@ -127,6 +133,8 @@ jobs:
               - 'pkg/**'
               - '.github/workflows/continuous-delivery.yml'
               - '.github/workflows/continuous-integration.yml'
+              - '.github/workflows/sync-charts-cleanup.yml'
+              - '.github/workflows/sync-charts.yml'
               - '.goreleaser*.yml'
               - 'Dockerfile'
               - 'docker-bake.hcl'
@@ -467,6 +475,7 @@ jobs:
       commit_version: ${{ env.VERSION }}
       commit: ${{ env.COMMIT_SHA }}
       controller_img: ${{ env.CONTROLLER_IMG }}
+      deploy_branch: ${{ env.DEPLOY_BRANCH }}
       push: ${{ env.PUSH }}
     steps:
       - name: Checkout
@@ -493,7 +502,7 @@ jobs:
           commit_version=$(git describe --tags --match 'v*' "${commit_sha}"| sed -e 's/^v//; s/-g[0-9a-f]\+$//; s/-\([0-9]\+\)$/-dev\1/')
 
           # shortened commit sha
-          commit_short=$(git rev-parse --short "${commit_sha}")
+          commit_short=$(git rev-parse --short=7 "${commit_sha}")
 
           # extract branch name
           branch_name=${GITHUB_REF#refs/heads/}
@@ -514,14 +523,6 @@ jobs:
 
           # By default the container image is being pushed to the registry
           echo "PUSH=true" >> $GITHUB_ENV
-
-          # Check if commit message contains [create-pr] to create infra-new PR
-          commit_message=$(git log -1 --pretty=format:'%s' "${commit_sha}")
-          if [[ "$commit_message" == *"[create-pr]"* ]]; then
-            echo "CREATE_PR=true" >> $GITHUB_ENV
-          else
-            echo "CREATE_PR=false" >> $GITHUB_ENV
-          fi
 
       # GITHUB_TOKEN has restricted permissions if the pull_request has been opened
       # from a forked repository, so we avoid pushing to the container registry if
@@ -672,6 +673,7 @@ jobs:
             --revision="${{ env.IMAGE_TAG }}@sha1:${{ env.COMMIT_SHA }}" \
             --reproducible
 
+      # XATA: Keep chart publication after the image build and manifest push.
       - name: Login to GHCR (Helm)
         if: env.PUSH == 'true'
         run: |
@@ -684,74 +686,32 @@ jobs:
           make inject-tags IMAGE="${{ env.REGISTRY }}/${{ env.REPO }}/cloudnative-pg" TAG="${{ env.IMAGE_TAG }}"
           make push-charts VERSION="${{ env.IMAGE_TAG }}"
 
-      - name: Checkout infra-new repo
-        if: env.PUSH == 'true' && env.CREATE_PR == 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: xataio/infra-new
-          token: ${{ secrets.GIT_TOKEN }}
-          path: infra-new-repo
+  # XATA: Dispatch published charts to infra-new after buildx completes.
+  deploy:
+    if: >-
+      github.event_name == 'push'
+      && github.ref_name == needs.buildx.outputs.deploy_branch
+    needs: buildx
+    uses: ./.github/workflows/sync-charts.yml
+    with:
+      action: deploy
+      source_pr: ""
+      sync_key: ${{ github.repository }}@${{ needs.buildx.outputs.deploy_branch }}
+      ref: ${{ github.sha }}
+    secrets: inherit
 
-      - name: Create PR in infra-new for dev testing
-        if: env.PUSH == 'true' && env.CREATE_PR == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GIT_TOKEN }}
-          CHART_VERSION: 0.0.0-${{ env.IMAGE_TAG }}
-        run: |
-          set -euo pipefail
-
-          cd infra-new-repo
-
-          COMPONENT_FILE="kustomize/maki/components/xata-cnpg-1.28.0/kustomization.yaml"
-
-          # Update the chart version in the component
-          sed -i 's|version: 0.0.0-g[a-f0-9]*|version: '"$CHART_VERSION"'|g' "$COMPONENT_FILE"
-
-          # Check if there are changes
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-
-          # Configure git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Create branch
-          BRANCH_NAME="cloudnative-pg-dev-${CHART_VERSION}"
-          git checkout -b "$BRANCH_NAME"
-
-          # Commit and push
-          git add .
-          git commit -m "Update cloudnative-pg to ${CHART_VERSION}
-
-          - Chart: oci://ghcr.io/xataio/xata-cnpg/charts/cloudnative-pg:${CHART_VERSION}
-          - Image: ghcr.io/xataio/xata-cnpg/cloudnative-pg:${{ env.IMAGE_TAG }}
-
-          Source: ${{ github.server_url }}/${{ github.repository }}/commit/${{ env.COMMIT_SHA }}"
-
-          git push -u origin "$BRANCH_NAME" --force
-
-          # Create or update PR
-          EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number' || echo "")
-
-          if [[ -n "$EXISTING_PR" ]]; then
-            echo "Updated existing PR #${EXISTING_PR}"
-            echo "PR URL: https://github.com/xataio/infra-new/pull/${EXISTING_PR}"
-          else
-            PR_URL=$(gh pr create \
-              --title "Update cloudnative-pg to ${CHART_VERSION}" \
-              --body "## Summary
-          Updates xata-cnpg component to use cloudnative-pg chart version ${CHART_VERSION}.
-
-          > ⚠️ **Warning**: This is for testing in dev environments only. Do not deploy to staging/production without proper review.
-
-          ### Details
-          - **Chart**: \`oci://ghcr.io/xataio/xata-cnpg/charts/cloudnative-pg:${CHART_VERSION}\`
-          - **Image**: \`ghcr.io/xataio/xata-cnpg/cloudnative-pg:${{ env.IMAGE_TAG }}\`
-          - **Source commit**: ${{ github.server_url }}/${{ github.repository }}/commit/${{ env.COMMIT_SHA }}
-
-          ---
-          🤖 Generated by [xata-cnpg CI](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})")
-            echo "Created PR: $PR_URL"
-          fi
+  # XATA: Same-repository preview dispatch only, after artifact publication.
+  preview:
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.base.ref == needs.buildx.outputs.deploy_branch
+      && contains(github.event.pull_request.labels.*.name, 'preview')
+    needs: buildx
+    uses: ./.github/workflows/sync-charts.yml
+    with:
+      action: preview
+      source_pr: ${{ github.event.pull_request.number }}
+      sync_key: ${{ github.repository }}#${{ github.event.pull_request.number }}
+      ref: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit

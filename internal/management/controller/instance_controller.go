@@ -1152,7 +1152,7 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		return fmt.Errorf("generating pgbackrest config: %w", err)
 	}
 
-	if _, err := pgbackrest.WriteConfigFile(content); err != nil {
+	if _, err := pgbackrest.WriteConfigFile(content, r.instance.PgData); err != nil {
 		return fmt.Errorf("writing pgbackrest config: %w", err)
 	}
 

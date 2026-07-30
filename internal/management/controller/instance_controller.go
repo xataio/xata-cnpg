@@ -1156,6 +1156,13 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		return fmt.Errorf("writing pgbackrest config: %w", err)
 	}
 
+	// pgbackrest has no log management of its own; bound the log files here
+	// since there is no logrotate in the container. Failures are not fatal:
+	// rotation is retried on the next reconcile.
+	if err := pgbackrest.RotateLogs(r.instance.PgData); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to rotate pgbackrest logs, will retry on next reconcile")
+	}
+
 	// Stanza creation is only needed on the primary — the stanza metadata
 	// lives in S3 and replicas access it directly from there. We re-run
 	// stanza-create whenever the stanza name changes (not just once), proactively

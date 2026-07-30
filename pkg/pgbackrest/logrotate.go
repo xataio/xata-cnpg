@@ -31,8 +31,8 @@ import (
 // pgbackrest has no log management of its own: packaged installations rely on
 // an OS-level logrotate configuration, which does not exist in a container,
 // so the instance manager takes that role.
-// TODO: set to 100KB for dev testing; raise to 10MiB before merging.
-const logRotateSizeLimit = 100 * 1024
+// TODO: set to 10KB for dev testing; raise to 10MiB before merging.
+const logRotateSizeLimit = 10 * 1024
 
 // RotateLogs bounds the pgbackrest log files on the PGDATA volume. Files over
 // the cap are copied to a single .old generation (overwriting the previous

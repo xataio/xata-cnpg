@@ -62,12 +62,17 @@ func TestRotateLogs(t *testing.T) {
 	if err := os.WriteFile(server, []byte("server\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The source stanza's restore record must be kept
+	restore := filepath.Join(logDir, "otherstanza-restore.log")
+	if err := os.WriteFile(restore, []byte("restore\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := RotateLogs(pgData, "stanza"); err != nil {
 		t.Fatalf("RotateLogs: %v", err)
 	}
 
-	// Foreign-stanza logs deleted, all-server.log kept
+	// Foreign-stanza logs deleted; all-server.log and -restore.log kept
 	if _, err := os.Stat(foreign); !os.IsNotExist(err) {
 		t.Errorf("foreign stanza log should be deleted, err %v", err)
 	}
@@ -76,6 +81,9 @@ func TestRotateLogs(t *testing.T) {
 	}
 	if _, err := os.Stat(server); err != nil {
 		t.Errorf("all-server.log should be kept: %v", err)
+	}
+	if _, err := os.Stat(restore); err != nil {
+		t.Errorf("-restore.log should be kept: %v", err)
 	}
 
 	// Small file untouched

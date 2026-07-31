@@ -38,8 +38,10 @@ const logRotateSizeLimit = 10 * 1024 * 1024
 // pgbackrest names log files <stanza>-<command>.log. Clones inherit the PGDATA
 // volume, so a child carries its parent's log files; without cleanup this
 // accumulates one stanza per level down a clone chain. Files belonging to a
-// foreign stanza are therefore deleted (all-server.log has no stanza and is
-// kept).
+// foreign stanza are therefore deleted, with two exceptions kept:
+// all-server.log (has no stanza), and the source stanza's <stanza>-restore.log,
+// which records how this branch was restored — a one-time forensic written
+// against the source stanza during bootstrap.
 //
 // Files of the current stanza over the cap are copied to a single .old
 // generation (overwriting the previous one) and truncated in place.
@@ -67,8 +69,11 @@ func RotateLogs(pgDataPath, stanza string) error {
 		path := filepath.Join(logDir, entry.Name())
 
 		// Delete logs (and their .old sibling) that belong to another stanza,
-		// inherited from a parent volume on clone.
-		if !strings.HasPrefix(entry.Name(), stanzaPrefix) && entry.Name() != "all-server.log" {
+		// inherited from a parent volume on clone. Keep all-server.log (no
+		// stanza) and any -restore.log (the source stanza's restore record).
+		if !strings.HasPrefix(entry.Name(), stanzaPrefix) &&
+			entry.Name() != "all-server.log" &&
+			!strings.HasSuffix(entry.Name(), "-restore.log") {
 			if err := os.Remove(path); err != nil {
 				errs = append(errs, err)
 			}

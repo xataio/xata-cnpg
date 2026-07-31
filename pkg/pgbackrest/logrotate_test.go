@@ -49,8 +49,33 @@ func TestRotateLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RotateLogs(pgData); err != nil {
+	// A foreign stanza's logs (inherited from a parent volume on clone) and
+	// all-server.log (no stanza)
+	foreign := filepath.Join(logDir, "otherstanza-backup.log")
+	if err := os.WriteFile(foreign, []byte("foreign\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(foreign+".old", []byte("foreign old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := filepath.Join(logDir, "all-server.log")
+	if err := os.WriteFile(server, []byte("server\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RotateLogs(pgData, "stanza"); err != nil {
 		t.Fatalf("RotateLogs: %v", err)
+	}
+
+	// Foreign-stanza logs deleted, all-server.log kept
+	if _, err := os.Stat(foreign); !os.IsNotExist(err) {
+		t.Errorf("foreign stanza log should be deleted, err %v", err)
+	}
+	if _, err := os.Stat(foreign + ".old"); !os.IsNotExist(err) {
+		t.Errorf("foreign stanza .old should be deleted, err %v", err)
+	}
+	if _, err := os.Stat(server); err != nil {
+		t.Errorf("all-server.log should be kept: %v", err)
 	}
 
 	// Small file untouched
@@ -78,7 +103,7 @@ func TestRotateLogs(t *testing.T) {
 	}
 
 	// Second run: nothing over the cap, .old stays
-	if err := RotateLogs(pgData); err != nil {
+	if err := RotateLogs(pgData, "stanza"); err != nil {
 		t.Fatalf("RotateLogs second run: %v", err)
 	}
 	if _, err := os.Stat(big + ".old"); err != nil {
@@ -87,7 +112,7 @@ func TestRotateLogs(t *testing.T) {
 }
 
 func TestRotateLogsMissingDir(t *testing.T) {
-	if err := RotateLogs(filepath.Join(t.TempDir(), "pgdata")); err != nil {
+	if err := RotateLogs(filepath.Join(t.TempDir(), "pgdata"), "stanza"); err != nil {
 		t.Fatalf("missing log dir should not error: %v", err)
 	}
 }

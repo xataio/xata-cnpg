@@ -1159,7 +1159,7 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 	// pgbackrest has no log management of its own; bound the log files here
 	// since there is no logrotate in the container. Failures are not fatal:
 	// rotation is retried on the next reconcile.
-	if err := pgbackrest.RotateLogs(r.instance.PgData); err != nil {
+	if err := pgbackrest.RotateLogs(r.instance.PgData, cluster.GetPgBackRestStanzaName()); err != nil {
 		log.FromContext(ctx).Error(err, "Failed to rotate pgbackrest logs, will retry on next reconcile")
 	}
 

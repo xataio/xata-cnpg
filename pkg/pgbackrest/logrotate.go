@@ -35,15 +35,24 @@ import (
 // it already touches these files.
 const logRotateSizeLimit = 10 * 1024 * 1024
 
+// ownerMarkerFile records which stanza the log directory currently belongs to.
+// It is how RotateLogs detects that a PGDATA volume changed owner — a clone,
+// pool-cluster adoption, or restore — even when the previous owner left no
+// stanza log files behind (e.g. a warm-pool cluster runs pgbackrest suspended
+// and only writes all-server.log).
+const ownerMarkerFile = ".stanza"
+
 // RotateLogs bounds the pgbackrest log files on the PGDATA volume.
 //
-// pgbackrest names log files <stanza>-<command>.log. Clones inherit the PGDATA
-// volume, so a child carries its parent's log files; without cleanup this
-// accumulates one stanza per level down a clone chain. Files belonging to a
-// foreign stanza are therefore deleted, with two exceptions kept:
-// all-server.log (has no stanza), and the source stanza's <stanza>-restore.log,
-// which records how this branch was restored — a one-time forensic written
-// against the source stanza during bootstrap.
+// pgbackrest names log files <stanza>-<command>.log. A PGDATA volume can carry
+// another cluster's logs: clones inherit the parent's volume, and pool-cluster
+// adoption reuses a warm cluster's volume. RotateLogs records the owning stanza
+// in a marker file; when the marker is missing or names a different stanza, the
+// volume changed owner, so it removes the previous owner's logs — every
+// <other-stanza>-*.log plus a clean slate of all-server.log (which has no
+// stanza in its name and so cannot be matched per-file). Two things are kept
+// across an owner change: the current stanza's own files, and any
+// <source-stanza>-restore.log, the one-time record of how the branch restored.
 //
 // Files of the current stanza over the cap are copied to a single .old
 // generation (overwriting the previous one) and truncated in place.
@@ -62,22 +71,29 @@ func RotateLogs(pgDataPath, stanza string) error {
 		return err
 	}
 
+	// A missing marker is NOT treated as an owner change: it means either a
+	// brand-new cluster (whose own history must be kept) or an existing cluster
+	// on first run after this code ships (whose history must not be wiped
+	// fleet-wide). Only a marker that exists and names a different stanza proves
+	// the previous owner was someone else.
+	markerPath := filepath.Join(logDir, ownerMarkerFile)
+	prevOwner := readOwnerMarker(markerPath)
+	ownerChanged := prevOwner != "" && prevOwner != stanza
+
 	stanzaPrefix := stanza + "-"
 	var errs []error
-	var foreignFound bool
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".log") {
 			continue
 		}
 		path := filepath.Join(logDir, entry.Name())
 
-		// Delete logs (and their .old sibling) that belong to another stanza,
-		// inherited from a parent volume on clone. Keep all-server.log (no
-		// stanza) and any -restore.log (the source stanza's restore record).
-		if !strings.HasPrefix(entry.Name(), stanzaPrefix) &&
+		// On an owner change, delete the previous owner's logs (and their .old
+		// sibling). Keep the current stanza's files and any -restore.log.
+		if ownerChanged &&
+			!strings.HasPrefix(entry.Name(), stanzaPrefix) &&
 			entry.Name() != "all-server.log" &&
 			!strings.HasSuffix(entry.Name(), "-restore.log") {
-			foreignFound = true
 			if err := os.Remove(path); err != nil {
 				errs = append(errs, err)
 			}
@@ -101,17 +117,39 @@ func RotateLogs(pgDataPath, stanza string) error {
 		}
 	}
 
-	// all-server.log has no stanza in its name, so it cannot be identified as
-	// foreign per-file. But finding any foreign-stanza file means this is the
-	// first reconcile on a freshly cloned volume, so the inherited
-	// all-server.log belongs to the parent pod — truncate it for a clean slate.
-	if foreignFound {
+	if ownerChanged {
+		// all-server.log has no stanza in its name, so it belonged to the
+		// previous owner — truncate it for a clean slate.
 		if err := os.Truncate(filepath.Join(logDir, "all-server.log"), 0); err != nil && !os.IsNotExist(err) {
 			errs = append(errs, err)
 		}
 	}
 
+	// Claim the directory whenever the marker does not already name us (missing
+	// or changed), so subsequent reconciles see a match and leave everything —
+	// including legitimate server-restart history — alone.
+	if prevOwner != stanza {
+		if err := writeOwnerMarker(markerPath, stanza); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
 	return errors.Join(errs...)
+}
+
+// readOwnerMarker returns the stanza recorded in the marker file, or "" if it
+// is missing or unreadable (treated as an owner change, i.e. cleanup runs).
+func readOwnerMarker(path string) string {
+	contents, err := os.ReadFile(path) //nolint:gosec // fixed path in the log directory
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(contents))
+}
+
+// writeOwnerMarker records stanza as the current owner of the log directory.
+func writeOwnerMarker(path, stanza string) error {
+	return os.WriteFile(path, []byte(stanza+"\n"), 0o600)
 }
 
 // copyTruncate copies src to dst (replacing dst) and then truncates src in

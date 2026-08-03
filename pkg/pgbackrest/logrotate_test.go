@@ -26,130 +26,162 @@ import (
 	"testing"
 )
 
-func TestRotateLogs(t *testing.T) {
-	pgData := filepath.Join(t.TempDir(), "pgdata")
-	logDir := filepath.Join(workingDir(pgData), "log")
+// newLogDir creates a pgbackrest log directory under a temp PGDATA and returns
+// both paths.
+func newLogDir(t *testing.T) (pgData, logDir string) {
+	t.Helper()
+	pgData = filepath.Join(t.TempDir(), "pgdata")
+	logDir = filepath.Join(workingDir(pgData), "log")
 	if err := os.MkdirAll(logDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	return pgData, logDir
+}
 
-	small := filepath.Join(logDir, "stanza-small.log")
-	if err := os.WriteFile(small, []byte("small\n"), 0o600); err != nil {
+func write(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func mustSize(t *testing.T, path string) int64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Size()
+}
+
+// Size rotation of the current stanza's files, with the marker already ours.
+func TestRotateLogsSizeRotation(t *testing.T) {
+	pgData, logDir := newLogDir(t)
+	write(t, filepath.Join(logDir, ownerMarkerFile), []byte("stanza\n"))
+
+	small := filepath.Join(logDir, "stanza-small.log")
+	write(t, small, []byte("small\n"))
 
 	big := filepath.Join(logDir, "stanza-big.log")
 	bigContent := bytes.Repeat([]byte("x"), logRotateSizeLimit+1)
-	if err := os.WriteFile(big, bigContent, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// A previous .old generation must be overwritten, not rotated again
-	if err := os.WriteFile(big+".old", []byte("previous generation\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// A foreign stanza's logs (inherited from a parent volume on clone) and
-	// all-server.log (no stanza)
-	foreign := filepath.Join(logDir, "otherstanza-backup.log")
-	if err := os.WriteFile(foreign, []byte("foreign\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(foreign+".old", []byte("foreign old\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	server := filepath.Join(logDir, "all-server.log")
-	if err := os.WriteFile(server, []byte("server\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// The source stanza's restore record must be kept
-	restore := filepath.Join(logDir, "otherstanza-restore.log")
-	if err := os.WriteFile(restore, []byte("restore\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	write(t, big, bigContent)
+	write(t, big+".old", []byte("previous generation\n"))
 
 	if err := RotateLogs(pgData, "stanza"); err != nil {
 		t.Fatalf("RotateLogs: %v", err)
 	}
 
-	// Foreign-stanza logs deleted; all-server.log and -restore.log kept
+	if c, err := os.ReadFile(small); err != nil || string(c) != "small\n" { //nolint:gosec // temp path
+		t.Errorf("small file should be untouched, got %q err %v", c, err)
+	}
+	if s := mustSize(t, big); s != 0 {
+		t.Errorf("big file should be truncated, size %d", s)
+	}
+	oldContent, err := os.ReadFile(big + ".old") //nolint:gosec // temp path
+	if err != nil || !bytes.Equal(oldContent, bigContent) {
+		t.Errorf(".old should hold the rotated content, got %d bytes err %v", len(oldContent), err)
+	}
+}
+
+// Owner change (clone): a marker naming a different stanza triggers deletion of
+// the previous owner's logs and a clean slate of all-server.log; the current
+// stanza's files and any -restore.log are kept, and the marker is updated.
+func TestRotateLogsOwnerChange(t *testing.T) {
+	pgData, logDir := newLogDir(t)
+	write(t, filepath.Join(logDir, ownerMarkerFile), []byte("parent\n"))
+
+	foreign := filepath.Join(logDir, "parent-backup.log")
+	write(t, foreign, []byte("foreign\n"))
+	write(t, foreign+".old", []byte("foreign old\n"))
+	server := filepath.Join(logDir, "all-server.log")
+	write(t, server, []byte("parent server history\n"))
+	restore := filepath.Join(logDir, "parent-restore.log")
+	write(t, restore, []byte("restore\n"))
+	own := filepath.Join(logDir, "stanza-backup.log")
+	write(t, own, []byte("own\n"))
+
+	if err := RotateLogs(pgData, "stanza"); err != nil {
+		t.Fatalf("RotateLogs: %v", err)
+	}
+
 	if _, err := os.Stat(foreign); !os.IsNotExist(err) {
 		t.Errorf("foreign stanza log should be deleted, err %v", err)
 	}
 	if _, err := os.Stat(foreign + ".old"); !os.IsNotExist(err) {
 		t.Errorf("foreign stanza .old should be deleted, err %v", err)
 	}
-	// all-server.log kept but truncated (foreign file present = fresh clone)
-	serverInfo, err := os.Stat(server)
-	if err != nil {
-		t.Errorf("all-server.log should be kept: %v", err)
-	} else if serverInfo.Size() != 0 {
-		t.Errorf("all-server.log should be truncated on clone, size %d", serverInfo.Size())
+	if s := mustSize(t, server); s != 0 {
+		t.Errorf("all-server.log should be truncated on owner change, size %d", s)
 	}
 	if _, err := os.Stat(restore); err != nil {
 		t.Errorf("-restore.log should be kept: %v", err)
 	}
+	if _, err := os.Stat(own); err != nil {
+		t.Errorf("own stanza log should be kept: %v", err)
+	}
+	if got := readOwnerMarker(filepath.Join(logDir, ownerMarkerFile)); got != "stanza" {
+		t.Errorf("marker should be updated to current stanza, got %q", got)
+	}
+}
 
-	// Small file untouched
-	content, err := os.ReadFile(small) //nolint:gosec // test-controlled temp path
-	if err != nil || string(content) != "small\n" {
-		t.Errorf("small file should be untouched, got %q err %v", content, err)
-	}
+// Pool adoption: the previous owner (a suspended warm-pool cluster) left NO
+// stanza log files, only all-server.log. The marker still proves the change, so
+// all-server.log is truncated even with no foreign *.log to find.
+func TestRotateLogsPoolAdoptionNoForeignLogs(t *testing.T) {
+	pgData, logDir := newLogDir(t)
+	write(t, filepath.Join(logDir, ownerMarkerFile), []byte("poolcluster\n"))
+	server := filepath.Join(logDir, "all-server.log")
+	write(t, server, []byte("warm pool server history\n"))
 
-	// Big file truncated in place
-	info, err := os.Stat(big)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Size() != 0 {
-		t.Errorf("big file should be truncated, size %d", info.Size())
-	}
-
-	// .old holds the previous content, replacing the older generation
-	oldContent, err := os.ReadFile(big + ".old") //nolint:gosec // test-controlled temp path
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(oldContent, bigContent) {
-		t.Errorf(".old should hold the rotated content, got %d bytes", len(oldContent))
+	if err := RotateLogs(pgData, "branch"); err != nil {
+		t.Fatalf("RotateLogs: %v", err)
 	}
 
-	// Second run: nothing over the cap, .old stays
+	if s := mustSize(t, server); s != 0 {
+		t.Errorf("all-server.log should be truncated on pool adoption, size %d", s)
+	}
+	if got := readOwnerMarker(filepath.Join(logDir, ownerMarkerFile)); got != "branch" {
+		t.Errorf("marker should be updated, got %q", got)
+	}
+}
+
+// Missing marker (new or existing cluster): NOT treated as an owner change, so
+// all-server.log is kept; the marker is written so later reconciles match.
+func TestRotateLogsMissingMarkerKeepsHistory(t *testing.T) {
+	pgData, logDir := newLogDir(t)
+	server := filepath.Join(logDir, "all-server.log")
+	write(t, server, []byte("existing history\n"))
+
 	if err := RotateLogs(pgData, "stanza"); err != nil {
-		t.Fatalf("RotateLogs second run: %v", err)
+		t.Fatalf("RotateLogs: %v", err)
 	}
-	if _, err := os.Stat(big + ".old"); err != nil {
-		t.Errorf(".old should survive a run with nothing to rotate: %v", err)
+
+	if c, err := os.ReadFile(server); err != nil || string(c) != "existing history\n" { //nolint:gosec // temp path
+		t.Errorf("all-server.log should be kept when marker is missing, got %q err %v", c, err)
+	}
+	if got := readOwnerMarker(filepath.Join(logDir, ownerMarkerFile)); got != "stanza" {
+		t.Errorf("marker should be written, got %q", got)
+	}
+}
+
+// Marker matches (steady state / restart): all-server.log left alone across
+// runs, so legitimate server-restart history accumulates.
+func TestRotateLogsMarkerMatchKeepsHistory(t *testing.T) {
+	pgData, logDir := newLogDir(t)
+	write(t, filepath.Join(logDir, ownerMarkerFile), []byte("stanza\n"))
+	server := filepath.Join(logDir, "all-server.log")
+	write(t, server, []byte("start1\nstart2\n"))
+
+	if err := RotateLogs(pgData, "stanza"); err != nil {
+		t.Fatalf("RotateLogs: %v", err)
+	}
+	if c, err := os.ReadFile(server); err != nil || string(c) != "start1\nstart2\n" { //nolint:gosec // temp path
+		t.Errorf("all-server.log should be untouched on marker match, got %q err %v", c, err)
 	}
 }
 
 func TestRotateLogsMissingDir(t *testing.T) {
 	if err := RotateLogs(filepath.Join(t.TempDir(), "pgdata"), "stanza"); err != nil {
 		t.Fatalf("missing log dir should not error: %v", err)
-	}
-}
-
-// Without foreign-stanza files (not a clone), all-server.log must be left alone.
-func TestRotateLogsKeepsServerLogWithoutClone(t *testing.T) {
-	pgData := filepath.Join(t.TempDir(), "pgdata")
-	logDir := filepath.Join(workingDir(pgData), "log")
-	if err := os.MkdirAll(logDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	server := filepath.Join(logDir, "all-server.log")
-	if err := os.WriteFile(server, []byte("server history\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(logDir, "stanza-backup.log"), []byte("own\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := RotateLogs(pgData, "stanza"); err != nil {
-		t.Fatalf("RotateLogs: %v", err)
-	}
-
-	content, err := os.ReadFile(server) //nolint:gosec // test-controlled temp path
-	if err != nil || string(content) != "server history\n" {
-		t.Errorf("all-server.log should be untouched without a clone, got %q err %v", content, err)
 	}
 }

@@ -29,8 +29,10 @@ import (
 
 // logRotateSizeLimit is the per-file size cap for pgbackrest log files.
 // pgbackrest has no log management of its own: packaged installations rely on
-// an OS-level logrotate configuration, which does not exist in a container,
-// so the instance manager takes that role.
+// an OS-level logrotate, which does not exist in a container. Rather than add
+// logrotate plus a scheduler to the image — a CNPG pod deliberately has no
+// cron/daemon — the instance manager rotates inline on config reconcile, where
+// it already touches these files.
 const logRotateSizeLimit = 10 * 1024 * 1024
 
 // RotateLogs bounds the pgbackrest log files on the PGDATA volume.
@@ -62,6 +64,7 @@ func RotateLogs(pgDataPath, stanza string) error {
 
 	stanzaPrefix := stanza + "-"
 	var errs []error
+	var foreignFound bool
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".log") {
 			continue
@@ -74,6 +77,7 @@ func RotateLogs(pgDataPath, stanza string) error {
 		if !strings.HasPrefix(entry.Name(), stanzaPrefix) &&
 			entry.Name() != "all-server.log" &&
 			!strings.HasSuffix(entry.Name(), "-restore.log") {
+			foreignFound = true
 			if err := os.Remove(path); err != nil {
 				errs = append(errs, err)
 			}
@@ -93,6 +97,16 @@ func RotateLogs(pgDataPath, stanza string) error {
 		}
 
 		if err := copyTruncate(path, path+".old"); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	// all-server.log has no stanza in its name, so it cannot be identified as
+	// foreign per-file. But finding any foreign-stanza file means this is the
+	// first reconcile on a freshly cloned volume, so the inherited
+	// all-server.log belongs to the parent pod — truncate it for a clean slate.
+	if foreignFound {
+		if err := os.Truncate(filepath.Join(logDir, "all-server.log"), 0); err != nil && !os.IsNotExist(err) {
 			errs = append(errs, err)
 		}
 	}

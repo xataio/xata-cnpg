@@ -79,8 +79,12 @@ func TestRotateLogs(t *testing.T) {
 	if _, err := os.Stat(foreign + ".old"); !os.IsNotExist(err) {
 		t.Errorf("foreign stanza .old should be deleted, err %v", err)
 	}
-	if _, err := os.Stat(server); err != nil {
+	// all-server.log kept but truncated (foreign file present = fresh clone)
+	serverInfo, err := os.Stat(server)
+	if err != nil {
 		t.Errorf("all-server.log should be kept: %v", err)
+	} else if serverInfo.Size() != 0 {
+		t.Errorf("all-server.log should be truncated on clone, size %d", serverInfo.Size())
 	}
 	if _, err := os.Stat(restore); err != nil {
 		t.Errorf("-restore.log should be kept: %v", err)
@@ -122,5 +126,30 @@ func TestRotateLogs(t *testing.T) {
 func TestRotateLogsMissingDir(t *testing.T) {
 	if err := RotateLogs(filepath.Join(t.TempDir(), "pgdata"), "stanza"); err != nil {
 		t.Fatalf("missing log dir should not error: %v", err)
+	}
+}
+
+// Without foreign-stanza files (not a clone), all-server.log must be left alone.
+func TestRotateLogsKeepsServerLogWithoutClone(t *testing.T) {
+	pgData := filepath.Join(t.TempDir(), "pgdata")
+	logDir := filepath.Join(workingDir(pgData), "log")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	server := filepath.Join(logDir, "all-server.log")
+	if err := os.WriteFile(server, []byte("server history\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "stanza-backup.log"), []byte("own\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RotateLogs(pgData, "stanza"); err != nil {
+		t.Fatalf("RotateLogs: %v", err)
+	}
+
+	content, err := os.ReadFile(server) //nolint:gosec // test-controlled temp path
+	if err != nil || string(content) != "server history\n" {
+		t.Errorf("all-server.log should be untouched without a clone, got %q err %v", content, err)
 	}
 }

@@ -15,6 +15,8 @@ type PgBackRestRepositoryApplyConfiguration struct {
 	S3    *PgBackRestS3ApplyConfiguration  `json:"s3,omitempty"`
 	GCS   *PgBackRestGCSApplyConfiguration `json:"gcs,omitempty"`
 	Azure *apiv1.PgBackRestAzure           `json:"azure,omitempty"`
+	// Cipher configures client-side encryption for this repository.
+	Cipher *PgBackRestCipherApplyConfiguration `json:"cipher,omitempty"`
 }
 
 // PgBackRestRepositoryApplyConfiguration constructs a declarative configuration of the PgBackRestRepository type for use with
@@ -44,5 +46,13 @@ func (b *PgBackRestRepositoryApplyConfiguration) WithGCS(value *PgBackRestGCSApp
 // If called multiple times, the Azure field is set to the value of the last call.
 func (b *PgBackRestRepositoryApplyConfiguration) WithAzure(value apiv1.PgBackRestAzure) *PgBackRestRepositoryApplyConfiguration {
 	b.Azure = &value
+	return b
+}
+
+// WithCipher sets the Cipher field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Cipher field is set to the value of the last call.
+func (b *PgBackRestRepositoryApplyConfiguration) WithCipher(value *PgBackRestCipherApplyConfiguration) *PgBackRestRepositoryApplyConfiguration {
+	b.Cipher = value
 	return b
 }

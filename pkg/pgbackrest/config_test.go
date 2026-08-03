@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 )
@@ -585,6 +586,47 @@ func TestGenerateBaseConfig_GCSUnsupportedKeyTypes(t *testing.T) {
 				t.Fatalf("expected an error for unsupported key type %q", keyType)
 			}
 		})
+	}
+}
+
+func TestGenerateBaseConfig_RepositoryCipher(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pgbackrest-cipher",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{"passphrase": []byte("repository-passphrase")},
+	}
+	k8sClient := fake.NewClientBuilder().WithObjects(secret).Build()
+	repo := &apiv1.PgBackRestRepository{
+		S3: &apiv1.PgBackRestS3{
+			Bucket:             "test-bucket",
+			Region:             "us-east-1",
+			InheritFromIAMRole: true,
+		},
+		Cipher: &apiv1.PgBackRestCipher{
+			Type: "aes-256-cbc",
+			Passphrase: apiv1.SecretKeySelector{
+				LocalObjectReference: apiv1.LocalObjectReference{Name: secret.Name},
+				Key:                  "passphrase",
+			},
+		},
+	}
+
+	cfg, err := generateBaseConfig(
+		context.Background(), k8sClient, "default",
+		repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+	)
+	if err != nil {
+		t.Fatalf("generateBaseConfig failed: %v", err)
+	}
+
+	global := cfg.Section("global")
+	if got := global.Key("repo1-cipher-type").String(); got != "aes-256-cbc" {
+		t.Errorf("expected repo1-cipher-type aes-256-cbc, got %q", got)
+	}
+	if got := global.Key("repo1-cipher-pass").String(); got != "repository-passphrase" {
+		t.Errorf("expected resolved repo1-cipher-pass, got %q", got)
 	}
 }
 

@@ -1152,6 +1152,10 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		return fmt.Errorf("generating pgbackrest config: %w", err)
 	}
 
+	// TODO: Send SIGHUP to the running pgbackrest TLS server when the
+	// configuration changes. Pool adoption updates the stanza and repository
+	// cipher without restarting the pod, so the server must reload its
+	// in-memory configuration.
 	if _, err := pgbackrest.WriteConfigFile(content, r.instance.PgData); err != nil {
 		return fmt.Errorf("writing pgbackrest config: %w", err)
 	}

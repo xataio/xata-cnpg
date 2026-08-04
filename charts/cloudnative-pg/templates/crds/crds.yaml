@@ -2069,6 +2069,33 @@ spec:
                             description: PgBackRestAzure defines the Azure Blob Storage
                               configuration for pgbackrest.
                             type: object
+                          cipher:
+                            description: Cipher configures client-side encryption
+                              for this repository.
+                            properties:
+                              passphrase:
+                                description: Passphrase references the Secret key
+                                  that contains the repository passphrase.
+                                properties:
+                                  key:
+                                    description: The key to select
+                                    type: string
+                                  name:
+                                    description: Name of the referent.
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              type:
+                                description: Type is the cipher used by pgbackrest.
+                                enum:
+                                - aes-256-cbc
+                                type: string
+                            required:
+                            - passphrase
+                            - type
+                            type: object
                           gcs:
                             description: PgBackRestGCS defines the Google Cloud Storage
                               configuration for pgbackrest.
@@ -3949,6 +3976,33 @@ spec:
                             azure:
                               description: PgBackRestAzure defines the Azure Blob
                                 Storage configuration for pgbackrest.
+                              type: object
+                            cipher:
+                              description: Cipher configures client-side encryption
+                                for this repository.
+                              properties:
+                                passphrase:
+                                  description: Passphrase references the Secret key
+                                    that contains the repository passphrase.
+                                  properties:
+                                    key:
+                                      description: The key to select
+                                      type: string
+                                    name:
+                                      description: Name of the referent.
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                type:
+                                  description: Type is the cipher used by pgbackrest.
+                                  enum:
+                                  - aes-256-cbc
+                                  type: string
+                              required:
+                              - passphrase
+                              - type
                               type: object
                             gcs:
                               description: PgBackRestGCS defines the Google Cloud

@@ -164,6 +164,18 @@ type PgBackRestRepository struct {
 	S3    *PgBackRestS3    `json:"s3,omitempty"`
 	GCS   *PgBackRestGCS   `json:"gcs,omitempty"`
 	Azure *PgBackRestAzure `json:"azure,omitempty"`
+	// Cipher configures client-side encryption for this repository.
+	// +optional
+	Cipher *PgBackRestCipher `json:"cipher,omitempty"`
+}
+
+// PgBackRestCipher defines client-side encryption for a pgbackrest repository.
+type PgBackRestCipher struct {
+	// Type is the cipher used by pgbackrest.
+	// +kubebuilder:validation:Enum=aes-256-cbc
+	Type string `json:"type"`
+	// Passphrase references the Secret key that contains the repository passphrase.
+	Passphrase SecretKeySelector `json:"passphrase"`
 }
 
 // PgBackRestS3 defines the S3-compatible storage configuration for pgbackrest.
@@ -284,7 +296,6 @@ type PgBackRestOptions struct {
 	// +optional
 	RepoPath string `json:"repoPath,omitempty"`
 	// TODO: add in future iterations:
-	// - encryption: cipherType, cipherPass
 	// - backup behavior: stopAuto, manifestSaveThreshold, resumeOff
 	// - network/performance: bufferSize, protocolTimeout, ioReadRateMax, ioWriteRateMax, ioBurstDurationSec
 	// - WAL: archiveTimeout, archiveMissing

@@ -127,6 +127,14 @@ func generateBaseConfig(
 			return nil, fmt.Errorf("configuring GCS: %w", err)
 		}
 	}
+	if repo.Cipher != nil {
+		passphrase, err := resolveSecretKeyRef(ctx, k8sClient, namespace, &repo.Cipher.Passphrase)
+		if err != nil {
+			return nil, fmt.Errorf("resolving repository cipher passphrase: %w", err)
+		}
+		global.Key("repo1-cipher-type").SetValue(repo.Cipher.Type)
+		global.Key("repo1-cipher-pass").SetValue(passphrase)
+	}
 
 	// pgbackrest working directories — stored on the PGDATA PVC (outside the
 	// pgdata/ subdirectory) so each cluster uses its own dedicated storage

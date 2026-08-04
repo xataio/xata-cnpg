@@ -344,6 +344,9 @@ func externalClusterSecrets(cluster apiv1.Cluster) []string {
 				result = append(result, barmanObjStore.EndpointCA.Name)
 			}
 		}
+		if server.PgBackRest != nil {
+			result = append(result, pgbackrestRepositorySecrets(&server.PgBackRest.Repository)...)
+		}
 	}
 
 	return result
@@ -394,10 +397,22 @@ func pgbackrestSecrets(cluster apiv1.Cluster) []string {
 		return nil
 	}
 
-	var result []string
-	s3 := cluster.Spec.Backup.PgBackRest.Repository.S3
-	if s3 == nil {
+	return pgbackrestRepositorySecrets(cluster.Spec.Backup.PgBackRest.Repository)
+}
+
+func pgbackrestRepositorySecrets(repository *apiv1.PgBackRestRepository) []string {
+	if repository == nil {
 		return nil
+	}
+
+	var result []string
+	if repository.Cipher != nil {
+		result = append(result, repository.Cipher.Passphrase.Name)
+	}
+
+	s3 := repository.S3
+	if s3 == nil {
+		return result
 	}
 
 	if s3.AccessKeyID != nil {

@@ -21,6 +21,8 @@ package pgbackrest
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -773,5 +775,28 @@ func TestGenerateConfig_ReplicaStanzaUsesLiveClusterHost(t *testing.T) {
 
 	if v := cfg.Section("branch-abc").Key("pg1-host").String(); v != "pool-cluster-xyz-rw" {
 		t.Errorf("expected pg1-host pool-cluster-xyz-rw (live cluster), got %q", v)
+	}
+}
+
+// TestEnsureWorkingDirectories guards against the working directories drifting
+// from the config values: log-path in particular must exist before pgbackrest
+// runs, since pgbackrest never creates it and silently disables file logging
+// when it is missing.
+func TestEnsureWorkingDirectories(t *testing.T) {
+	pgData := filepath.Join(t.TempDir(), "pgdata")
+
+	if err := ensureWorkingDirectories(pgData); err != nil {
+		t.Fatalf("ensureWorkingDirectories: %v", err)
+	}
+
+	for _, subdir := range []string{"spool", "log", "lock"} {
+		path := filepath.Join(workingDir(pgData), subdir)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("expected directory %s to exist: %v", path, err)
+		}
+		if !info.IsDir() {
+			t.Errorf("expected %s to be a directory", path)
+		}
 	}
 }

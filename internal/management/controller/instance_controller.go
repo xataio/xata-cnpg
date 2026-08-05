@@ -1156,8 +1156,15 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 	// configuration changes. Pool adoption updates the stanza and repository
 	// cipher without restarting the pod, so the server must reload its
 	// in-memory configuration.
-	if _, err := pgbackrest.WriteConfigFile(content); err != nil {
+	if _, err := pgbackrest.WriteConfigFile(content, r.instance.PgData); err != nil {
 		return fmt.Errorf("writing pgbackrest config: %w", err)
+	}
+
+	// pgbackrest has no log management of its own; bound the log files here
+	// since there is no logrotate in the container. Failures are not fatal:
+	// rotation is retried on the next reconcile.
+	if err := pgbackrest.RotateLogs(r.instance.PgData, cluster.GetPgBackRestStanzaName()); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to rotate pgbackrest logs, will retry on next reconcile")
 	}
 
 	// Stanza creation is only needed on the primary — the stanza metadata

@@ -139,7 +139,7 @@ func generateBaseConfig(
 	// pgbackrest working directories — stored on the PGDATA PVC (outside the
 	// pgdata/ subdirectory) so each cluster uses its own dedicated storage
 	// instead of shared node scratch space.
-	pgbackrestDir := filepath.Dir(pgDataPath) + "/pgbackrest"
+	pgbackrestDir := workingDir(pgDataPath)
 	global.Key("spool-path").SetValue(pgbackrestDir + "/spool")
 	global.Key("log-path").SetValue(pgbackrestDir + "/log")
 	global.Key("lock-path").SetValue(pgbackrestDir + "/lock")
@@ -170,15 +170,39 @@ func renderConfig(cfg *ini.File) (string, error) {
 	return buf.String(), nil
 }
 
-// WriteConfigFile writes the pgbackrest configuration to ConfigFilePath.
-// It creates the parent directory if it doesn't exist.
-// Returns true if the file content changed, false if it was already up to date.
-func WriteConfigFile(content string) (bool, error) {
-	dir := filepath.Dir(ConfigFilePath)
-	for _, subdir := range []string{"", "log", "lock"} {
-		if err := os.MkdirAll(filepath.Join(dir, subdir), 0o700); err != nil {
-			return false, fmt.Errorf("creating directory %s: %w", filepath.Join(dir, subdir), err)
+// workingDir returns the pgbackrest working directory on the PGDATA volume.
+// Both the configuration values (spool-path, log-path, lock-path) and the
+// directory creation in WriteConfigFile derive from it so they cannot drift
+// apart.
+func workingDir(pgDataPath string) string {
+	return filepath.Dir(pgDataPath) + "/pgbackrest"
+}
+
+// ensureWorkingDirectories creates the pgbackrest working directories on the
+// PGDATA volume. pgbackrest creates the spool and lock paths on demand, but
+// never the log path — without it every command warns and file logging is
+// silently disabled.
+func ensureWorkingDirectories(pgDataPath string) error {
+	for _, subdir := range []string{"spool", "log", "lock"} {
+		path := filepath.Join(workingDir(pgDataPath), subdir)
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			return fmt.Errorf("creating directory %s: %w", path, err)
 		}
+	}
+	return nil
+}
+
+// WriteConfigFile writes the pgbackrest configuration to ConfigFilePath.
+// It creates the config parent directory and the pgbackrest working
+// directories on the PGDATA volume.
+// Returns true if the file content changed, false if it was already up to date.
+func WriteConfigFile(content, pgDataPath string) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(ConfigFilePath), 0o700); err != nil {
+		return false, fmt.Errorf("creating directory %s: %w", filepath.Dir(ConfigFilePath), err)
+	}
+
+	if err := ensureWorkingDirectories(pgDataPath); err != nil {
+		return false, err
 	}
 
 	existing, err := os.ReadFile(ConfigFilePath)

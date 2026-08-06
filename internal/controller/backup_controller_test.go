@@ -25,8 +25,10 @@ import (
 
 	volumesnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -606,5 +608,99 @@ var _ = Describe("checkPrerequisites for pgBackRest backups", func() {
 		Expect(expectErr).ToNot(HaveOccurred())
 		Expect(stored.Status.Phase).To(BeEquivalentTo(apiv1.BackupPhaseFailed))
 		Expect(stored.Status.Method).To(BeEquivalentTo(apiv1.BackupMethodPgBackRest))
+	})
+})
+
+var _ = Describe("backup TTL cleanup", func() {
+	var env *testingEnvironment
+	BeforeEach(func() { env = buildTestEnvironment() })
+
+	It("deletes a completed backup older than 2 hours", func(ctx context.Context) {
+		ns := newFakeNamespace(env.client)
+
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{Name: "old-completed", Namespace: ns},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: "cluster"},
+				Method:  apiv1.BackupMethodPgBackRest,
+			},
+			Status: apiv1.BackupStatus{
+				Phase:     apiv1.BackupPhaseCompleted,
+				StoppedAt: ptr.To(metav1.NewTime(time.Now().Add(-3 * time.Hour))),
+			},
+		}
+		Expect(env.client.Create(ctx, backup)).To(Succeed())
+
+		res, err := env.backupReconciler.Reconcile(ctx, ctrl.Request{
+			NamespacedName: client.ObjectKeyFromObject(backup),
+		})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(res.RequeueAfter).To(BeZero())
+
+		// Backup should be deleted
+		var stored apiv1.Backup
+		err = env.client.Get(ctx, client.ObjectKeyFromObject(backup), &stored)
+		Expect(apierrs.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("does not delete a completed backup younger than 2 hours", func(ctx context.Context) {
+		ns := newFakeNamespace(env.client)
+
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{Name: "recent-completed", Namespace: ns},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: "cluster"},
+				Method:  apiv1.BackupMethodPgBackRest,
+			},
+			Status: apiv1.BackupStatus{
+				Phase:     apiv1.BackupPhaseCompleted,
+				StoppedAt: ptr.To(metav1.NewTime(time.Now().Add(-30 * time.Minute))),
+			},
+		}
+		Expect(env.client.Create(ctx, backup)).To(Succeed())
+
+		res, err := env.backupReconciler.Reconcile(ctx, ctrl.Request{
+			NamespacedName: client.ObjectKeyFromObject(backup),
+		})
+		Expect(err).ToNot(HaveOccurred())
+		// Should requeue for the remaining TTL
+		Expect(res.RequeueAfter).To(BeNumerically(">", 0))
+		Expect(res.RequeueAfter).To(BeNumerically("<=", 90*time.Minute))
+
+		// Backup should still exist
+		var stored apiv1.Backup
+		Expect(env.client.Get(ctx, client.ObjectKeyFromObject(backup), &stored)).To(Succeed())
+	})
+
+	It("deletes a failed backup older than 2 hours using creationTimestamp", func(ctx context.Context) {
+		ns := newFakeNamespace(env.client)
+
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "old-failed",
+				Namespace:         ns,
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-3 * time.Hour)),
+			},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: "cluster"},
+				Method:  apiv1.BackupMethodPgBackRest,
+			},
+			Status: apiv1.BackupStatus{
+				Phase: apiv1.BackupPhaseFailed,
+				// StoppedAt is nil for failed backups
+			},
+		}
+		Expect(env.client.Create(ctx, backup)).To(Succeed())
+
+		res, err := env.backupReconciler.Reconcile(ctx, ctrl.Request{
+			NamespacedName: client.ObjectKeyFromObject(backup),
+		})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(res.RequeueAfter).To(BeZero())
+
+		// Backup should be deleted
+		var stored apiv1.Backup
+		err = env.client.Get(ctx, client.ObjectKeyFromObject(backup), &stored)
+		Expect(apierrs.IsNotFound(err)).To(BeTrue())
 	})
 })

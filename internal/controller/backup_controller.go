@@ -124,7 +124,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	switch backup.Status.Phase {
 	case apiv1.BackupPhaseFailed, apiv1.BackupPhaseCompleted:
-		return ctrl.Result{}, nil
+		return r.reconcileCompletedBackup(ctx, &backup)
 	}
 
 	var cluster apiv1.Cluster
@@ -224,6 +224,32 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	hookResult := postReconcilePluginHooks(ctx, &cluster, &backup)
 	return hookResult.Result, hookResult.Err
+}
+
+// reconcileCompletedBackup handles TTL-based cleanup of completed or failed Backup CRs.
+// Backups are deleted 2 hours after completion/failure to avoid accumulating stale objects.
+func (r *BackupReconciler) reconcileCompletedBackup(ctx context.Context, backup *apiv1.Backup) (ctrl.Result, error) {
+	const backupTTL = 2 * time.Hour
+	contextLogger := log.FromContext(ctx)
+
+	var finishedAt time.Time
+	if backup.Status.StoppedAt != nil {
+		finishedAt = backup.Status.StoppedAt.Time
+	} else {
+		finishedAt = backup.CreationTimestamp.Time
+	}
+
+	age := time.Since(finishedAt)
+	if age >= backupTTL {
+		contextLogger.Info("Deleting expired backup CR",
+			"backup", backup.Name, "phase", backup.Status.Phase, "age", age)
+		if err := r.Delete(ctx, backup); err != nil && !apierrs.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	return ctrl.Result{RequeueAfter: backupTTL - age}, nil
 }
 
 func (r *BackupReconciler) startBackupManagedByInstance(

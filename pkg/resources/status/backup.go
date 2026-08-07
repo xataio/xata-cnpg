@@ -90,9 +90,16 @@ func FlagBackupAsFailed(
 
 	var flagErr flagBackupErrors
 
+	backupGone := false
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var livingBackup apiv1.Backup
 		if err := cli.Get(ctx, client.ObjectKeyFromObject(backup), &livingBackup); err != nil {
+			// The backup has been deleted: there is nothing left to flag,
+			// and no reason to record a failure for a vanished backup.
+			if apierrs.IsNotFound(err) {
+				backupGone = true
+				return nil
+			}
 			contextLogger.Error(err, "failed to get backup")
 			return err
 		}
@@ -115,6 +122,10 @@ func FlagBackupAsFailed(
 	}); err != nil {
 		contextLogger.Error(err, "while flagging backup as failed")
 		flagErr.backupErr = err
+	}
+
+	if backupGone {
+		return nil
 	}
 
 	if cluster == nil {
@@ -168,7 +179,7 @@ func backupCancellationReason(
 		Name:      backup.Spec.Cluster.Name,
 	}, &cluster)
 	switch {
-	case apierrs.IsNotFound(err):
+	case apierrs.IsNotFound(err), apierrs.IsForbidden(err):
 		return "cluster has been deleted", true
 	case err != nil:
 		// we cannot assess the cluster state, proceed with the failure path
@@ -203,6 +214,10 @@ func flagBackupAsCancelled(
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var livingBackup apiv1.Backup
 		if err := cli.Get(ctx, client.ObjectKeyFromObject(backup), &livingBackup); err != nil {
+			// The backup has been deleted: there is nothing left to cancel.
+			if apierrs.IsNotFound(err) {
+				return nil
+			}
 			return err
 		}
 		origBackup := livingBackup.DeepCopy()

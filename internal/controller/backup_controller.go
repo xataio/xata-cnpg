@@ -66,6 +66,12 @@ const backupPhase = ".status.phase"
 // where the name of the cluster is written
 const clusterNameField = ".spec.cluster.name"
 
+// missingClusterGracePeriod is how long a backup with an empty phase waits for
+// its cluster to appear before being cancelled. It covers the creation race
+// where the backup is reconciled before the cluster is visible in the cache.
+// After it, a missing cluster means the cluster has been deleted.
+const missingClusterGracePeriod = 10 * time.Minute
+
 // ErrPrimaryImageNeedsUpdate is returned when the primary instance is not running with the latest image
 var ErrPrimaryImageNeedsUpdate = fmt.Errorf("primary instance not having expected image, cannot run backup")
 
@@ -406,9 +412,26 @@ func (r *BackupReconciler) getCluster(
 	}
 
 	if apierrs.IsNotFound(err) {
-		r.Recorder.Eventf(backup, "Warning", "FindingCluster",
-			"Unknown cluster %v, will retry in 30 seconds", clusterName)
-		return &ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		// A backup with an empty phase may just be waiting for its cluster to
+		// appear in the cache. Give it a grace period before deciding the
+		// cluster is gone.
+		if backup.Status.Phase == "" &&
+			time.Since(backup.CreationTimestamp.Time) < missingClusterGracePeriod {
+			r.Recorder.Eventf(backup, "Warning", "FindingCluster",
+				"Unknown cluster %v, will retry in 30 seconds", clusterName)
+			return &ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+
+		// The cluster is gone (branch deletion, pool hibernation). Flag the
+		// backup: FlagBackupAsFailed reads the missing cluster and marks it
+		// cancelled instead of failed, so no alarm fires.
+		contextLogger.Info("target cluster is gone, cancelling backup", "cluster", clusterName)
+		if flagErr := resourcestatus.FlagBackupAsFailed(ctx, r.Client, backup, nil,
+			fmt.Errorf("cluster %s has been deleted", clusterName)); flagErr != nil {
+			contextLogger.Error(flagErr, "while flagging backup as cancelled, retrying...")
+			return nil, flagErr
+		}
+		return &ctrl.Result{}, nil
 	}
 
 	contextLogger.Error(err, "error getting cluster, proceeding to flag backup as failed.")

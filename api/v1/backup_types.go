@@ -51,6 +51,12 @@ const (
 	// BackupPhaseFailed means that the backup is failed
 	BackupPhaseFailed = "failed"
 
+	// BackupPhaseCancelled means that the backup was interrupted because the
+	// target cluster was hibernated or deleted. It is a terminal phase and,
+	// unlike BackupPhaseFailed, does not indicate a problem with the backup
+	// system: the cluster status is not updated and no alert should fire.
+	BackupPhaseCancelled = "cancelled"
+
 	// BackupPhaseWalArchivingFailing means wal archiving isn't properly working
 	BackupPhaseWalArchivingFailing = "walArchivingFailing"
 )

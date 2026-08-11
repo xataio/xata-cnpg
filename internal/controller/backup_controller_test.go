@@ -608,3 +608,59 @@ var _ = Describe("checkPrerequisites for pgBackRest backups", func() {
 		Expect(stored.Status.Method).To(BeEquivalentTo(apiv1.BackupMethodPgBackRest))
 	})
 })
+
+var _ = Describe("getCluster when the target cluster is missing", func() {
+	var env *testingEnvironment
+	BeforeEach(func() { env = buildTestEnvironment() })
+
+	It("cancels a running backup when the cluster is gone", func(ctx context.Context) {
+		ns := newFakeNamespace(env.client)
+
+		// No cluster is created: it has been deleted
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{Name: "backup-cluster-gone", Namespace: ns},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: "missing-cluster"},
+				Method:  apiv1.BackupMethodPgBackRest,
+			},
+			Status: apiv1.BackupStatus{Phase: apiv1.BackupPhaseRunning},
+		}
+		Expect(env.client.Create(ctx, backup)).To(Succeed())
+
+		var cluster apiv1.Cluster
+		res, err := env.backupReconciler.getCluster(ctx, backup, &cluster)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(res).ToNot(BeNil())
+
+		var stored apiv1.Backup
+		Expect(env.client.Get(ctx, client.ObjectKeyFromObject(backup), &stored)).To(Succeed())
+		Expect(stored.Status.Phase).To(BeEquivalentTo(apiv1.BackupPhaseCancelled))
+	})
+
+	It("requeues a fresh backup while the cluster is not yet visible", func(ctx context.Context) {
+		ns := newFakeNamespace(env.client)
+
+		// Empty phase and just created: this is the creation race
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{Name: "backup-fresh", Namespace: ns},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: "missing-cluster"},
+				Method:  apiv1.BackupMethodPgBackRest,
+			},
+		}
+		Expect(env.client.Create(ctx, backup)).To(Succeed())
+		// The fake client does not set CreationTimestamp; set it so the backup
+		// is within the grace period.
+		backup.CreationTimestamp = metav1.Now()
+
+		var cluster apiv1.Cluster
+		res, err := env.backupReconciler.getCluster(ctx, backup, &cluster)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(res).ToNot(BeNil())
+		Expect(res.RequeueAfter).To(Equal(30 * time.Second))
+
+		var stored apiv1.Backup
+		Expect(env.client.Get(ctx, client.ObjectKeyFromObject(backup), &stored)).To(Succeed())
+		Expect(stored.Status.Phase).To(BeEmpty())
+	})
+})

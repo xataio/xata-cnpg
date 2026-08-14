@@ -330,8 +330,17 @@ func (ws *localWebserverEndpoints) setWALArchiveStatusCondition(w http.ResponseW
 	// This runs inside archive_command (CLI hasn't exited), so pg_stat_archiver
 	// still shows WAL_N-1. WAL_N is in S3 (ArchivePush completed), acting as buffer.
 	// 5 minutes = archive_timeout default. If archive_timeout changes, this should too.
+	// While suspended, the archive wrapper acks WAL without pushing, so
+	// pg_stat_archiver reports archives that never reached the repository.
+	// Do not stamp LastRecoverabilityPoint from those.
+	// Before the first successful backup there is no base backup to restore
+	// from, so no point in time is recoverable: keep the field empty. This
+	// also keeps the last suspended-period archive time (still visible in
+	// pg_stat_archiver right after a pool adoption) out of the status.
 	var modifier status.Modifier
-	if asr.Error == "" && time.Since(ws.lastPITRUpdate) >= 5*time.Minute {
+	if !cluster.IsPgBackRestSuspended() &&
+		cluster.Status.LastSuccessfulBackup != "" && //nolint:staticcheck
+		asr.Error == "" && time.Since(ws.lastPITRUpdate) >= 5*time.Minute {
 		if t := ws.readLastArchivedTime(); t != "" {
 			modifier = func(cluster *apiv1.Cluster) {
 				cluster.Status.LastRecoverabilityPoint = t

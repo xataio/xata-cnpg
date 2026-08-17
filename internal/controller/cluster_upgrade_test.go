@@ -815,6 +815,75 @@ var _ = Describe("Cluster upgrade with podSpec reconciliation disabled", func() 
 	})
 })
 
+var _ = Describe("Primary detection during rollout", func() {
+	var (
+		cluster    apiv1.Cluster
+		statusList postgres.PostgresqlStatusList
+	)
+
+	BeforeEach(func(ctx SpecContext) {
+		cluster = apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test",
+			},
+			Spec: apiv1.ClusterSpec{
+				ImageName: "postgres:13.11",
+			},
+			Status: apiv1.ClusterStatus{
+				Image:         "postgres:13.11",
+				TargetPrimary: "test-1",
+			},
+		}
+		configuration.Current = configuration.NewConfiguration()
+
+		pod, err := specs.NewInstance(ctx, cluster, 1, true)
+		Expect(err).ToNot(HaveOccurred())
+		statusList = postgres.PostgresqlStatusList{
+			Items: []postgres.PostgresqlStatus{
+				{
+					Pod:            pod,
+					IsPodReady:     true,
+					ExecutableHash: "test_hash",
+				},
+			},
+		}
+	})
+
+	AfterEach(func() {
+		configuration.Current = configuration.NewConfiguration()
+	})
+
+	It("accepts an idle noop-bootstrap cluster without a current primary", func(ctx SpecContext) {
+		cluster.Spec.Bootstrap = &apiv1.BootstrapConfiguration{
+			Noop: &apiv1.BootstrapNoop{},
+		}
+
+		done, err := (&ClusterReconciler{}).rolloutRequiredInstances(ctx, &cluster, &statusList)
+
+		Expect(done).To(BeFalse())
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	It("rejects a regular cluster without a current primary", func(ctx SpecContext) {
+		done, err := (&ClusterReconciler{}).rolloutRequiredInstances(ctx, &cluster, &statusList)
+
+		Expect(done).To(BeFalse())
+		Expect(err).To(MatchError("expected 1 primary PostgreSQL but none found"))
+	})
+
+	It("rejects a noop-bootstrap cluster without a target primary", func(ctx SpecContext) {
+		cluster.Spec.Bootstrap = &apiv1.BootstrapConfiguration{
+			Noop: &apiv1.BootstrapNoop{},
+		}
+		cluster.Status.TargetPrimary = ""
+
+		done, err := (&ClusterReconciler{}).rolloutRequiredInstances(ctx, &cluster, &statusList)
+
+		Expect(done).To(BeFalse())
+		Expect(err).To(MatchError("expected 1 primary PostgreSQL but none found"))
+	})
+})
+
 type fakePluginClientRollout struct {
 	pluginClient.Client
 	returnedPod   *corev1.Pod

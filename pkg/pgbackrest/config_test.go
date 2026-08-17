@@ -495,6 +495,29 @@ func TestGenerateBaseConfig_TLSAndPaths(t *testing.T) {
 	}
 }
 
+func TestGenerateBaseConfig_IRSAWebIdentity(t *testing.T) {
+	repo := &apiv1.PgBackRestRepository{
+		S3: &apiv1.PgBackRestS3{
+			Bucket:             "test-bucket",
+			Region:             "us-east-1",
+			InheritFromIAMRole: true,
+			KeyType:            "web-id",
+		},
+	}
+
+	cfg, err := generateBaseConfig(
+		context.Background(), nil, "default",
+		repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+	)
+	if err != nil {
+		t.Fatalf("generateBaseConfig failed: %v", err)
+	}
+
+	if got := cfg.Section("global").Key("repo1-s3-key-type").String(); got != "web-id" {
+		t.Fatalf("expected web-id S3 key type, got %q", got)
+	}
+}
+
 func TestGenerateBaseConfig_GCS(t *testing.T) {
 	tests := map[string]struct {
 		gcs        *apiv1.PgBackRestGCS

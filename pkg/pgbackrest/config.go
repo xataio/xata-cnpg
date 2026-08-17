@@ -250,7 +250,11 @@ func configureS3(
 	}
 
 	if s3.InheritFromIAMRole {
-		section.Key("repo1-s3-key-type").SetValue(keyTypeAuto)
+		keyType := s3.KeyType
+		if keyType == "" {
+			keyType = keyTypeAuto
+		}
+		section.Key("repo1-s3-key-type").SetValue(keyType)
 	} else {
 		accessKey, err := resolveSecretKeyRef(ctx, k8sClient, namespace, s3.AccessKeyID)
 		if err != nil {

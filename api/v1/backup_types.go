@@ -202,9 +202,15 @@ type PgBackRestS3 struct {
 	// +optional
 	SecretAccessKey *SecretKeySelector `json:"secretAccessKey,omitempty"`
 	// Use IAM role-based authentication (e.g. IRSA, instance profile).
-	// Sets pgbackrest repo1-s3-key-type=auto.
+	// When KeyType is empty, sets pgbackrest repo1-s3-key-type=auto.
 	// +optional
 	InheritFromIAMRole bool `json:"inheritFromIAMRole,omitempty"`
+	// Selects the pgbackrest S3 credential provider for IAM role-based
+	// authentication. Use web-id for EKS IRSA. Defaults to auto for backward
+	// compatibility with instance-profile credentials.
+	// +optional
+	// +kubebuilder:validation:Enum=auto;web-id
+	KeyType string `json:"keyType,omitempty"`
 }
 
 // PgBackRestRetention defines the backup retention policy for pgbackrest.

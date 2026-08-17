@@ -1671,8 +1671,17 @@ spec:
                               inheritFromIAMRole:
                                 description: |-
                                   Use IAM role-based authentication (e.g. IRSA, instance profile).
-                                  Sets pgbackrest repo1-s3-key-type=auto.
+                                  When KeyType is empty, sets pgbackrest repo1-s3-key-type=auto.
                                 type: boolean
+                              keyType:
+                                description: |-
+                                  Selects the pgbackrest S3 credential provider for IAM role-based
+                                  authentication. Use web-id for EKS IRSA. Defaults to auto for backward
+                                  compatibility with instance-profile credentials.
+                                enum:
+                                - auto
+                                - web-id
+                                type: string
                               region:
                                 description: The S3 region
                                 type: string
@@ -3628,8 +3637,17 @@ spec:
                                 inheritFromIAMRole:
                                   description: |-
                                     Use IAM role-based authentication (e.g. IRSA, instance profile).
-                                    Sets pgbackrest repo1-s3-key-type=auto.
+                                    When KeyType is empty, sets pgbackrest repo1-s3-key-type=auto.
                                   type: boolean
+                                keyType:
+                                  description: |-
+                                    Selects the pgbackrest S3 credential provider for IAM role-based
+                                    authentication. Use web-id for EKS IRSA. Defaults to auto for backward
+                                    compatibility with instance-profile credentials.
+                                  enum:
+                                  - auto
+                                  - web-id
+                                  type: string
                                 region:
                                   description: The S3 region
                                   type: string

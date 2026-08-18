@@ -249,13 +249,12 @@ func configureS3(
 		section.Key("repo1-s3-endpoint").SetValue("s3." + s3.Region + ".amazonaws.com")
 	}
 
-	if s3.InheritFromIAMRole {
-		keyType := s3.KeyType
-		if keyType == "" {
-			keyType = keyTypeAuto
-		}
-		section.Key("repo1-s3-key-type").SetValue(keyType)
-	} else {
+	switch {
+	case s3.KeyType != "":
+		section.Key("repo1-s3-key-type").SetValue(s3.KeyType)
+	case s3.InheritFromIAMRole: //nolint:staticcheck // Compatibility with existing clusters.
+		section.Key("repo1-s3-key-type").SetValue(keyTypeAuto)
+	default:
 		accessKey, err := resolveSecretKeyRef(ctx, k8sClient, namespace, s3.AccessKeyID)
 		if err != nil {
 			return fmt.Errorf("resolving S3 access key: %w", err)

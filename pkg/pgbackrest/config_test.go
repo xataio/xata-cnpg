@@ -21,6 +21,7 @@ package pgbackrest
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -483,6 +484,7 @@ func TestGenerateBaseConfig_TLSAndPaths(t *testing.T) {
 		{"tls address", global, "tls-server-address", "*"},
 		{"tls auth", global, "tls-server-auth", "streaming_replica=*"},
 		{"spool path", global, "spool-path", "/var/lib/postgresql/data/pgbackrest/spool"},
+		{"legacy IAM authentication", global, "repo1-s3-key-type", "auto"},
 		{"pg1 path", stanza, "pg1-path", "/var/lib/postgresql/data/pgdata"},
 	}
 
@@ -496,25 +498,29 @@ func TestGenerateBaseConfig_TLSAndPaths(t *testing.T) {
 }
 
 func TestGenerateBaseConfig_IRSAWebIdentity(t *testing.T) {
-	repo := &apiv1.PgBackRestRepository{
-		S3: &apiv1.PgBackRestS3{
-			Bucket:             "test-bucket",
-			Region:             "us-east-1",
-			InheritFromIAMRole: true,
-			KeyType:            "web-id",
-		},
-	}
+	for _, inheritFromIAMRole := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy field %t", inheritFromIAMRole), func(t *testing.T) {
+			repo := &apiv1.PgBackRestRepository{
+				S3: &apiv1.PgBackRestS3{
+					Bucket:             "test-bucket",
+					Region:             "us-east-1",
+					InheritFromIAMRole: inheritFromIAMRole,
+					KeyType:            "web-id",
+				},
+			}
 
-	cfg, err := generateBaseConfig(
-		context.Background(), nil, "default",
-		repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
-	)
-	if err != nil {
-		t.Fatalf("generateBaseConfig failed: %v", err)
-	}
+			cfg, err := generateBaseConfig(
+				context.Background(), nil, "default",
+				repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+			)
+			if err != nil {
+				t.Fatalf("generateBaseConfig failed: %v", err)
+			}
 
-	if got := cfg.Section("global").Key("repo1-s3-key-type").String(); got != "web-id" {
-		t.Fatalf("expected web-id S3 key type, got %q", got)
+			if got := cfg.Section("global").Key("repo1-s3-key-type").String(); got != "web-id" {
+				t.Fatalf("expected web-id S3 key type, got %q", got)
+			}
+		})
 	}
 }
 

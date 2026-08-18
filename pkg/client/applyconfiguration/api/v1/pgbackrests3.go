@@ -22,12 +22,14 @@ type PgBackRestS3ApplyConfiguration struct {
 	AccessKeyID *api.SecretKeySelector `json:"accessKeyId,omitempty"`
 	// The reference to the secret access key
 	SecretAccessKey *api.SecretKeySelector `json:"secretAccessKey,omitempty"`
-	// Use IAM role-based authentication (e.g. IRSA, instance profile).
-	// When KeyType is empty, sets pgbackrest repo1-s3-key-type=auto.
+	// Use instance-profile authentication when KeyType is empty.
+	//
+	// Deprecated: use KeyType instead. This field remains as a compatibility
+	// fallback and selects pgbackrest repo1-s3-key-type=auto.
 	InheritFromIAMRole *bool `json:"inheritFromIAMRole,omitempty"`
-	// Selects the pgbackrest S3 credential provider for IAM role-based
-	// authentication. Use web-id for EKS IRSA. Defaults to auto for backward
-	// compatibility with instance-profile credentials.
+	// Selects the pgbackrest S3 credential provider. When set, this field takes
+	// precedence over the deprecated InheritFromIAMRole field. Use auto for
+	// instance-profile credentials and web-id for EKS IRSA.
 	KeyType *string `json:"keyType,omitempty"`
 }
 

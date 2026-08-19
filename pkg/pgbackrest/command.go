@@ -176,7 +176,7 @@ func Backup(ctx context.Context, stanzaName string, backupType string, annotatio
 	contextLog := log.FromContext(ctx)
 	contextLog.Info("Starting pgbackrest backup", "stanza", stanzaName, "type", backupType)
 
-	args := []string{"--stanza=" + stanzaName, "backup", "--type=" + backupType, "--no-archive-check"}
+	args := []string{"--stanza=" + stanzaName, "backup", "--type=" + backupType}
 	if annotation != "" {
 		args = append(args, "--annotation="+annotation)
 	}

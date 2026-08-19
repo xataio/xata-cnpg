@@ -27,6 +27,7 @@ import (
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -135,7 +136,14 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	if err := b.retryWithRefreshedCluster(ctx, func() error {
 		return status.PatchConditionsWithOptimisticLock(ctx, b.Client, b.Cluster, apiv1.BackupStartingCondition)
 	}); err != nil {
-		b.Log.Error(err, "Error changing backup condition (backup started)")
+		if apierrs.IsNotFound(err) {
+			// The cluster was deleted mid-backup (hibernation or branch
+			// deletion) — there is nothing left to update.
+			b.Log.Info("Cluster gone, skipping backup started condition update",
+				"err", err.Error())
+		} else {
+			b.Log.Error(err, "Error changing backup condition (backup started)")
+		}
 	}
 
 	backupType := b.Backup.Spec.PgBackRestBackupType
@@ -189,7 +197,14 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	if err := b.retryWithRefreshedCluster(ctx, func() error {
 		return status.PatchConditionsWithOptimisticLock(ctx, b.Client, b.Cluster, apiv1.BackupSucceededCondition)
 	}); err != nil {
-		b.Log.Error(err, "Can't update the cluster with the completed backup data")
+		if apierrs.IsNotFound(err) {
+			// The cluster was deleted mid-backup (hibernation or branch
+			// deletion) — there is nothing left to update.
+			b.Log.Info("Cluster gone, skipping backup succeeded condition update",
+				"err", err.Error())
+		} else {
+			b.Log.Error(err, "Can't update the cluster with the completed backup data")
+		}
 	}
 }
 
@@ -368,7 +383,14 @@ func (b *PgBackRestBackupCommand) populateBackupDetails(ctx context.Context) {
 		}
 		return b.Client.Status().Patch(ctx, b.Cluster, client.MergeFrom(origCluster))
 	}); err != nil {
-		b.Log.Error(err, "while setting firstRecoverabilityPoint and lastSuccessfulBackup")
+		if apierrs.IsNotFound(err) {
+			// The cluster was deleted mid-backup (hibernation or branch
+			// deletion) — there is nothing left to update.
+			b.Log.Info("Cluster gone, skipping firstRecoverabilityPoint and lastSuccessfulBackup update",
+				"err", err.Error())
+		} else {
+			b.Log.Error(err, "while setting firstRecoverabilityPoint and lastSuccessfulBackup")
+		}
 	}
 }
 

@@ -24,7 +24,7 @@ env:
   # XATA: Release branch
   DEPLOY_BRANCH: "release-1.28"
   # renovate: datasource=golang-version depName=golang versioning=loose
-  GOLANG_VERSION: "1.26.5"
+  GOLANG_VERSION: "1.26.6"
   # renovate: datasource=github-releases depName=golangci/golangci-lint versioning=loose
   GOLANGCI_LINT_VERSION: "v2.10.1"
   KUBEBUILDER_VERSION: "2.3.1"

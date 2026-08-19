@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8client "sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,6 +33,7 @@ import (
 	"github.com/xataio/xata-cnpg/internal/cnpi/plugin"
 	pluginClient "github.com/xataio/xata-cnpg/internal/cnpi/plugin/client"
 	"github.com/xataio/xata-cnpg/internal/configuration"
+	rolloutManager "github.com/xataio/xata-cnpg/internal/controller/rollout"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
 	"github.com/xataio/xata-cnpg/pkg/specs"
 	"github.com/xataio/xata-cnpg/pkg/utils"
@@ -812,6 +814,121 @@ var _ = Describe("Cluster upgrade with podSpec reconciliation disabled", func() 
 		Expect(rollout.required).To(BeFalse())
 		Expect(rollout.canBeInPlace).To(BeFalse())
 		Expect(rollout.reason).To(BeEmpty())
+	})
+})
+
+var _ = Describe("Primary detection during rollout", func() {
+	var (
+		cluster    apiv1.Cluster
+		statusList postgres.PostgresqlStatusList
+	)
+
+	BeforeEach(func(ctx SpecContext) {
+		cluster = apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test",
+			},
+			Spec: apiv1.ClusterSpec{
+				ImageName: "postgres:13.11",
+			},
+			Status: apiv1.ClusterStatus{
+				Image:         "postgres:13.11",
+				TargetPrimary: "test-1",
+			},
+		}
+		configuration.Current = configuration.NewConfiguration()
+
+		pod, err := specs.NewInstance(ctx, cluster, 1, true)
+		Expect(err).ToNot(HaveOccurred())
+		statusList = postgres.PostgresqlStatusList{
+			Items: []postgres.PostgresqlStatus{
+				{
+					Pod:            pod,
+					IsPodReady:     true,
+					ExecutableHash: "test_hash",
+				},
+			},
+		}
+	})
+
+	AfterEach(func() {
+		configuration.Current = configuration.NewConfiguration()
+	})
+
+	It("accepts an idle noop-bootstrap cluster without a current primary", func(ctx SpecContext) {
+		cluster.Spec.Bootstrap = &apiv1.BootstrapConfiguration{
+			Noop: &apiv1.BootstrapNoop{},
+		}
+
+		done, err := (&ClusterReconciler{}).rolloutRequiredInstances(ctx, &cluster, &statusList)
+
+		Expect(done).To(BeFalse())
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	It("rejects a regular cluster without a current primary", func(ctx SpecContext) {
+		done, err := (&ClusterReconciler{}).rolloutRequiredInstances(ctx, &cluster, &statusList)
+
+		Expect(done).To(BeFalse())
+		Expect(err).To(MatchError("expected 1 primary PostgreSQL but none found"))
+	})
+
+	It("rejects a noop-bootstrap cluster without a target primary", func(ctx SpecContext) {
+		cluster.Spec.Bootstrap = &apiv1.BootstrapConfiguration{
+			Noop: &apiv1.BootstrapNoop{},
+		}
+		cluster.Status.TargetPrimary = ""
+
+		done, err := (&ClusterReconciler{}).rolloutRequiredInstances(ctx, &cluster, &statusList)
+
+		Expect(done).To(BeFalse())
+		Expect(err).To(MatchError("expected 1 primary PostgreSQL but none found"))
+	})
+
+	It("resumes normal rollout after an idle noop cluster acquires PGDATA", func(ctx SpecContext) {
+		cluster.Namespace = "default"
+		cluster.Spec.Bootstrap = &apiv1.BootstrapConfiguration{
+			Noop: &apiv1.BootstrapNoop{},
+		}
+		cluster.Spec.Instances = 1
+		cluster.Status.Instances = 1
+
+		environment := buildTestEnvironment()
+		reconciler := environment.clusterReconciler
+		reconciler.rolloutManager = rolloutManager.New(0, 0)
+
+		Expect(environment.client.Create(ctx, &cluster)).To(Succeed())
+		pod, err := specs.NewInstance(ctx, cluster, 1, true)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(environment.client.Create(ctx, pod)).To(Succeed())
+		statusList.Items = []postgres.PostgresqlStatus{
+			{
+				Pod:            pod,
+				IsPodReady:     true,
+				ExecutableHash: "test_hash",
+			},
+		}
+
+		done, err := reconciler.rolloutRequiredInstances(ctx, &cluster, &statusList)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(done).To(BeFalse())
+
+		// The instance manager writes CurrentPrimary after PGDATA appears. That
+		// Cluster status update enqueues the cluster controller again.
+		oldCluster := cluster.DeepCopy()
+		cluster.Status.CurrentPrimary = cluster.Status.TargetPrimary
+		Expect(environment.client.Status().Patch(ctx, &cluster, k8client.MergeFrom(oldCluster))).To(Succeed())
+
+		// A missing executable hash forces a rollout and proves that the second
+		// evaluation follows normal primary handling instead of the idle guard.
+		statusList.Items[0].ExecutableHash = ""
+		done, err = reconciler.rolloutRequiredInstances(ctx, &cluster, &statusList)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(done).To(BeTrue())
+
+		persistedPod := &corev1.Pod{}
+		err = environment.client.Get(ctx, k8client.ObjectKeyFromObject(pod), persistedPod)
+		Expect(apierrs.IsNotFound(err)).To(BeTrue())
 	})
 })
 

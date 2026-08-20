@@ -39,6 +39,7 @@ import (
 	"github.com/xataio/xata-cnpg/internal/cnpi/plugin/repository"
 	"github.com/xataio/xata-cnpg/internal/management/cache"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/local"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
 )
 
@@ -83,6 +84,10 @@ func NewCmd() *cobra.Command {
 			switch {
 			case errors.Is(err, barmanRestorer.ErrWALNotFound):
 				// Nothing to log here. The failure has already been logged.
+			case errors.Is(err, pgbackrest.ErrWALNotFound):
+				// Normal end-of-archive condition, already logged at debug
+				// level. PostgreSQL uses the failure to stop recovery or
+				// fall back to streaming replication.
 			case errors.Is(err, ErrNoBackupConfigured):
 				contextLog.Debug("tried restoring WALs, but no backup was configured")
 			case errors.Is(err, ErrEndOfWALStreamReached):
@@ -138,6 +143,15 @@ func run(ctx context.Context, pgData string, podName string, args []string) erro
 		// This happens only if a CNPG-i plugin was able to restore
 		// the requested WAL.
 		return nil
+	}
+
+	// Restore from the cluster's own pgbackrest repository when configured,
+	// mirroring the dispatch in the WAL archiver. This serves pg_rewind
+	// (--restore-target-wal), replicas falling back to restore_command when
+	// streaming cannot provide a segment, and timeline history probing
+	// during promotion.
+	if shouldRestoreViaPgBackRest(cluster, podName) {
+		return restoreWALViaPgBackRest(ctx, cluster, walName, destinationPath)
 	}
 
 	recoverClusterName, recoverEnv, barmanConfiguration, err := GetRecoverConfiguration(cluster, podName)
@@ -251,6 +265,55 @@ func run(ctx context.Context, pgData string, podName string, args []string) erro
 		"downloadTotalTime", time.Since(downloadStartTime),
 		"totalTime", time.Since(startTime))
 
+	return nil
+}
+
+// shouldRestoreViaPgBackRest returns true when this WAL request must be served
+// from the cluster's own pgbackrest repository, mirroring the archiving
+// dispatch in pkg/management/postgres/archiver. The designated primary of a
+// replica cluster restores from the recovery source instead, which pgbackrest
+// support does not implement yet: that case keeps following the barman-cloud
+// path.
+func shouldRestoreViaPgBackRest(cluster *apiv1.Cluster, podName string) bool {
+	if cluster.IsReplica() && cluster.Status.CurrentPrimary == podName {
+		return false
+	}
+	return cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured()
+}
+
+// restoreWALViaPgBackRest fetches a single WAL segment (or timeline history
+// file) from the cluster's pgbackrest repository. pgbackrest provides its own
+// asynchronous prefetch (archive-async with archive-get-queue-max and a spool
+// on the PGDATA volume), so unlike the barman-cloud path there is no
+// wrapper-level spooling here.
+func restoreWALViaPgBackRest(ctx context.Context, cluster *apiv1.Cluster, walName, destinationPath string) error {
+	contextLog := log.FromContext(ctx)
+	startTime := time.Now()
+
+	// While suspended the cluster must leave no footprint in object storage
+	// and the stanza may not exist yet (e.g. warm-pool members): report "not
+	// found" so PostgreSQL moves on, mirroring the archive-push no-op in the
+	// archiver.
+	if cluster.IsPgBackRestSuspended() {
+		contextLog.Debug("pgbackrest is suspended, skipping WAL restore",
+			"walName", walName)
+		return pgbackrest.ErrWALNotFound
+	}
+
+	stanza := cluster.GetPgBackRestStanzaName()
+	if err := pgbackrest.ArchiveGet(ctx, stanza, walName, destinationPath); err != nil {
+		if errors.Is(err, pgbackrest.ErrWALNotFound) {
+			contextLog.Debug("WAL file not found in the pgbackrest repository",
+				"walName", walName,
+				"stanza", stanza)
+		}
+		return err
+	}
+
+	contextLog.Info("Restored WAL file via pgbackrest",
+		"walName", walName,
+		"stanza", stanza,
+		"totalTime", time.Since(startTime))
 	return nil
 }
 

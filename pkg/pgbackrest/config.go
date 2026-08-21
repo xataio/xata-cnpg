@@ -127,6 +127,12 @@ func generateBaseConfig(
 			return nil, fmt.Errorf("configuring GCS: %w", err)
 		}
 	}
+
+	if repo.Azure != nil {
+		if err := configureAzure(repo.Azure, global); err != nil {
+			return nil, fmt.Errorf("configuring Azure: %w", err)
+		}
+	}
 	if repo.Cipher != nil {
 		passphrase, err := resolveSecretKeyRef(ctx, k8sClient, namespace, &repo.Cipher.Passphrase)
 		if err != nil {
@@ -217,6 +223,11 @@ func WriteConfigFile(content, pgDataPath string) (bool, error) {
 	return true, nil
 }
 
+// keyTypeAuto is the pgbackrest key-type value that derives credentials from
+// the cloud provider's instance metadata (IAM role, workload identity, or
+// managed identity) instead of a static secret.
+const keyTypeAuto = "auto"
+
 // configureS3 sets S3-specific keys in the [global] section.
 func configureS3(
 	ctx context.Context,
@@ -239,7 +250,7 @@ func configureS3(
 	}
 
 	if s3.InheritFromIAMRole {
-		section.Key("repo1-s3-key-type").SetValue("auto")
+		section.Key("repo1-s3-key-type").SetValue(keyTypeAuto)
 	} else {
 		accessKey, err := resolveSecretKeyRef(ctx, k8sClient, namespace, s3.AccessKeyID)
 		if err != nil {
@@ -269,16 +280,45 @@ func configureGCS(gcs *apiv1.PgBackRestGCS, section *ini.Section) error {
 	if keyType == "" {
 		// pgbackrest defaults repo1-gcs-key-type to "service", so "auto"
 		// (workload identity / ADC) must be set explicitly.
-		keyType = "auto"
+		keyType = keyTypeAuto
 	}
 	section.Key("repo1-gcs-key-type").SetValue(keyType)
 
-	if keyType != "auto" {
+	if keyType != keyTypeAuto {
 		// The "service" and "token" key types need repo1-gcs-key to point at
 		// a file on disk holding the service account JSON or bearer token.
 		// Plumbing the KeyRef secret to a file on the pod is not wired up
 		// yet, so only "auto" is supported for now.
-		return fmt.Errorf("GCS key type %q is not supported yet, only \"auto\" is", keyType)
+		return fmt.Errorf("gcs key type %q is not supported yet, only \"auto\" is", keyType)
+	}
+
+	return nil
+}
+
+// configureAzure sets Azure-specific keys in the [global] section.
+func configureAzure(azure *apiv1.PgBackRestAzure, section *ini.Section) error {
+	section.Key("repo1-type").SetValue("azure")
+	section.Key("repo1-azure-account").SetValue(azure.Account)
+	section.Key("repo1-azure-container").SetValue(azure.Container)
+
+	if azure.Endpoint != "" {
+		section.Key("repo1-azure-endpoint").SetValue(azure.Endpoint)
+	}
+
+	keyType := azure.KeyType
+	if keyType == "" {
+		// pgbackrest defaults repo1-azure-key-type to "shared", so "auto"
+		// (managed identity via instance metadata, pgbackrest >= 2.58) must
+		// be set explicitly.
+		keyType = keyTypeAuto
+	}
+	section.Key("repo1-azure-key-type").SetValue(keyType)
+
+	if keyType != keyTypeAuto {
+		// The "shared" and "sas" key types need repo1-azure-key holding the
+		// account key or SAS token. Plumbing the KeyRef secret is not wired
+		// up yet, so only "auto" is supported for now.
+		return fmt.Errorf("azure key type %q is not supported yet, only \"auto\" is", keyType)
 	}
 
 	return nil

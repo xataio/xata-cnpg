@@ -2,19 +2,15 @@
 
 package v1
 
-import (
-	apiv1 "github.com/xataio/xata-cnpg/api/v1"
-)
-
 // PgBackRestRepositoryApplyConfiguration represents a declarative configuration of the PgBackRestRepository type for use
 // with apply.
 //
 // PgBackRestRepository defines the storage repository for pgbackrest.
 // Exactly one of s3, gcs, or azure must be specified.
 type PgBackRestRepositoryApplyConfiguration struct {
-	S3    *PgBackRestS3ApplyConfiguration  `json:"s3,omitempty"`
-	GCS   *PgBackRestGCSApplyConfiguration `json:"gcs,omitempty"`
-	Azure *apiv1.PgBackRestAzure           `json:"azure,omitempty"`
+	S3    *PgBackRestS3ApplyConfiguration    `json:"s3,omitempty"`
+	GCS   *PgBackRestGCSApplyConfiguration   `json:"gcs,omitempty"`
+	Azure *PgBackRestAzureApplyConfiguration `json:"azure,omitempty"`
 	// Cipher configures client-side encryption for this repository.
 	Cipher *PgBackRestCipherApplyConfiguration `json:"cipher,omitempty"`
 }
@@ -44,8 +40,8 @@ func (b *PgBackRestRepositoryApplyConfiguration) WithGCS(value *PgBackRestGCSApp
 // WithAzure sets the Azure field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Azure field is set to the value of the last call.
-func (b *PgBackRestRepositoryApplyConfiguration) WithAzure(value apiv1.PgBackRestAzure) *PgBackRestRepositoryApplyConfiguration {
-	b.Azure = &value
+func (b *PgBackRestRepositoryApplyConfiguration) WithAzure(value *PgBackRestAzureApplyConfiguration) *PgBackRestRepositoryApplyConfiguration {
+	b.Azure = value
 	return b
 }
 

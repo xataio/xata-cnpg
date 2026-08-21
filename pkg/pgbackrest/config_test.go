@@ -591,6 +591,109 @@ func TestGenerateBaseConfig_GCSUnsupportedKeyTypes(t *testing.T) {
 	}
 }
 
+func TestGenerateBaseConfig_Azure(t *testing.T) {
+	tests := map[string]struct {
+		azure      *apiv1.PgBackRestAzure
+		wantKeys   map[string]string
+		absentKeys []string
+	}{
+		"defaults to auto key type": {
+			azure: &apiv1.PgBackRestAzure{
+				Account:   "testaccount",
+				Container: "backups",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":            "azure",
+				"repo1-azure-account":   "testaccount",
+				"repo1-azure-container": "backups",
+				"repo1-azure-key-type":  "auto",
+			},
+			absentKeys: []string{"repo1-azure-endpoint"},
+		},
+		"explicit auto key type": {
+			azure: &apiv1.PgBackRestAzure{
+				Account:   "testaccount",
+				Container: "backups",
+				KeyType:   "auto",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":            "azure",
+				"repo1-azure-account":   "testaccount",
+				"repo1-azure-container": "backups",
+				"repo1-azure-key-type":  "auto",
+			},
+		},
+		"endpoint override": {
+			azure: &apiv1.PgBackRestAzure{
+				Account:   "testaccount",
+				Container: "backups",
+				Endpoint:  "azurite:10000",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":            "azure",
+				"repo1-azure-account":   "testaccount",
+				"repo1-azure-container": "backups",
+				"repo1-azure-key-type":  "auto",
+				"repo1-azure-endpoint":  "azurite:10000",
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			repo := &apiv1.PgBackRestRepository{Azure: tt.azure}
+
+			cfg, err := generateBaseConfig(
+				context.Background(), nil, "default",
+				repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+			)
+			if err != nil {
+				t.Fatalf("generateBaseConfig failed: %v", err)
+			}
+
+			global := cfg.Section("global")
+			for key, expected := range tt.wantKeys {
+				if v := global.Key(key).String(); v != expected {
+					t.Errorf("expected %s=%s, got %q", key, expected, v)
+				}
+			}
+			for _, key := range tt.absentKeys {
+				if global.HasKey(key) {
+					t.Errorf("%s should not be set", key)
+				}
+			}
+			for _, key := range global.KeyStrings() {
+				if strings.HasPrefix(key, "repo1-s3-") || strings.HasPrefix(key, "repo1-gcs-") {
+					t.Errorf("no repo1-s3-* or repo1-gcs-* keys expected for an Azure repository, found %s", key)
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateBaseConfig_AzureUnsupportedKeyTypes(t *testing.T) {
+	for _, keyType := range []string{"shared", "sas"} {
+		t.Run(keyType, func(t *testing.T) {
+			repo := &apiv1.PgBackRestRepository{
+				Azure: &apiv1.PgBackRestAzure{
+					Account:   "testaccount",
+					Container: "backups",
+					KeyType:   keyType,
+					KeyRef:    &apiv1.SecretKeySelector{},
+				},
+			}
+
+			_, err := generateBaseConfig(
+				context.Background(), nil, "default",
+				repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+			)
+			if err == nil {
+				t.Fatalf("expected an error for unsupported key type %q", keyType)
+			}
+		})
+	}
+}
+
 func TestGenerateBaseConfig_RepositoryCipher(t *testing.T) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{

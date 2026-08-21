@@ -57,6 +57,21 @@ const (
 	backupRetryInitialDelay = 10 * time.Second
 )
 
+// appliedConfigWaitTimeout and appliedConfigWaitInterval control how long the
+// backup waits for the instance reconciler to apply the pgbackrest
+// configuration of the Cluster generation the backup was computed from. The
+// stanza on the command line comes from a fresh Cluster read, while pgbackrest
+// reads everything else from the config file the reconciler writes; running
+// before the reconciler catches up fails with "backup command requires option:
+// pg1-path" (e.g. right after warm-pool adoption renames the stanza). The
+// timeout is a backstop for a permanently failing reconciler (e.g. a broken
+// secret reference); expiry means "the reconciler has not applied this spec",
+// never plain lag.
+var (
+	appliedConfigWaitTimeout  = 5 * time.Minute
+	appliedConfigWaitInterval = 2 * time.Second
+)
+
 // PgBackRestBackupCommand represents a pgbackrest backup being executed.
 type PgBackRestBackupCommand struct {
 	Cluster  *apiv1.Cluster
@@ -158,6 +173,14 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	progressCtx, stopProgress := context.WithCancel(ctx)
 	go b.pollProgress(progressCtx)
 
+	if err := b.waitForAppliedConfig(ctx); err != nil {
+		stopProgress()
+		b.Log.Error(err, "Backup failed: pgbackrest configuration not applied")
+		b.Recorder.Event(b.Backup, "Normal", "Failed", "pgbackrest configuration not applied after waiting")
+		_ = status.FlagBackupAsFailed(ctx, b.Client, b.Backup, b.Cluster, err)
+		return
+	}
+
 	stanza := b.Cluster.GetPgBackRestStanzaName()
 
 	if err := b.waitForStanza(ctx, stanza); err != nil {
@@ -204,6 +227,43 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 				"err", err.Error())
 		} else {
 			b.Log.Error(err, "Can't update the cluster with the completed backup data")
+		}
+	}
+}
+
+// waitForAppliedConfig waits until the instance reconciler has applied the
+// pgbackrest configuration for a Cluster generation at least as new as the
+// one this backup was computed from. This is an exact readiness signal: the
+// backup's --stanza flag and the config file pgbackrest reads then describe
+// the same spec. On timeout the reconciler is genuinely stuck (it never
+// applied this spec), and the error says so together with the generation it
+// last applied.
+func (b *PgBackRestBackupCommand) waitForAppliedConfig(ctx context.Context) error {
+	target := b.Cluster.Generation
+	deadline := time.Now().Add(appliedConfigWaitTimeout)
+
+	logged := false
+	for {
+		applied := b.Instance.PgBackRestAppliedGeneration.Load()
+		if applied >= target {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf(
+				"pgbackrest configuration for cluster generation %d not applied after %s "+
+					"(last applied generation %d): the instance reconciler is not applying the spec",
+				target, appliedConfigWaitTimeout, applied)
+		}
+		if !logged {
+			b.Log.Info("Waiting for the pgbackrest configuration to be applied",
+				"targetGeneration", target, "appliedGeneration", applied)
+			logged = true
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(appliedConfigWaitInterval):
 		}
 	}
 }

@@ -74,6 +74,30 @@ type BackupInfo struct {
 	Annotation map[string]string `json:"annotation,omitempty"`
 }
 
+// pgbackrest info status codes (status.code in the JSON output), from
+// src/command/info/info.c in the pgbackrest sources.
+const (
+	// StanzaStatusOK means the stanza exists and has at least one backup.
+	StanzaStatusOK = 0
+	// StanzaStatusMissingPath means the stanza does not exist in the
+	// repository at all.
+	StanzaStatusMissingPath = 1
+	// StanzaStatusNoValidBackups means the stanza exists but holds no
+	// backups yet — the normal state right before the first backup.
+	StanzaStatusNoValidBackups = 2
+	// StanzaStatusMissingData means the stanza path exists but the stanza
+	// metadata (archive.info/backup.info) is missing.
+	StanzaStatusMissingData = 3
+)
+
+// StanzaMissing reports whether the stanza has not been created in the
+// repository yet. The info command reports this state in status.code with
+// exit code 0, so callers must check it explicitly — a nil error from Info
+// alone does not mean the stanza exists.
+func (s *StanzaInfo) StanzaMissing() bool {
+	return s.Status.Code == StanzaStatusMissingPath || s.Status.Code == StanzaStatusMissingData
+}
+
 // LatestBackup returns the last backup in the list, or nil if empty.
 func (s *StanzaInfo) LatestBackup() *BackupInfo {
 	if len(s.Backup) == 0 {

@@ -333,8 +333,31 @@ type PgBackRestGCS struct {
 }
 
 // PgBackRestAzure defines the Azure Blob Storage configuration for pgbackrest.
-// TODO: implement in a future iteration
-type PgBackRestAzure struct{}
+// +kubebuilder:validation:XValidation:rule="(has(self.keyType) && (self.keyType == 'shared' || self.keyType == 'sas')) == has(self.keyRef)",message="keyRef must be set when keyType is shared or sas, and must not be set when keyType is auto"
+type PgBackRestAzure struct {
+	// The Azure storage account name
+	Account string `json:"account"`
+	// The Azure Blob Storage container name
+	Container string `json:"container"`
+	// KeyType selects the authentication method. "auto" requests a
+	// managed-identity token from instance metadata (the AKS path,
+	// pgbackrest >= 2.58). "shared" reads the storage account shared key
+	// from KeyRef. "sas" reads a shared access signature token from KeyRef.
+	// +optional
+	// +kubebuilder:validation:Enum=auto;shared;sas
+	// +kubebuilder:default:=auto
+	KeyType string `json:"keyType,omitempty"`
+	// The Azure Blob Storage endpoint, overriding the default
+	// <account>.blob.core.windows.net. Rarely needed, mostly for testing
+	// against Azurite.
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+	// The reference to a Secret holding the storage account shared key when
+	// keyType is "shared", or a SAS token when keyType is "sas". Required
+	// for those key types, must be unset for "auto".
+	// +optional
+	KeyRef *SecretKeySelector `json:"keyRef,omitempty"`
+}
 
 // BackupSpec defines the desired state of Backup
 // +kubebuilder:validation:XValidation:rule="oldSelf == self",message="BackupSpec is immutable once set"

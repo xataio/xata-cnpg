@@ -1518,7 +1518,56 @@ spec:
                           azure:
                             description: PgBackRestAzure defines the Azure Blob Storage
                               configuration for pgbackrest.
+                            properties:
+                              account:
+                                description: The Azure storage account name
+                                type: string
+                              container:
+                                description: The Azure Blob Storage container name
+                                type: string
+                              endpoint:
+                                description: |-
+                                  The Azure Blob Storage endpoint, overriding the default
+                                  <account>.blob.core.windows.net. Rarely needed, mostly for testing
+                                  against Azurite.
+                                type: string
+                              keyRef:
+                                description: |-
+                                  The reference to a Secret holding the storage account shared key when
+                                  keyType is "shared", or a SAS token when keyType is "sas". Required
+                                  for those key types, must be unset for "auto".
+                                properties:
+                                  key:
+                                    description: The key to select
+                                    type: string
+                                  name:
+                                    description: Name of the referent.
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              keyType:
+                                default: auto
+                                description: |-
+                                  KeyType selects the authentication method. "auto" requests a
+                                  managed-identity token from instance metadata (the AKS path,
+                                  pgbackrest >= 2.58). "shared" reads the storage account shared key
+                                  from KeyRef. "sas" reads a shared access signature token from KeyRef.
+                                enum:
+                                - auto
+                                - shared
+                                - sas
+                                type: string
+                            required:
+                            - account
+                            - container
                             type: object
+                            x-kubernetes-validations:
+                            - message: keyRef must be set when keyType is shared or
+                                sas, and must not be set when keyType is auto
+                              rule: (has(self.keyType) && (self.keyType == 'shared'
+                                || self.keyType == 'sas')) == has(self.keyRef)
                           cipher:
                             description: Cipher configures client-side encryption
                               for this repository.
@@ -3426,7 +3475,56 @@ spec:
                             azure:
                               description: PgBackRestAzure defines the Azure Blob
                                 Storage configuration for pgbackrest.
+                              properties:
+                                account:
+                                  description: The Azure storage account name
+                                  type: string
+                                container:
+                                  description: The Azure Blob Storage container name
+                                  type: string
+                                endpoint:
+                                  description: |-
+                                    The Azure Blob Storage endpoint, overriding the default
+                                    <account>.blob.core.windows.net. Rarely needed, mostly for testing
+                                    against Azurite.
+                                  type: string
+                                keyRef:
+                                  description: |-
+                                    The reference to a Secret holding the storage account shared key when
+                                    keyType is "shared", or a SAS token when keyType is "sas". Required
+                                    for those key types, must be unset for "auto".
+                                  properties:
+                                    key:
+                                      description: The key to select
+                                      type: string
+                                    name:
+                                      description: Name of the referent.
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                keyType:
+                                  default: auto
+                                  description: |-
+                                    KeyType selects the authentication method. "auto" requests a
+                                    managed-identity token from instance metadata (the AKS path,
+                                    pgbackrest >= 2.58). "shared" reads the storage account shared key
+                                    from KeyRef. "sas" reads a shared access signature token from KeyRef.
+                                  enum:
+                                  - auto
+                                  - shared
+                                  - sas
+                                  type: string
+                              required:
+                              - account
+                              - container
                               type: object
+                              x-kubernetes-validations:
+                              - message: keyRef must be set when keyType is shared
+                                  or sas, and must not be set when keyType is auto
+                                rule: (has(self.keyType) && (self.keyType == 'shared'
+                                  || self.keyType == 'sas')) == has(self.keyRef)
                             cipher:
                               description: Cipher configures client-side encryption
                                 for this repository.

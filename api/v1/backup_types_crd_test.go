@@ -80,4 +80,24 @@ var _ = Describe("PgBackRest repository CRD schema", func() {
 		Expect(gcs.XValidations[0].Rule).To(Equal(
 			"(has(self.keyType) && (self.keyType == 'service' || self.keyType == 'token')) == has(self.keyRef)"))
 	})
+
+	It("describes the azure repository", func() {
+		azure := loadRepositorySchema().Properties["azure"]
+
+		Expect(azure.Required).To(ConsistOf("account", "container"))
+		Expect(azure.Properties).To(HaveKey("account"))
+		Expect(azure.Properties).To(HaveKey("container"))
+		Expect(azure.Properties).To(HaveKey("endpoint"))
+		Expect(azure.Properties).To(HaveKey("keyRef"))
+
+		keyType := azure.Properties["keyType"]
+		Expect(keyType.Enum).To(HaveLen(3))
+		Expect(keyType.Default.Raw).To(BeEquivalentTo(`"auto"`))
+
+		// keyRef is what carries credentials for the non-auto key types, so
+		// the schema must reject auto+keyRef and shared/sas without keyRef.
+		Expect(azure.XValidations).To(HaveLen(1))
+		Expect(azure.XValidations[0].Rule).To(Equal(
+			"(has(self.keyType) && (self.keyType == 'shared' || self.keyType == 'sas')) == has(self.keyRef)"))
+	})
 })

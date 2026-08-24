@@ -213,11 +213,18 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 // triggered at cluster adoption (ScheduledBackup immediate:true) can race it.
 // Waiting here instead of retrying the backup avoids wasting time on a backup
 // that would fail immediately due to a missing stanza or lock contention.
+//
+// A nil error from Info is not enough: pgbackrest info exits 0 for a stanza
+// that does not exist and reports the absence only in status.code, so the
+// status is checked explicitly.
 func (b *PgBackRestBackupCommand) waitForStanza(ctx context.Context, stanza string) error {
 	for attempt := 1; attempt <= stanzaWaitAttempts; attempt++ {
-		_, err := pgbackrest.Info(ctx, stanza)
+		info, err := pgbackrest.Info(ctx, stanza)
 		if err == nil {
-			return nil
+			if !info.StanzaMissing() {
+				return nil
+			}
+			err = fmt.Errorf("stanza status %d (%s)", info.Status.Code, info.Status.Message)
 		}
 
 		b.Log.Info("Waiting for stanza to be ready",

@@ -1193,6 +1193,10 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		}
 	}
 
+	// Publish the generation whose pgbackrest configuration is now fully
+	// applied on this pod. Backups wait on this before running pgbackrest.
+	r.instance.PgBackRestAppliedGeneration.Store(cluster.Generation)
+
 	return nil
 }
 

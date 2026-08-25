@@ -1151,6 +1151,14 @@ func (r *ClusterReconciler) createPrimaryInstance(
 		if err != nil {
 			return ctrl.Result{}, err
 		}
+		if metadata == nil {
+			r.Recorder.Eventf(cluster, "Warning", "SnapshotSourceNotFound",
+				"Cannot create the primary instance: volume snapshot source %s (%s) does not exist",
+				recoverySnapshot.DataSource.Name, recoverySnapshot.DataSource.Kind)
+			return ctrl.Result{}, fmt.Errorf(
+				"volume snapshot source %s (%s) not found while creating the primary instance",
+				recoverySnapshot.DataSource.Name, recoverySnapshot.DataSource.Kind)
+		}
 		r.Recorder.Event(cluster, "Normal", "CreatingInstance", "Primary instance (from volumeSnapshots)")
 		job = specs.CreatePrimaryJobViaRestoreSnapshot(*cluster, nodeSerial, metadata, backup)
 

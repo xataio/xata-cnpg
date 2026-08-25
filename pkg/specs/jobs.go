@@ -186,6 +186,10 @@ func CreatePrimaryJobViaRestoreSnapshot(
 		"restoresnapshot",
 	}
 
+	if object == nil {
+		object = &metav1.ObjectMeta{}
+	}
+
 	if object.Annotations[utils.BackupLabelFileAnnotationName] != "" {
 		flag := fmt.Sprintf("--backuplabel=%s", object.Annotations[utils.BackupLabelFileAnnotationName])
 		initCommand = append(initCommand, flag)

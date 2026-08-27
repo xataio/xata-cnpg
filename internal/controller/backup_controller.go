@@ -232,6 +232,56 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	return hookResult.Result, hookResult.Err
 }
 
+// backupPendingSinceAnnotation records when a backup started waiting for a
+// usable target pod. waitForBackupPod sets it and bounds the wait;
+// startBackupManagedByInstance clears it once the pod is usable, so every
+// interruption gets a fresh budget.
+const backupPendingSinceAnnotation = "xata.io/backupPendingSince"
+
+// backupPodWaitTimeout bounds how long a backup waits for its target pod
+// (missing, not ready, or terminating) before it is flagged as failed. Node
+// drains and pod reschedules complete well within this budget; exceeding it
+// means the pod is genuinely stuck.
+const backupPodWaitTimeout = 15 * time.Minute
+
+// waitForBackupPod marks the backup as pending and requeues in 30 seconds.
+// When the backup has been waiting longer than backupPodWaitTimeout, it is
+// flagged as failed instead.
+func (r *BackupReconciler) waitForBackupPod(
+	ctx context.Context,
+	backup *apiv1.Backup,
+	origBackup *apiv1.Backup,
+	cluster *apiv1.Cluster,
+	reason string,
+) (*ctrl.Result, error) {
+	now := time.Now()
+
+	since, err := time.Parse(time.RFC3339, backup.Annotations[backupPendingSinceAnnotation])
+	if err != nil {
+		// No valid marker: this is the first wait iteration.
+		since = now
+		if backup.Annotations == nil {
+			backup.Annotations = map[string]string{}
+		}
+		backup.Annotations[backupPendingSinceAnnotation] = now.Format(time.RFC3339)
+		if err := r.Patch(ctx, backup, client.MergeFrom(origBackup)); err != nil {
+			return nil, err
+		}
+	}
+
+	if now.Sub(since) > backupPodWaitTimeout {
+		_ = resourcestatus.FlagBackupAsFailed(ctx, r.Client, backup, cluster,
+			fmt.Errorf("target pod not usable after waiting %s: %s", backupPodWaitTimeout, reason))
+		return &ctrl.Result{}, nil
+	}
+
+	backup.Status.Phase = apiv1.BackupPhasePending
+	if err := r.Status().Patch(ctx, backup, client.MergeFrom(origBackup)); err != nil {
+		return nil, err
+	}
+	return &ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
 func (r *BackupReconciler) startBackupManagedByInstance(
 	ctx context.Context,
 	cluster apiv1.Cluster,
@@ -248,11 +298,7 @@ func (r *BackupReconciler) startBackupManagedByInstance(
 			"Couldn't find target pod %s, will retry in 30 seconds", cluster.Status.TargetPrimary)
 		contextLogger.Info("Couldn't find target pod, will retry in 30 seconds", "target",
 			cluster.Status.TargetPrimary)
-		backup.Status.Phase = apiv1.BackupPhasePending
-		if err := r.Status().Patch(ctx, &backup, client.MergeFrom(origBackup)); err != nil {
-			return nil, err
-		}
-		return &ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return r.waitForBackupPod(ctx, &backup, origBackup, &cluster, "target pod not found")
 	}
 
 	if err != nil {
@@ -264,15 +310,23 @@ func (r *BackupReconciler) startBackupManagedByInstance(
 
 	contextLogger.Debug("Found pod for backup", "pod", pod.Name)
 
-	if !utils.IsPodReady(*pod) {
+	// A pod with a deletion timestamp can keep its Ready condition for a few
+	// seconds while terminating (e.g. during a node drain); exec'ing into it
+	// fails with "container not found", so it must wait like a not-ready pod.
+	if !utils.IsPodReady(*pod) || !pod.DeletionTimestamp.IsZero() {
 		contextLogger.Info("Backup target is not ready, will retry in 30 seconds", "target", pod.Name)
-		backup.Status.Phase = apiv1.BackupPhasePending
 		r.Recorder.Eventf(&backup, "Warning", "BackupPending", "Backup target pod not ready: %s",
-			cluster.Status.TargetPrimary)
-		if err := r.Status().Patch(ctx, &backup, client.MergeFrom(origBackup)); err != nil {
+			pod.Name)
+		return r.waitForBackupPod(ctx, &backup, origBackup, &cluster, "target pod not ready")
+	}
+
+	// The pod is usable: clear the wait marker, so that a later interruption
+	// starts a fresh wait budget.
+	if _, waiting := backup.Annotations[backupPendingSinceAnnotation]; waiting {
+		delete(backup.Annotations, backupPendingSinceAnnotation)
+		if err := r.Patch(ctx, &backup, client.MergeFrom(origBackup)); err != nil {
 			return nil, err
 		}
-		return &ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
 	contextLogger.Info("Starting backup",

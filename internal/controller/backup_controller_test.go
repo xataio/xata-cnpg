@@ -682,7 +682,7 @@ var _ = Describe("waitForBackupPod", func() {
 		return backup
 	}
 
-	BeforeEach(func(ctx context.Context) {
+	BeforeEach(func() {
 		env = buildTestEnvironment()
 		ns = newFakeNamespace(env.client)
 		cluster = newFakeCNPGCluster(env.client, ns)

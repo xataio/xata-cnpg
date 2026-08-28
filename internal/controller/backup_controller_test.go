@@ -664,3 +664,69 @@ var _ = Describe("getCluster when the target cluster is missing", func() {
 		Expect(stored.Status.Phase).To(BeEmpty())
 	})
 })
+
+var _ = Describe("waitForBackupPod", func() {
+	var env *testingEnvironment
+	var ns string
+	var cluster *apiv1.Cluster
+
+	newBackup := func(ctx context.Context, name string) *apiv1.Backup {
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: cluster.Name},
+				Method:  apiv1.BackupMethodPgBackRest,
+			},
+		}
+		Expect(env.client.Create(ctx, backup)).To(Succeed())
+		return backup
+	}
+
+	BeforeEach(func() {
+		env = buildTestEnvironment()
+		ns = newFakeNamespace(env.client)
+		cluster = newFakeCNPGCluster(env.client, ns)
+	})
+
+	It("sets the wait marker and requeues on the first iteration", func(ctx context.Context) {
+		backup := newBackup(ctx, "backup-wait-first")
+
+		res, err := env.backupReconciler.waitForBackupPod(
+			ctx, backup, backup.DeepCopy(), cluster, "target pod not found")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(res.RequeueAfter).To(Equal(30 * time.Second))
+
+		var stored apiv1.Backup
+		Expect(env.client.Get(ctx, client.ObjectKeyFromObject(backup), &stored)).To(Succeed())
+		Expect(stored.Status.Phase).To(BeEquivalentTo(apiv1.BackupPhasePending))
+		Expect(stored.Annotations[backupPendingSinceAnnotation]).ToNot(BeEmpty())
+	})
+
+	It("keeps requeueing while the budget is not exhausted", func(ctx context.Context) {
+		backup := newBackup(ctx, "backup-wait-again")
+		backup.Annotations = map[string]string{
+			backupPendingSinceAnnotation: time.Now().Add(-time.Minute).Format(time.RFC3339),
+		}
+
+		res, err := env.backupReconciler.waitForBackupPod(
+			ctx, backup, backup.DeepCopy(), cluster, "target pod not ready")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(res.RequeueAfter).To(Equal(30 * time.Second))
+	})
+
+	It("flags the backup as failed when the budget is exhausted", func(ctx context.Context) {
+		backup := newBackup(ctx, "backup-wait-expired")
+		backup.Annotations = map[string]string{
+			backupPendingSinceAnnotation: time.Now().Add(-backupPodWaitTimeout - time.Minute).Format(time.RFC3339),
+		}
+
+		res, err := env.backupReconciler.waitForBackupPod(
+			ctx, backup, backup.DeepCopy(), cluster, "target pod not ready")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(res.RequeueAfter).To(BeZero())
+
+		var stored apiv1.Backup
+		Expect(env.client.Get(ctx, client.ObjectKeyFromObject(backup), &stored)).To(Succeed())
+		Expect(stored.Status.Phase).To(BeEquivalentTo(apiv1.BackupPhaseFailed))
+	})
+})

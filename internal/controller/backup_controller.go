@@ -33,6 +33,7 @@ import (
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -232,6 +233,61 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	return hookResult.Result, hookResult.Err
 }
 
+// backupPendingSinceAnnotation records when a backup started waiting for a
+// usable target pod. waitForBackupPod sets it and bounds the wait;
+// startBackupManagedByInstance clears it once the pod is usable, so every
+// interruption gets a fresh budget.
+const backupPendingSinceAnnotation = "xata.io/backupPendingSince"
+
+// backupPodWaitTimeout bounds how long a backup waits for its target pod
+// (missing, not ready, or terminating) before it is flagged as failed. Node
+// drains and pod reschedules complete well within this budget; exceeding it
+// means the pod is genuinely stuck.
+const backupPodWaitTimeout = 15 * time.Minute
+
+// errBackupPodUnavailable reports that the backup exec failed and the target
+// pod is not usable (missing, terminating, or not ready). The backup must
+// wait for the pod and retry instead of failing.
+var errBackupPodUnavailable = errors.New("backup target pod is not usable")
+
+// waitForBackupPod marks the backup as pending and requeues in 30 seconds.
+// When the backup has been waiting longer than backupPodWaitTimeout, it is
+// flagged as failed instead.
+func (r *BackupReconciler) waitForBackupPod(
+	ctx context.Context,
+	backup *apiv1.Backup,
+	origBackup *apiv1.Backup,
+	cluster *apiv1.Cluster,
+	reason string,
+) (*ctrl.Result, error) {
+	now := time.Now()
+
+	since, err := time.Parse(time.RFC3339, backup.Annotations[backupPendingSinceAnnotation])
+	if err != nil {
+		// No valid marker: this is the first wait iteration.
+		since = now
+		if backup.Annotations == nil {
+			backup.Annotations = map[string]string{}
+		}
+		backup.Annotations[backupPendingSinceAnnotation] = now.Format(time.RFC3339)
+		if err := r.Patch(ctx, backup, client.MergeFrom(origBackup)); err != nil {
+			return nil, err
+		}
+	}
+
+	if now.Sub(since) > backupPodWaitTimeout {
+		_ = resourcestatus.FlagBackupAsFailed(ctx, r.Client, backup, cluster,
+			fmt.Errorf("target pod not usable after waiting %s: %s", backupPodWaitTimeout, reason))
+		return &ctrl.Result{}, nil
+	}
+
+	backup.Status.Phase = apiv1.BackupPhasePending
+	if err := r.Status().Patch(ctx, backup, client.MergeFrom(origBackup)); err != nil {
+		return nil, err
+	}
+	return &ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
 func (r *BackupReconciler) startBackupManagedByInstance(
 	ctx context.Context,
 	cluster apiv1.Cluster,
@@ -248,11 +304,7 @@ func (r *BackupReconciler) startBackupManagedByInstance(
 			"Couldn't find target pod %s, will retry in 30 seconds", cluster.Status.TargetPrimary)
 		contextLogger.Info("Couldn't find target pod, will retry in 30 seconds", "target",
 			cluster.Status.TargetPrimary)
-		backup.Status.Phase = apiv1.BackupPhasePending
-		if err := r.Status().Patch(ctx, &backup, client.MergeFrom(origBackup)); err != nil {
-			return nil, err
-		}
-		return &ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return r.waitForBackupPod(ctx, &backup, origBackup, &cluster, "target pod not found")
 	}
 
 	if err != nil {
@@ -264,15 +316,23 @@ func (r *BackupReconciler) startBackupManagedByInstance(
 
 	contextLogger.Debug("Found pod for backup", "pod", pod.Name)
 
-	if !utils.IsPodReady(*pod) {
+	// A pod with a deletion timestamp can keep its Ready condition for a few
+	// seconds while terminating (e.g. during a node drain); exec'ing into it
+	// fails with "container not found", so it must wait like a not-ready pod.
+	if !utils.IsPodReady(*pod) || !pod.DeletionTimestamp.IsZero() {
 		contextLogger.Info("Backup target is not ready, will retry in 30 seconds", "target", pod.Name)
-		backup.Status.Phase = apiv1.BackupPhasePending
 		r.Recorder.Eventf(&backup, "Warning", "BackupPending", "Backup target pod not ready: %s",
-			cluster.Status.TargetPrimary)
-		if err := r.Status().Patch(ctx, &backup, client.MergeFrom(origBackup)); err != nil {
+			pod.Name)
+		return r.waitForBackupPod(ctx, &backup, origBackup, &cluster, "target pod not ready")
+	}
+
+	// The pod is usable: clear the wait marker, so that a later interruption
+	// starts a fresh wait budget.
+	if _, waiting := backup.Annotations[backupPendingSinceAnnotation]; waiting {
+		delete(backup.Annotations, backupPendingSinceAnnotation)
+		if err := r.Patch(ctx, &backup, client.MergeFrom(origBackup)); err != nil {
 			return nil, err
 		}
-		return &ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
 	contextLogger.Info("Starting backup",
@@ -284,6 +344,11 @@ func (r *BackupReconciler) startBackupManagedByInstance(
 
 	// This backup can be started
 	if err := startInstanceManagerBackup(ctx, r.Client, &backup, pod, &cluster); err != nil {
+		if errors.Is(err, errBackupPodUnavailable) {
+			r.Recorder.Eventf(&backup, "Warning", "BackupPending",
+				"Backup target pod %s became unusable, will retry in 30 seconds", pod.Name)
+			return r.waitForBackupPod(ctx, &backup, origBackup, &cluster, "target pod became unusable")
+		}
 		r.Recorder.Eventf(&backup, "Warning", "Error", "Backup exit with error %v", err)
 		_ = resourcestatus.FlagBackupAsFailed(ctx, r.Client, &backup, &cluster,
 			fmt.Errorf("encountered an error while taking the backup: %w", err))
@@ -860,6 +925,19 @@ func startInstanceManagerBackup(
 		return execErr
 	})
 	if err != nil {
+		// The exec can fail because the pod died between the usability check
+		// and the exec (e.g. a node drain). Re-check the pod: when it is not
+		// usable anymore, the caller must wait and retry instead of failing
+		// the backup. A failed exec started nothing, so a retry is safe.
+		var livingPod corev1.Pod
+		podErr := client.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}, &livingPod)
+		if apierrs.IsNotFound(podErr) ||
+			(podErr == nil && (!utils.IsPodReady(livingPod) || !livingPod.DeletionTimestamp.IsZero())) {
+			log.FromContext(ctx).Info("Backup exec failed and the target pod is not usable, will retry",
+				"pod", pod.Name, "err", err.Error())
+			return errBackupPodUnavailable
+		}
+
 		log.FromContext(ctx).Error(err, "executing backup", "stdout", stdout, "stderr", stderr)
 		setCommandErr := func(backup *apiv1.Backup) {
 			backup.Status.CommandError = fmt.Sprintf("with stderr: %s, with stdout: %s", stderr, stdout)

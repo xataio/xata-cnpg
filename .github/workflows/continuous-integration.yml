@@ -689,7 +689,9 @@ jobs:
   # XATA: Dispatch published charts to infra-new after buildx completes.
   deploy:
     if: >-
-      github.event_name == 'push'
+      !cancelled()
+      && needs.buildx.result == 'success'
+      && github.event_name == 'push'
       && github.ref_name == needs.buildx.outputs.deploy_branch
     needs: buildx
     uses: ./.github/workflows/sync-charts.yml
@@ -703,7 +705,9 @@ jobs:
   # XATA: Same-repository preview dispatch only, after artifact publication.
   preview:
     if: >-
-      github.event_name == 'pull_request'
+      !cancelled()
+      && needs.buildx.result == 'success'
+      && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository
       && github.event.pull_request.base.ref == needs.buildx.outputs.deploy_branch
       && contains(github.event.pull_request.labels.*.name, 'preview')

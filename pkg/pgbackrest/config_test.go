@@ -747,12 +747,13 @@ func TestConfigureReplicaStanza(t *testing.T) {
 		key      string
 		expected string
 	}{
-		{"pg1-host", "pg1-host", "test-cluster-rw"},
-		{"pg1-host-type", "pg1-host-type", "tls"},
-		{"pg1-host-ca-file", "pg1-host-ca-file", "/controller/certificates/server-ca.crt"},
-		{"pg1-host-cert-file", "pg1-host-cert-file", "/controller/certificates/streaming_replica.crt"},
-		{"pg1-host-key-file", "pg1-host-key-file", "/controller/certificates/streaming_replica.key"},
+		{"pg1-path", "pg1-path", "/pgdata"},
 		{"pg2-path", "pg2-path", "/pgdata"},
+		{"pg2-host", "pg2-host", "test-cluster-rw"},
+		{"pg2-host-type", "pg2-host-type", "tls"},
+		{"pg2-host-ca-file", "pg2-host-ca-file", "/controller/certificates/server-ca.crt"},
+		{"pg2-host-cert-file", "pg2-host-cert-file", "/controller/certificates/streaming_replica.crt"},
+		{"pg2-host-key-file", "pg2-host-key-file", "/controller/certificates/streaming_replica.key"},
 	}
 
 	for _, tt := range tests {
@@ -761,6 +762,15 @@ func TestConfigureReplicaStanza(t *testing.T) {
 				t.Errorf("expected %s=%s, got %s", tt.key, tt.expected, v)
 			}
 		})
+	}
+
+	// pg1 must stay local: any pg1-host* key makes pgbackrest refuse to run
+	// archive-get/archive-push/restore on the replica (error 072), which
+	// breaks restore_command for standbys.
+	for _, key := range stanza.KeyStrings() {
+		if strings.HasPrefix(key, "pg1-host") {
+			t.Errorf("replica stanza must not set %s", key)
+		}
 	}
 }
 
@@ -846,7 +856,7 @@ func TestGenerateConfig_StanzaName(t *testing.T) {
 }
 
 // TestGenerateConfig_ReplicaStanzaUsesLiveClusterHost verifies that on a
-// replica the stanza section follows the stanza override, but pg1-host still
+// replica the stanza section follows the stanza override, but pg2-host still
 // points at the live cluster's -rw service (not the stanza name).
 func TestGenerateConfig_ReplicaStanzaUsesLiveClusterHost(t *testing.T) {
 	cluster := &apiv1.Cluster{
@@ -876,8 +886,55 @@ func TestGenerateConfig_ReplicaStanzaUsesLiveClusterHost(t *testing.T) {
 		t.Fatalf("parsing rendered config failed: %v", err)
 	}
 
-	if v := cfg.Section("branch-abc").Key("pg1-host").String(); v != "pool-cluster-xyz-rw" {
-		t.Errorf("expected pg1-host pool-cluster-xyz-rw (live cluster), got %q", v)
+	if v := cfg.Section("branch-abc").Key("pg2-host").String(); v != "pool-cluster-xyz-rw" {
+		t.Errorf("expected pg2-host pool-cluster-xyz-rw (live cluster), got %q", v)
+	}
+}
+
+// TestGenerateConfig_ReplicaKeepsPg1Local verifies that the rendered replica
+// configuration keeps pg1 as the local instance and puts the remote primary on
+// pg2. pgbackrest's archive-get, archive-push and restore refuse to run when
+// the default pg (pg1) has a pg-host set (error 072); with pg1-host on
+// replicas, standbys could never fetch WAL from the repository through
+// restore_command.
+func TestGenerateConfig_ReplicaKeepsPg1Local(t *testing.T) {
+	cluster := &apiv1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+		Spec: apiv1.ClusterSpec{
+			Backup: &apiv1.BackupConfiguration{
+				PgBackRest: &apiv1.PgBackRestConfiguration{
+					Repository: &apiv1.PgBackRestRepository{
+						S3: &apiv1.PgBackRestS3{
+							Bucket:             "test-bucket",
+							Region:             "us-east-1",
+							InheritFromIAMRole: true,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	content, err := GenerateConfig(context.Background(), nil, cluster, "/pgdata", false)
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+	cfg, err := ini.Load([]byte(content))
+	if err != nil {
+		t.Fatalf("parsing rendered config failed: %v", err)
+	}
+
+	stanza := cfg.Section(cluster.GetPgBackRestStanzaName())
+	if v := stanza.Key("pg1-path").String(); v != "/pgdata" {
+		t.Errorf("expected pg1-path /pgdata (local standby), got %q", v)
+	}
+	if v := stanza.Key("pg2-host").String(); v != "test-cluster-rw" {
+		t.Errorf("expected pg2-host test-cluster-rw (remote primary), got %q", v)
+	}
+	for _, key := range stanza.KeyStrings() {
+		if strings.HasPrefix(key, "pg1-host") {
+			t.Errorf("rendered replica stanza must not set %s", key)
+		}
 	}
 }
 

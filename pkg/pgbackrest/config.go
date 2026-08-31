@@ -39,7 +39,7 @@ import (
 // GenerateConfig builds a pgbackrest.conf INI configuration from the cluster
 // spec. It resolves S3 credentials from Kubernetes secrets.
 // isPrimary controls whether this pod gets replica-specific config for
-// backup-standby (pg1-host pointing to the primary via TLS).
+// backup-standby (pg2-host pointing to the primary via TLS).
 func GenerateConfig(
 	ctx context.Context,
 	k8sClient client.Client,
@@ -65,12 +65,12 @@ func GenerateConfig(
 	applyOptionDefaults(opts, cluster)
 	configureOptions(opts, cfg)
 
-	// On replicas, configure pg1 as the remote primary (via TLS) and pg2 as
-	// the local standby. This enables backup-standby: pgbackrest copies files
+	// On replicas, keep pg1 as the local standby and add pg2 as the remote
+	// primary (via TLS). This enables backup-standby: pgbackrest copies files
 	// locally from the replica while coordinating with the primary over TLS.
 	if !isPrimary {
 		// The section key is the stanza identity; the clusterName arg is the
-		// live cluster used to reach the primary (pg1-host: <name>-rw), so it
+		// live cluster used to reach the primary (pg2-host: <name>-rw), so it
 		// must stay the actual Cluster name even when the stanza is overridden.
 		configureReplicaStanza(cfg.Section(cluster.GetPgBackRestStanzaName()), cluster.Name, pgDataPath)
 	}
@@ -493,18 +493,23 @@ func resolveSecretKeyRef(
 }
 
 // configureReplicaStanza sets up the stanza section on a replica for
-// backup-standby mode. pg1 is the remote primary (accessed via TLS for
-// pg_backup_start/stop and remaining files), pg2 is the local standby
-// where the bulk of the file copy happens.
+// backup-standby mode. pg1 stays the local standby (pg1-path is already set
+// by generateBaseConfig), where the bulk of the file copy happens; pg2 is the
+// remote primary, reached via TLS for pg_backup_start/stop and the files that
+// must come from the primary.
+//
+// The local instance must be pg1: pgbackrest's archive-get, archive-push and
+// restore commands refuse to run when the default pg index (pg1) has a pg-host
+// set ("command must be run on the PostgreSQL host", error 072). With pg1-host
+// on replicas, restore_command could never fetch WAL from the repository. For
+// backup the index order is irrelevant: pgbackrest connects to every configured
+// pg and detects which one is the primary and which one is the standby.
 func configureReplicaStanza(stanza *ini.Section, clusterName string, pgDataPath string) {
-	// pg1 = remote primary (TLS connection for pg_backup_start/stop + remaining files)
-	// pg1-path is already set by generateBaseConfig — we add the host/TLS options.
-	stanza.Key("pg1-host").SetValue(clusterName + "-rw")
-	stanza.Key("pg1-host-type").SetValue("tls")
-	stanza.Key("pg1-host-ca-file").SetValue(postgres.ServerCACertificateLocation)
-	stanza.Key("pg1-host-cert-file").SetValue(postgres.StreamingReplicaCertificateLocation)
-	stanza.Key("pg1-host-key-file").SetValue(postgres.StreamingReplicaKeyLocation)
-
-	// pg2 = local standby (bulk file copy)
+	// pg2 = remote primary (TLS connection for pg_backup_start/stop + remaining files)
 	stanza.Key("pg2-path").SetValue(pgDataPath)
+	stanza.Key("pg2-host").SetValue(clusterName + "-rw")
+	stanza.Key("pg2-host-type").SetValue("tls")
+	stanza.Key("pg2-host-ca-file").SetValue(postgres.ServerCACertificateLocation)
+	stanza.Key("pg2-host-cert-file").SetValue(postgres.StreamingReplicaCertificateLocation)
+	stanza.Key("pg2-host-key-file").SetValue(postgres.StreamingReplicaKeyLocation)
 }

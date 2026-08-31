@@ -223,10 +223,33 @@ func WriteConfigFile(content, pgDataPath string) (bool, error) {
 	return true, nil
 }
 
-// keyTypeAuto is the pgbackrest key-type value that derives credentials from
-// the cloud provider's instance metadata (IAM role, workload identity, or
-// managed identity) instead of a static secret.
-const keyTypeAuto = "auto"
+const (
+	// keyTypeAuto derives credentials from the cloud provider's environment.
+	keyTypeAuto = "auto"
+	// keyTypeWebID exchanges the projected Kubernetes token through AWS STS.
+	keyTypeWebID = "web-id"
+
+	awsRoleARNEnv              = "AWS_ROLE_ARN"
+	awsWebIdentityTokenFileEnv = "AWS_WEB_IDENTITY_TOKEN_FILE"
+)
+
+// effectiveS3KeyType selects IRSA when EKS has injected the complete web
+// identity environment. Otherwise, automatic authentication retains its
+// instance-metadata behavior for backward compatibility.
+func effectiveS3KeyType(s3 *apiv1.PgBackRestS3) string {
+	keyType := s3.KeyType
+	if keyType == "" && s3.InheritFromIAMRole { //nolint:staticcheck // Compatibility with existing clusters.
+		keyType = keyTypeAuto
+	}
+
+	if keyType == keyTypeAuto &&
+		os.Getenv(awsRoleARNEnv) != "" &&
+		os.Getenv(awsWebIdentityTokenFileEnv) != "" {
+		return keyTypeWebID
+	}
+
+	return keyType
+}
 
 // configureS3 sets S3-specific keys in the [global] section.
 func configureS3(
@@ -249,12 +272,10 @@ func configureS3(
 		section.Key("repo1-s3-endpoint").SetValue("s3." + s3.Region + ".amazonaws.com")
 	}
 
-	switch {
-	case s3.KeyType != "":
-		section.Key("repo1-s3-key-type").SetValue(s3.KeyType)
-	case s3.InheritFromIAMRole: //nolint:staticcheck // Compatibility with existing clusters.
-		section.Key("repo1-s3-key-type").SetValue(keyTypeAuto)
-	default:
+	keyType := effectiveS3KeyType(s3)
+	if keyType != "" {
+		section.Key("repo1-s3-key-type").SetValue(keyType)
+	} else {
 		accessKey, err := resolveSecretKeyRef(ctx, k8sClient, namespace, s3.AccessKeyID)
 		if err != nil {
 			return fmt.Errorf("resolving S3 access key: %w", err)

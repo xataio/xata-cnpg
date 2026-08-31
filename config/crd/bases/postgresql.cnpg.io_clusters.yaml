@@ -1670,16 +1670,19 @@ spec:
                                 type: string
                               inheritFromIAMRole:
                                 description: |-
-                                  Use instance-profile authentication when KeyType is empty.
+                                  Select automatic AWS authentication when KeyType is empty. IRSA is used
+                                  when its web identity environment is available; otherwise authentication
+                                  falls back to the instance profile.
 
                                   Deprecated: use KeyType instead. This field remains as a compatibility
-                                  fallback and selects pgbackrest repo1-s3-key-type=auto.
+                                  fallback and selects automatic AWS authentication.
                                 type: boolean
                               keyType:
                                 description: |-
                                   Selects the pgbackrest S3 credential provider. When set, this field takes
-                                  precedence over the deprecated InheritFromIAMRole field. Use auto for
-                                  instance-profile credentials and web-id for EKS IRSA.
+                                  precedence over the deprecated InheritFromIAMRole field. Auto prefers EKS
+                                  IRSA when its environment is available and otherwise uses the instance
+                                  profile. Web-id requires EKS IRSA.
                                 enum:
                                 - auto
                                 - web-id
@@ -3642,16 +3645,19 @@ spec:
                                   type: string
                                 inheritFromIAMRole:
                                   description: |-
-                                    Use instance-profile authentication when KeyType is empty.
+                                    Select automatic AWS authentication when KeyType is empty. IRSA is used
+                                    when its web identity environment is available; otherwise authentication
+                                    falls back to the instance profile.
 
                                     Deprecated: use KeyType instead. This field remains as a compatibility
-                                    fallback and selects pgbackrest repo1-s3-key-type=auto.
+                                    fallback and selects automatic AWS authentication.
                                   type: boolean
                                 keyType:
                                   description: |-
                                     Selects the pgbackrest S3 credential provider. When set, this field takes
-                                    precedence over the deprecated InheritFromIAMRole field. Use auto for
-                                    instance-profile credentials and web-id for EKS IRSA.
+                                    precedence over the deprecated InheritFromIAMRole field. Auto prefers EKS
+                                    IRSA when its environment is available and otherwise uses the instance
+                                    profile. Web-id requires EKS IRSA.
                                   enum:
                                   - auto
                                   - web-id

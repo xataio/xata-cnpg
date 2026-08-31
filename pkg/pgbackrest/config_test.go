@@ -524,6 +524,63 @@ func TestGenerateBaseConfig_IRSAWebIdentity(t *testing.T) {
 	}
 }
 
+func TestEffectiveS3KeyType(t *testing.T) {
+	tests := []struct {
+		name               string
+		keyType            string
+		inheritFromIAMRole bool
+		roleARN            string
+		tokenFile          string
+		want               string
+	}{
+		{name: "static credentials", want: ""},
+		{name: "legacy IAM uses IMDS", inheritFromIAMRole: true, want: keyTypeAuto},
+		{name: "explicit auto uses IMDS", keyType: keyTypeAuto, want: keyTypeAuto},
+		{
+			name:      "auto prefers IRSA",
+			keyType:   keyTypeAuto,
+			roleARN:   "arn:aws:iam::123456789012:role/cnpg-backups",
+			tokenFile: "/var/run/secrets/eks.amazonaws.com/serviceaccount/token",
+			want:      keyTypeWebID,
+		},
+		{
+			name:               "legacy IAM prefers IRSA",
+			inheritFromIAMRole: true,
+			roleARN:            "arn:aws:iam::123456789012:role/cnpg-backups",
+			tokenFile:          "/var/run/secrets/eks.amazonaws.com/serviceaccount/token",
+			want:               keyTypeWebID,
+		},
+		{
+			name:    "role without token uses IMDS",
+			keyType: keyTypeAuto,
+			roleARN: "arn:aws:iam::123456789012:role/cnpg-backups",
+			want:    keyTypeAuto,
+		},
+		{
+			name:      "token without role uses IMDS",
+			keyType:   keyTypeAuto,
+			tokenFile: "/var/run/secrets/eks.amazonaws.com/serviceaccount/token",
+			want:      keyTypeAuto,
+		},
+		{name: "explicit web identity", keyType: keyTypeWebID, want: keyTypeWebID},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(awsRoleARNEnv, tt.roleARN)
+			t.Setenv(awsWebIdentityTokenFileEnv, tt.tokenFile)
+
+			got := effectiveS3KeyType(&apiv1.PgBackRestS3{
+				KeyType:            tt.keyType,
+				InheritFromIAMRole: tt.inheritFromIAMRole,
+			})
+			if got != tt.want {
+				t.Fatalf("expected key type %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestGenerateBaseConfig_GCS(t *testing.T) {
 	tests := map[string]struct {
 		gcs        *apiv1.PgBackRestGCS

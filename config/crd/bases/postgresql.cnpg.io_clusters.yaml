@@ -1686,17 +1686,7 @@ spec:
                                 - auto
                                 - web-id
                                 - pod-id
-                                - process
                                 type: string
-                              processCommand:
-                                description: |-
-                                  ProcessCommand is the command and arguments used by the process credential
-                                  provider. Each entry is emitted as a repo1-s3-process-cmd value. The first
-                                  entry is the executable and the remaining entries are its arguments.
-                                items:
-                                  type: string
-                                minItems: 1
-                                type: array
                               region:
                                 description: The S3 region
                                 type: string
@@ -3666,17 +3656,7 @@ spec:
                                   - auto
                                   - web-id
                                   - pod-id
-                                  - process
                                   type: string
-                                processCommand:
-                                  description: |-
-                                    ProcessCommand is the command and arguments used by the process credential
-                                    provider. Each entry is emitted as a repo1-s3-process-cmd value. The first
-                                    entry is the executable and the remaining entries are its arguments.
-                                  items:
-                                    type: string
-                                  minItems: 1
-                                  type: array
                                 region:
                                   description: The S3 region
                                   type: string

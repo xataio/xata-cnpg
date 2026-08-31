@@ -112,10 +112,7 @@ func generateBaseConfig(
 	stanzaName string,
 	pgDataPath string,
 ) (*ini.File, error) {
-	// pgBackRest list options are represented by repeated INI keys. Process
-	// credential commands use one list entry for the executable and one for each
-	// argument, so preserve shadow keys when rendering the configuration.
-	cfg := ini.Empty(ini.LoadOptions{AllowShadows: true})
+	cfg := ini.Empty()
 	global := cfg.Section("global")
 
 	// Repository storage configuration. The CRD guarantees exactly one
@@ -283,16 +280,6 @@ func configureS3(
 			return fmt.Errorf("resolving S3 secret key: %w", err)
 		}
 		section.Key("repo1-s3-key-secret").SetValue(secretKey)
-	}
-
-	for idx, commandPart := range s3.ProcessCommand {
-		if idx == 0 {
-			section.Key("repo1-s3-process-cmd").SetValue(commandPart)
-			continue
-		}
-		if err := section.Key("repo1-s3-process-cmd").AddShadow(commandPart); err != nil {
-			return fmt.Errorf("configuring S3 process command: %w", err)
-		}
 	}
 
 	return nil

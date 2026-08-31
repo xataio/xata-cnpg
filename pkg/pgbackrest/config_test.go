@@ -23,7 +23,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -513,7 +512,6 @@ func TestEffectiveS3KeyType(t *testing.T) {
 		{name: "explicit auto", keyType: "auto", want: "auto"},
 		{name: "explicit web identity", keyType: "web-id", want: "web-id"},
 		{name: "explicit pod identity", keyType: "pod-id", want: "pod-id"},
-		{name: "explicit process", keyType: "process", want: "process"},
 	}
 
 	for _, tt := range tests {
@@ -536,15 +534,12 @@ func TestEffectiveS3KeyType(t *testing.T) {
 }
 
 func TestGenerateBaseConfig_S3CredentialProviders(t *testing.T) {
-	for _, keyType := range []string{"shared", "auto", "web-id", "pod-id", "process"} {
+	for _, keyType := range []string{"shared", "auto", "web-id", "pod-id"} {
 		t.Run(keyType, func(t *testing.T) {
 			s3 := &apiv1.PgBackRestS3{
 				Bucket:  "test-bucket",
 				Region:  "us-east-1",
 				KeyType: keyType,
-			}
-			if keyType == "process" {
-				s3.ProcessCommand = []string{"/usr/local/bin/get-credentials", "--role", "backup"}
 			}
 
 			cfg, err := generateBaseConfig(
@@ -559,19 +554,6 @@ func TestGenerateBaseConfig_S3CredentialProviders(t *testing.T) {
 			global := cfg.Section("global")
 			if got := global.Key("repo1-s3-key-type").String(); got != keyType {
 				t.Fatalf("expected S3 key type %q, got %q", keyType, got)
-			}
-			if keyType == "process" {
-				if got := global.Key("repo1-s3-process-cmd").ValueWithShadows(); !reflect.DeepEqual(got, s3.ProcessCommand) {
-					t.Fatalf("expected process command %v, got %v", s3.ProcessCommand, got)
-				}
-
-				rendered, err := renderConfig(cfg)
-				if err != nil {
-					t.Fatalf("renderConfig failed: %v", err)
-				}
-				if got := strings.Count(rendered, "repo1-s3-process-cmd"); got != len(s3.ProcessCommand) {
-					t.Fatalf("expected %d rendered process command entries, got %d", len(s3.ProcessCommand), got)
-				}
 			}
 		})
 	}

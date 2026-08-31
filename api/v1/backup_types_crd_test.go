@@ -108,7 +108,7 @@ var _ = Describe("PgBackRest repository CRD schema", func() {
 		Expect(s3.Properties).To(HaveKey("accessKeyId"))
 		Expect(s3.Properties).To(HaveKey("secretAccessKey"))
 		Expect(s3.Properties).To(HaveKey("inheritFromIAMRole"))
-		Expect(s3.Properties).To(HaveKey("processCommand"))
+		Expect(s3.Properties).ToNot(HaveKey("processCommand"))
 
 		keyType := s3.Properties["keyType"]
 		Expect(keyType.Enum).To(ConsistOf(
@@ -116,12 +116,8 @@ var _ = Describe("PgBackRest repository CRD schema", func() {
 			apiextensionsv1.JSON{Raw: []byte(`"auto"`)},
 			apiextensionsv1.JSON{Raw: []byte(`"web-id"`)},
 			apiextensionsv1.JSON{Raw: []byte(`"pod-id"`)},
-			apiextensionsv1.JSON{Raw: []byte(`"process"`)},
 		))
 		Expect(keyType.Default).To(BeNil())
-
-		processCommand := s3.Properties["processCommand"]
-		Expect(processCommand.MinItems).To(HaveValue(Equal(int64(1))))
 
 		Expect(s3.XValidations).To(HaveLen(1))
 		Expect(s3.XValidations[0].Rule).To(Equal(

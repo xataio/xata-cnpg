@@ -212,14 +212,8 @@ type PgBackRestS3 struct {
 	// backward compatibility. Auto retrieves temporary credentials from the
 	// instance metadata service; it does not select web-id or pod-id.
 	// +optional
-	// +kubebuilder:validation:Enum=shared;auto;web-id;pod-id;process
+	// +kubebuilder:validation:Enum=shared;auto;web-id;pod-id
 	KeyType string `json:"keyType,omitempty"`
-	// ProcessCommand is the command and arguments used by the process credential
-	// provider. Each entry is emitted as a repo1-s3-process-cmd value. The first
-	// entry is the executable and the remaining entries are its arguments.
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	ProcessCommand []string `json:"processCommand,omitempty"`
 }
 
 // PgBackRestRetention defines the backup retention policy for pgbackrest.

@@ -32,10 +32,6 @@ type PgBackRestS3ApplyConfiguration struct {
 	// backward compatibility. Auto retrieves temporary credentials from the
 	// instance metadata service; it does not select web-id or pod-id.
 	KeyType *string `json:"keyType,omitempty"`
-	// ProcessCommand is the command and arguments used by the process credential
-	// provider. Each entry is emitted as a repo1-s3-process-cmd value. The first
-	// entry is the executable and the remaining entries are its arguments.
-	ProcessCommand []string `json:"processCommand,omitempty"`
 }
 
 // PgBackRestS3ApplyConfiguration constructs a declarative configuration of the PgBackRestS3 type for use with
@@ -97,15 +93,5 @@ func (b *PgBackRestS3ApplyConfiguration) WithInheritFromIAMRole(value bool) *PgB
 // If called multiple times, the KeyType field is set to the value of the last call.
 func (b *PgBackRestS3ApplyConfiguration) WithKeyType(value string) *PgBackRestS3ApplyConfiguration {
 	b.KeyType = &value
-	return b
-}
-
-// WithProcessCommand adds the given value to the ProcessCommand field in the declarative configuration
-// and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, values provided by each call will be appended to the ProcessCommand field.
-func (b *PgBackRestS3ApplyConfiguration) WithProcessCommand(values ...string) *PgBackRestS3ApplyConfiguration {
-	for i := range values {
-		b.ProcessCommand = append(b.ProcessCommand, values[i])
-	}
 	return b
 }

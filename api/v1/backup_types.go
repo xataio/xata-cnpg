@@ -185,7 +185,7 @@ type PgBackRestCipher struct {
 }
 
 // PgBackRestS3 defines the S3-compatible storage configuration for pgbackrest.
-// +kubebuilder:validation:XValidation:rule="has(self.keyType) ? (!has(self.accessKeyId) && !has(self.secretAccessKey)) : ((self.inheritFromIAMRole == true && !has(self.accessKeyId) && !has(self.secretAccessKey)) || (self.inheritFromIAMRole != true && has(self.accessKeyId) && has(self.secretAccessKey)))",message="keyType, inheritFromIAMRole, or both accessKeyId and secretAccessKey must select authentication; keyType takes precedence over inheritFromIAMRole"
+// +kubebuilder:validation:XValidation:rule="has(self.accessKeyId) == has(self.secretAccessKey)",message="accessKeyId and secretAccessKey must be specified together"
 type PgBackRestS3 struct {
 	// The S3 bucket name
 	Bucket string `json:"bucket"`
@@ -201,21 +201,25 @@ type PgBackRestS3 struct {
 	// The reference to the secret access key
 	// +optional
 	SecretAccessKey *SecretKeySelector `json:"secretAccessKey,omitempty"`
-	// Select automatic AWS authentication when KeyType is empty. IRSA is used
-	// when its web identity environment is available; otherwise authentication
-	// falls back to the instance profile.
-	//
-	// Deprecated: use KeyType instead. This field remains as a compatibility
-	// fallback and selects automatic AWS authentication.
+	// Deprecated: use KeyType instead. This field is retained for existing
+	// resources. When KeyType is empty, resources without static credentials
+	// use the auto provider regardless of this value.
 	// +optional
 	InheritFromIAMRole bool `json:"inheritFromIAMRole,omitempty"`
-	// Selects the pgbackrest S3 credential provider. When set, this field takes
-	// precedence over the deprecated InheritFromIAMRole field. Auto prefers EKS
-	// IRSA when its environment is available and otherwise uses the instance
-	// profile. Web-id requires EKS IRSA.
+	// Selects the pgbackrest S3 credential provider. The value is passed through
+	// to repo1-s3-key-type. When empty, it defaults to auto unless both static
+	// credential references are present, in which case it defaults to shared for
+	// backward compatibility. Auto retrieves temporary credentials from the
+	// instance metadata service; it does not select web-id or pod-id.
 	// +optional
-	// +kubebuilder:validation:Enum=auto;web-id
+	// +kubebuilder:validation:Enum=shared;auto;web-id;pod-id;process
 	KeyType string `json:"keyType,omitempty"`
+	// ProcessCommand is the command and arguments used by the process credential
+	// provider. Each entry is emitted as a repo1-s3-process-cmd value. The first
+	// entry is the executable and the remaining entries are its arguments.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	ProcessCommand []string `json:"processCommand,omitempty"`
 }
 
 // PgBackRestRetention defines the backup retention policy for pgbackrest.

@@ -112,7 +112,10 @@ func generateBaseConfig(
 	stanzaName string,
 	pgDataPath string,
 ) (*ini.File, error) {
-	cfg := ini.Empty()
+	// pgBackRest list options are represented by repeated INI keys. Process
+	// credential commands use one list entry for the executable and one for each
+	// argument, so preserve shadow keys when rendering the configuration.
+	cfg := ini.Empty(ini.LoadOptions{AllowShadows: true})
 	global := cfg.Section("global")
 
 	// Repository storage configuration. The CRD guarantees exactly one
@@ -224,31 +227,23 @@ func WriteConfigFile(content, pgDataPath string) (bool, error) {
 }
 
 const (
-	// keyTypeAuto derives credentials from the cloud provider's environment.
-	keyTypeAuto = "auto"
-	// keyTypeWebID exchanges the projected Kubernetes token through AWS STS.
-	keyTypeWebID = "web-id"
-
-	awsRoleARNEnv              = "AWS_ROLE_ARN"
-	awsWebIdentityTokenFileEnv = "AWS_WEB_IDENTITY_TOKEN_FILE"
+	keyTypeAuto   = "auto"
+	keyTypeShared = "shared"
 )
 
-// effectiveS3KeyType selects IRSA when EKS has injected the complete web
-// identity environment. Otherwise, automatic authentication retains its
-// instance-metadata behavior for backward compatibility.
+// effectiveS3KeyType returns the explicitly selected pgBackRest provider. New
+// resources default to auto. Existing resources with static credential
+// references retain pgBackRest's shared-key behavior.
 func effectiveS3KeyType(s3 *apiv1.PgBackRestS3) string {
-	keyType := s3.KeyType
-	if keyType == "" && s3.InheritFromIAMRole { //nolint:staticcheck // Compatibility with existing clusters.
-		keyType = keyTypeAuto
+	if s3.KeyType != "" {
+		return s3.KeyType
 	}
 
-	if keyType == keyTypeAuto &&
-		os.Getenv(awsRoleARNEnv) != "" &&
-		os.Getenv(awsWebIdentityTokenFileEnv) != "" {
-		return keyTypeWebID
+	if s3.AccessKeyID != nil && s3.SecretAccessKey != nil {
+		return keyTypeShared
 	}
 
-	return keyType
+	return keyTypeAuto
 }
 
 // configureS3 sets S3-specific keys in the [global] section.
@@ -273,19 +268,31 @@ func configureS3(
 	}
 
 	keyType := effectiveS3KeyType(s3)
-	if keyType != "" {
-		section.Key("repo1-s3-key-type").SetValue(keyType)
-	} else {
+	section.Key("repo1-s3-key-type").SetValue(keyType)
+
+	if s3.AccessKeyID != nil {
 		accessKey, err := resolveSecretKeyRef(ctx, k8sClient, namespace, s3.AccessKeyID)
 		if err != nil {
 			return fmt.Errorf("resolving S3 access key: %w", err)
 		}
+		section.Key("repo1-s3-key").SetValue(accessKey)
+	}
+	if s3.SecretAccessKey != nil {
 		secretKey, err := resolveSecretKeyRef(ctx, k8sClient, namespace, s3.SecretAccessKey)
 		if err != nil {
 			return fmt.Errorf("resolving S3 secret key: %w", err)
 		}
-		section.Key("repo1-s3-key").SetValue(accessKey)
 		section.Key("repo1-s3-key-secret").SetValue(secretKey)
+	}
+
+	for idx, commandPart := range s3.ProcessCommand {
+		if idx == 0 {
+			section.Key("repo1-s3-process-cmd").SetValue(commandPart)
+			continue
+		}
+		if err := section.Key("repo1-s3-process-cmd").AddShadow(commandPart); err != nil {
+			return fmt.Errorf("configuring S3 process command: %w", err)
+		}
 	}
 
 	return nil

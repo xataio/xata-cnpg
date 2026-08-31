@@ -21,9 +21,9 @@ package pgbackrest
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -497,87 +497,127 @@ func TestGenerateBaseConfig_TLSAndPaths(t *testing.T) {
 	}
 }
 
-func TestGenerateBaseConfig_IRSAWebIdentity(t *testing.T) {
-	for _, inheritFromIAMRole := range []bool{false, true} {
-		t.Run(fmt.Sprintf("legacy field %t", inheritFromIAMRole), func(t *testing.T) {
-			repo := &apiv1.PgBackRestRepository{
-				S3: &apiv1.PgBackRestS3{
-					Bucket:             "test-bucket",
-					Region:             "us-east-1",
-					InheritFromIAMRole: inheritFromIAMRole,
-					KeyType:            "web-id",
-				},
-			}
-
-			cfg, err := generateBaseConfig(
-				context.Background(), nil, "default",
-				repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
-			)
-			if err != nil {
-				t.Fatalf("generateBaseConfig failed: %v", err)
-			}
-
-			if got := cfg.Section("global").Key("repo1-s3-key-type").String(); got != "web-id" {
-				t.Fatalf("expected web-id S3 key type, got %q", got)
-			}
-		})
-	}
-}
-
 func TestEffectiveS3KeyType(t *testing.T) {
 	tests := []struct {
 		name               string
 		keyType            string
 		inheritFromIAMRole bool
-		roleARN            string
-		tokenFile          string
+		staticCredentials  bool
 		want               string
 	}{
-		{name: "static credentials", want: ""},
-		{name: "legacy IAM uses IMDS", inheritFromIAMRole: true, want: keyTypeAuto},
-		{name: "explicit auto uses IMDS", keyType: keyTypeAuto, want: keyTypeAuto},
-		{
-			name:      "auto prefers IRSA",
-			keyType:   keyTypeAuto,
-			roleARN:   "arn:aws:iam::123456789012:role/cnpg-backups",
-			tokenFile: "/var/run/secrets/eks.amazonaws.com/serviceaccount/token",
-			want:      keyTypeWebID,
-		},
-		{
-			name:               "legacy IAM prefers IRSA",
-			inheritFromIAMRole: true,
-			roleARN:            "arn:aws:iam::123456789012:role/cnpg-backups",
-			tokenFile:          "/var/run/secrets/eks.amazonaws.com/serviceaccount/token",
-			want:               keyTypeWebID,
-		},
-		{
-			name:    "role without token uses IMDS",
-			keyType: keyTypeAuto,
-			roleARN: "arn:aws:iam::123456789012:role/cnpg-backups",
-			want:    keyTypeAuto,
-		},
-		{
-			name:      "token without role uses IMDS",
-			keyType:   keyTypeAuto,
-			tokenFile: "/var/run/secrets/eks.amazonaws.com/serviceaccount/token",
-			want:      keyTypeAuto,
-		},
-		{name: "explicit web identity", keyType: keyTypeWebID, want: keyTypeWebID},
+		{name: "defaults to auto", want: keyTypeAuto},
+		{name: "legacy true defaults to auto", inheritFromIAMRole: true, want: keyTypeAuto},
+		{name: "legacy false defaults to auto", want: keyTypeAuto},
+		{name: "legacy static credentials default to shared", staticCredentials: true, want: keyTypeShared},
+		{name: "explicit shared", keyType: "shared", want: "shared"},
+		{name: "explicit auto", keyType: "auto", want: "auto"},
+		{name: "explicit web identity", keyType: "web-id", want: "web-id"},
+		{name: "explicit pod identity", keyType: "pod-id", want: "pod-id"},
+		{name: "explicit process", keyType: "process", want: "process"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(awsRoleARNEnv, tt.roleARN)
-			t.Setenv(awsWebIdentityTokenFileEnv, tt.tokenFile)
-
-			got := effectiveS3KeyType(&apiv1.PgBackRestS3{
+			s3 := &apiv1.PgBackRestS3{
 				KeyType:            tt.keyType,
 				InheritFromIAMRole: tt.inheritFromIAMRole,
-			})
+			}
+			if tt.staticCredentials {
+				s3.AccessKeyID = &apiv1.SecretKeySelector{}
+				s3.SecretAccessKey = &apiv1.SecretKeySelector{}
+			}
+
+			got := effectiveS3KeyType(s3)
 			if got != tt.want {
 				t.Fatalf("expected key type %q, got %q", tt.want, got)
 			}
 		})
+	}
+}
+
+func TestGenerateBaseConfig_S3CredentialProviders(t *testing.T) {
+	for _, keyType := range []string{"shared", "auto", "web-id", "pod-id", "process"} {
+		t.Run(keyType, func(t *testing.T) {
+			s3 := &apiv1.PgBackRestS3{
+				Bucket:  "test-bucket",
+				Region:  "us-east-1",
+				KeyType: keyType,
+			}
+			if keyType == "process" {
+				s3.ProcessCommand = []string{"/usr/local/bin/get-credentials", "--role", "backup"}
+			}
+
+			cfg, err := generateBaseConfig(
+				context.Background(), nil, "default",
+				&apiv1.PgBackRestRepository{S3: s3},
+				"test-cluster", "/var/lib/postgresql/data/pgdata",
+			)
+			if err != nil {
+				t.Fatalf("generateBaseConfig failed: %v", err)
+			}
+
+			global := cfg.Section("global")
+			if got := global.Key("repo1-s3-key-type").String(); got != keyType {
+				t.Fatalf("expected S3 key type %q, got %q", keyType, got)
+			}
+			if keyType == "process" {
+				if got := global.Key("repo1-s3-process-cmd").ValueWithShadows(); !reflect.DeepEqual(got, s3.ProcessCommand) {
+					t.Fatalf("expected process command %v, got %v", s3.ProcessCommand, got)
+				}
+
+				rendered, err := renderConfig(cfg)
+				if err != nil {
+					t.Fatalf("renderConfig failed: %v", err)
+				}
+				if got := strings.Count(rendered, "repo1-s3-process-cmd"); got != len(s3.ProcessCommand) {
+					t.Fatalf("expected %d rendered process command entries, got %d", len(s3.ProcessCommand), got)
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateBaseConfig_S3StaticCredentials(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "s3-credentials", Namespace: "default"},
+		Data: map[string][]byte{
+			"access-key-id":     []byte("access-key"),
+			"secret-access-key": []byte("secret-key"),
+		},
+	}
+	k8sClient := fake.NewClientBuilder().WithObjects(secret).Build()
+	repo := &apiv1.PgBackRestRepository{
+		S3: &apiv1.PgBackRestS3{
+			Bucket: "test-bucket",
+			Region: "us-east-1",
+			AccessKeyID: &apiv1.SecretKeySelector{
+				LocalObjectReference: apiv1.LocalObjectReference{Name: secret.Name},
+				Key:                  "access-key-id",
+			},
+			SecretAccessKey: &apiv1.SecretKeySelector{
+				LocalObjectReference: apiv1.LocalObjectReference{Name: secret.Name},
+				Key:                  "secret-access-key",
+			},
+		},
+	}
+
+	cfg, err := generateBaseConfig(
+		context.Background(), k8sClient, "default",
+		repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+	)
+	if err != nil {
+		t.Fatalf("generateBaseConfig failed: %v", err)
+	}
+
+	global := cfg.Section("global")
+	if got := global.Key("repo1-s3-key-type").String(); got != keyTypeShared {
+		t.Fatalf("expected S3 key type %q, got %q", keyTypeShared, got)
+	}
+	if got := global.Key("repo1-s3-key").String(); got != "access-key" {
+		t.Fatalf("expected resolved access key, got %q", got)
+	}
+	if got := global.Key("repo1-s3-key-secret").String(); got != "secret-key" {
+		t.Fatalf("expected resolved secret key, got %q", got)
 	}
 }
 

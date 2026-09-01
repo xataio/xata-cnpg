@@ -209,6 +209,14 @@ const (
 	// suspend archiving during an initial bulk data load.
 	PgBackRestSuspended = MetadataNamespace + "/pgBackRestSuspended"
 
+	// PgBackRestPrimaryFallback marks a pgBackRest backup that failed on a
+	// standby and was handed back for a retry on the primary. The instance
+	// manager sets it instead of failing the backup; the backup controller reads
+	// it when electing the target pod. Its presence also bounds the fallback to
+	// a single extra attempt: a backup that fails again with the annotation
+	// already set is failed normally.
+	PgBackRestPrimaryFallback = MetadataNamespace + "/pgBackRestPrimaryFallback"
+
 	// skipEmptyWalArchiveCheck is the name of the annotation which turns off the checks that ensure that the WAL
 	// archive is empty before writing data
 	skipEmptyWalArchiveCheck = MetadataNamespace + "/skipEmptyWalArchiveCheck"

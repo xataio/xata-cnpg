@@ -36,6 +36,7 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/resources"
 	"github.com/xataio/xata-cnpg/pkg/resources/status"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 // AnnotationKeyBackupCR is the pgbackrest annotation key used to link a
@@ -135,6 +136,73 @@ func (b *PgBackRestBackupCommand) Start(ctx context.Context) error {
 	return nil
 }
 
+// failBackup records a backup failure. On a standby it hands the backup back to
+// the backup controller for one retry on the primary instead of failing it.
+//
+// A standby backup depends on things a primary-local backup does not: a TLS
+// connection to the primary, the same pgbackrest version on both pods, the
+// pgbackrest port on the -rw service, and a network path between them. All of
+// those have broken in production, and each one stops backups on every slot
+// until someone notices. Rather than enumerate the causes, any standby failure
+// is retried on the primary, which needs none of them.
+//
+// Clearing the phase and the elected instance sends the Backup back through the
+// normal flow; getBackupTargetPod reads PgBackRestPrimaryFallback and elects the
+// primary. The annotation also bounds this to one extra attempt: a backup that
+// fails again with it already set is failed normally, so the failure is recorded
+// and alarms fire. The role comes from this pod's own PGDATA rather than the
+// cluster status, so no other component has to agree with it.
+func (b *PgBackRestBackupCommand) failBackup(ctx context.Context, cause error) {
+	if _, alreadyFellBack := b.Backup.Annotations[utils.PgBackRestPrimaryFallback]; !alreadyFellBack {
+		// A failure to read PGDATA is not a reason to skip reporting the
+		// original failure, so treat an unknown role as primary.
+		if isPrimary, err := b.Instance.IsPrimary(); err == nil && !isPrimary {
+			if err := b.handBackToPrimary(ctx, cause); err != nil {
+				b.Log.Error(err, "Could not hand the backup back for a retry on the primary")
+			} else {
+				return
+			}
+		}
+	}
+
+	_ = status.FlagBackupAsFailed(ctx, b.Client, b.Backup, b.Cluster, cause)
+}
+
+// handBackToPrimary marks the backup for a retry on the primary and clears the
+// state that keeps it bound to this standby.
+func (b *PgBackRestBackupCommand) handBackToPrimary(ctx context.Context, cause error) error {
+	b.statusMu.Lock()
+	defer b.statusMu.Unlock()
+
+	// Annotate before clearing the status. If the status patch below fails, the
+	// annotation makes the next attempt fail normally rather than loop.
+	origBackup := b.Backup.DeepCopy()
+	if b.Backup.Annotations == nil {
+		b.Backup.Annotations = map[string]string{}
+	}
+	b.Backup.Annotations[utils.PgBackRestPrimaryFallback] = "true"
+	if err := b.Client.Patch(ctx, b.Backup, client.MergeFrom(origBackup)); err != nil {
+		return fmt.Errorf("annotating backup for the primary retry: %w", err)
+	}
+
+	b.Log.Info("Backup failed on this standby, retrying on the primary",
+		"cluster", b.Cluster.Name, "standby", b.Instance.GetPodName(), "cause", cause.Error())
+	b.Recorder.Eventf(b.Backup, "Warning", "RetryingOnPrimary",
+		"Backup failed on standby %v, retrying on the primary: %v",
+		b.Instance.GetPodName(), cause.Error())
+
+	origBackup = b.Backup.DeepCopy()
+	// The error is kept for diagnostics; the phase is what the controller acts on.
+	b.Backup.Status.Phase = ""
+	b.Backup.Status.Error = cause.Error()
+	b.Backup.Status.InstanceID = nil
+	if err := b.Client.Status().Patch(ctx, b.Backup, client.MergeFrom(origBackup)); err != nil {
+		return fmt.Errorf("clearing backup status for the primary retry: %w", err)
+	}
+
+	return nil
+}
+
 // run executes the pgbackrest backup command and updates the status.
 // This method runs in a dedicated goroutine.
 func (b *PgBackRestBackupCommand) run(ctx context.Context) {
@@ -177,7 +245,7 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 		stopProgress()
 		b.Log.Error(err, "Backup failed: pgbackrest configuration not applied")
 		b.Recorder.Event(b.Backup, "Normal", "Failed", "pgbackrest configuration not applied after waiting")
-		_ = status.FlagBackupAsFailed(ctx, b.Client, b.Backup, b.Cluster, err)
+		b.failBackup(ctx, err)
 		return
 	}
 
@@ -187,7 +255,7 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 		stopProgress()
 		b.Log.Error(err, "Backup failed: stanza not ready")
 		b.Recorder.Event(b.Backup, "Normal", "Failed", "Stanza not ready after waiting")
-		_ = status.FlagBackupAsFailed(ctx, b.Client, b.Backup, b.Cluster, err)
+		b.failBackup(ctx, err)
 		return
 	}
 
@@ -197,7 +265,7 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	if err != nil {
 		b.Log.Error(err, "Backup failed")
 		b.Recorder.Event(b.Backup, "Normal", "Failed", "Backup failed")
-		_ = status.FlagBackupAsFailed(ctx, b.Client, b.Backup, b.Cluster, err)
+		b.failBackup(ctx, err)
 		return
 	}
 

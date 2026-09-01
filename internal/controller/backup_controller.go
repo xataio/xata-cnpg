@@ -130,9 +130,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	switch backup.Status.Phase {
-	case apiv1.BackupPhaseFailed:
-		return r.reconcileFailedBackup(ctx, &backup)
-	case apiv1.BackupPhaseCompleted, apiv1.BackupPhaseCancelled:
+	case apiv1.BackupPhaseFailed, apiv1.BackupPhaseCompleted, apiv1.BackupPhaseCancelled:
 		return ctrl.Result{}, nil
 	}
 
@@ -241,12 +239,6 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 // interruption gets a fresh budget.
 const backupPendingSinceAnnotation = "xata.io/backupPendingSince"
 
-// backupPrimaryFallbackAnnotation records that a failed pgBackRest backup has
-// already been re-elected onto the primary, bounding the fallback to a single
-// extra attempt. It lives on the Backup rather than in its status because it
-// only carries state from one reconcile of this controller to the next.
-const backupPrimaryFallbackAnnotation = "xata.io/pgBackRestPrimaryFallback"
-
 // backupPodWaitTimeout bounds how long a backup waits for its target pod
 // (missing, not ready, or terminating) before it is flagged as failed. Node
 // drains and pod reschedules complete well within this budget; exceeding it
@@ -294,85 +286,6 @@ func (r *BackupReconciler) waitForBackupPod(
 		return nil, err
 	}
 	return &ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-}
-
-// reconcileFailedBackup gives a failed pgBackRest backup one more attempt on the
-// primary when it ran on a standby. A standby backup depends on things a
-// primary-local backup does not: a TLS connection to the primary, the same
-// pgbackrest version on both pods, the pgbackrest port on the -rw service, and
-// a reachable network path. Every one of those has broken in production. Rather
-// than enumerate the causes, any standby failure is retried once on the primary,
-// which needs none of them. The instance manager has already retried on the
-// standby (runBackupWithRetry), so this is a last attempt, not a second one.
-//
-// Backups interrupted by hibernation or cluster deletion never reach here:
-// FlagBackupAsFailed flags those as cancelled instead.
-func (r *BackupReconciler) reconcileFailedBackup(
-	ctx context.Context,
-	backup *apiv1.Backup,
-) (ctrl.Result, error) {
-	contextLogger := log.FromContext(ctx)
-
-	if backup.Spec.Method != apiv1.BackupMethodPgBackRest {
-		return ctrl.Result{}, nil
-	}
-
-	if _, alreadyFellBack := backup.Annotations[backupPrimaryFallbackAnnotation]; alreadyFellBack {
-		return ctrl.Result{}, nil
-	}
-
-	// Without an elected instance the backup never ran, so there is no standby
-	// failure to move away from.
-	if backup.Status.InstanceID == nil {
-		return ctrl.Result{}, nil
-	}
-
-	var cluster apiv1.Cluster
-	if err := r.Get(ctx, client.ObjectKey{
-		Namespace: backup.Namespace,
-		Name:      backup.Spec.Cluster.Name,
-	}, &cluster); err != nil {
-		// A missing cluster leaves nothing to retry on.
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-
-	if backup.Status.InstanceID.PodName == cluster.Status.CurrentPrimary {
-		return ctrl.Result{}, nil
-	}
-
-	// Mark the fallback before clearing the failure. If the status patch below
-	// fails, the next reconcile sees the annotation and leaves the backup
-	// failed, which is the safe direction: no retry loop.
-	origBackup := backup.DeepCopy()
-	if backup.Annotations == nil {
-		backup.Annotations = map[string]string{}
-	}
-	backup.Annotations[backupPrimaryFallbackAnnotation] = "true"
-	if err := r.Patch(ctx, backup, client.MergeFrom(origBackup)); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	contextLogger.Info("Retrying failed standby backup on the primary",
-		"cluster", cluster.Name,
-		"standby", backup.Status.InstanceID.PodName,
-		"primary", cluster.Status.CurrentPrimary,
-		"error", backup.Status.Error)
-
-	r.Recorder.Eventf(backup, "Warning", "RetryingOnPrimary",
-		"Backup failed on standby %v, retrying on primary %v",
-		backup.Status.InstanceID.PodName, cluster.Status.CurrentPrimary)
-
-	// Clear the failure so the normal flow elects a new pod. getBackupTargetPod
-	// reads the annotation and returns the primary.
-	origBackup = backup.DeepCopy()
-	backup.Status.Phase = ""
-	backup.Status.Error = ""
-	backup.Status.InstanceID = nil
-	if err := r.Status().Patch(ctx, backup, client.MergeFrom(origBackup)); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	return ctrl.Result{RequeueAfter: time.Second}, nil
 }
 
 func (r *BackupReconciler) startBackupManagedByInstance(
@@ -906,10 +819,11 @@ func (r *BackupReconciler) getBackupTargetPod(ctx context.Context,
 	if backup.Spec.Target != "" {
 		backupTarget = backup.Spec.Target
 	}
-	// A backup that already failed on a standby is retried on the primary,
-	// which needs neither a connection to another pod nor a matching pgbackrest
-	// version. This overrides the configured target on purpose.
-	if _, fellBack := backup.Annotations[backupPrimaryFallbackAnnotation]; fellBack {
+	// A pgBackRest backup that already failed on a standby is handed back by the
+	// instance manager for a retry on the primary, which needs neither a
+	// connection to another pod nor a matching pgbackrest version. This
+	// overrides the configured target on purpose.
+	if _, fellBack := backup.Annotations[utils.PgBackRestPrimaryFallback]; fellBack {
 		backupTarget = apiv1.BackupTargetPrimary
 	}
 	postgresqlStatusList := r.instanceStatusClient.GetStatusFromInstances(ctx, pods)

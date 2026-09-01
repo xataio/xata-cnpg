@@ -22,6 +22,7 @@ package repository
 import (
 	"context"
 	"net"
+	"sync"
 	"testing"
 
 	"github.com/cloudnative-pg/cnpg-i/pkg/identity"
@@ -81,9 +82,11 @@ func (i identityImplementation) Probe(
 }
 
 type unitTestProtocol struct {
+	mu           sync.Mutex
 	name         string
 	mockHandlers []*mockHandler
 	server       *grpc.Server
+	listener     *bufconn.Listener
 }
 
 type mockHandler struct {
@@ -102,9 +105,14 @@ func (h *mockHandler) Close() error {
 }
 
 func (p *unitTestProtocol) Dial(ctx context.Context) (connection.Handler, error) {
-	listener := bufconn.Listen(1024 * 1024)
+	// Dial can be called concurrently by the connection pool constructor,
+	// and every connection must be served: keep a single listener and
+	// gRPC server per protocol instance.
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	if len(p.mockHandlers) == 0 {
+	if p.listener == nil {
+		p.listener = bufconn.Listen(1024 * 1024)
 		p.server = grpc.NewServer()
 
 		identity.RegisterIdentityServer(p.server, &identityImplementation{})
@@ -115,10 +123,11 @@ func (p *unitTestProtocol) Dial(ctx context.Context) (connection.Handler, error)
 		}()
 
 		go func() {
-			_ = p.server.Serve(listener)
+			_ = p.server.Serve(p.listener)
 		}()
 	}
 
+	listener := p.listener
 	dialer := func(_ context.Context, _ string) (net.Conn, error) {
 		return listener.Dial()
 	}

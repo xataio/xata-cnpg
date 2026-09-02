@@ -33,11 +33,13 @@ import (
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/internal/management/cache"
+	"github.com/xataio/xata-cnpg/pkg/executablehash"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 	m "github.com/xataio/xata-cnpg/pkg/management/postgres/metrics"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/local"
 	postgresconf "github.com/xataio/xata-cnpg/pkg/postgres"
 	"github.com/xataio/xata-cnpg/pkg/specs"
+	"github.com/xataio/xata-cnpg/pkg/versions"
 )
 
 // PrometheusNamespace is the namespace to be used for all custom metrics exposed by instances
@@ -58,6 +60,8 @@ type Exporter struct {
 
 	// pluginCollector is used to collect metrics from plugins
 	pluginCollector m.PluginCollector
+
+	getExecutableHash func() (string, error)
 }
 
 // metrics here are related to the exporter itself, which is instrumented to
@@ -80,6 +84,7 @@ type metrics struct {
 	FencingOn                    prometheus.Gauge
 	PgStatWalMetrics             PgStatWalMetrics
 	NodesUsed                    prometheus.Gauge
+	InstanceManagerInfo          *prometheus.Desc
 }
 
 // PgStatWalMetrics is available from PG14+
@@ -98,10 +103,11 @@ type PgStatWalMetrics struct {
 func NewExporter(instance *postgres.Instance, pluginCollector m.PluginCollector) *Exporter {
 	clusterGetter := local.NewClient().Cache().GetCluster
 	return &Exporter{
-		instance:        instance,
-		Metrics:         newMetrics(),
-		getCluster:      clusterGetter,
-		pluginCollector: pluginCollector,
+		instance:          instance,
+		Metrics:           newMetrics(),
+		getCluster:        clusterGetter,
+		pluginCollector:   pluginCollector,
+		getExecutableHash: executablehash.Get,
 	}
 }
 
@@ -213,6 +219,12 @@ func newMetrics() *metrics {
 				"implying the absence of High Availability (HA). Ideally this value " +
 				"should match the number of instances in the cluster.",
 		}),
+		InstanceManagerInfo: prometheus.NewDesc(
+			prometheus.BuildFQName(PrometheusNamespace, "", "instance_manager_info"),
+			"Information about the running instance manager. The value is always 1.",
+			[]string{"namespace", "cluster", "pod", "version", "commit", "architecture", "executable_hash"},
+			nil,
+		),
 		PgStatWalMetrics: PgStatWalMetrics{
 			WalRecords: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 				Namespace: PrometheusNamespace,
@@ -292,6 +304,7 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	e.Metrics.LastFailedBackupTimestamp.Describe(ch)
 	e.Metrics.LastAvailableBackupTimestamp.Describe(ch)
 	e.Metrics.NodesUsed.Describe(ch)
+	ch <- e.Metrics.InstanceManagerInfo
 
 	if e.queries != nil {
 		e.queries.Describe(ch)
@@ -318,6 +331,8 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 // Collect implements prometheus.Collector, collecting the Metrics values to
 // export.
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
+	e.collectInstanceManagerInfo(ch)
+
 	// Skip metrics collection while waiting for PGDATA — PostgreSQL isn't running yet
 	if e.instance.WaitingForPGData() {
 		log.Debug("waiting for PGDATA, skipping metrics collection")
@@ -346,6 +361,27 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 		log.Debug("collecting metrics from queries")
 		e.queries.Collect(ch)
 	}
+}
+
+func (e *Exporter) collectInstanceManagerInfo(ch chan<- prometheus.Metric) {
+	executableHash, err := e.getExecutableHash()
+	if err != nil {
+		log.Error(err, "Unable to calculate the instance manager executable hash")
+		return
+	}
+
+	ch <- prometheus.MustNewConstMetric(
+		e.Metrics.InstanceManagerInfo,
+		prometheus.GaugeValue,
+		1,
+		e.instance.GetNamespaceName(),
+		e.instance.GetClusterName(),
+		e.instance.GetPodName(),
+		versions.Info.Version,
+		versions.Info.Commit,
+		e.instance.GetArchitecture(),
+		executableHash,
+	)
 }
 
 func (e *Exporter) updateMetricsFromQueries() {

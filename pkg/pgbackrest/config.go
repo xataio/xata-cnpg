@@ -223,10 +223,25 @@ func WriteConfigFile(content, pgDataPath string) (bool, error) {
 	return true, nil
 }
 
-// keyTypeAuto is the pgbackrest key-type value that derives credentials from
-// the cloud provider's instance metadata (IAM role, workload identity, or
-// managed identity) instead of a static secret.
-const keyTypeAuto = "auto"
+const (
+	keyTypeAuto   = "auto"
+	keyTypeShared = "shared"
+)
+
+// effectiveS3KeyType returns the explicitly selected pgBackRest provider. New
+// resources default to auto. Existing resources with static credential
+// references retain pgBackRest's shared-key behavior.
+func effectiveS3KeyType(s3 *apiv1.PgBackRestS3) string {
+	if s3.KeyType != "" {
+		return s3.KeyType
+	}
+
+	if s3.AccessKeyID != nil && s3.SecretAccessKey != nil {
+		return keyTypeShared
+	}
+
+	return keyTypeAuto
+}
 
 // configureS3 sets S3-specific keys in the [global] section.
 func configureS3(
@@ -249,18 +264,21 @@ func configureS3(
 		section.Key("repo1-s3-endpoint").SetValue("s3." + s3.Region + ".amazonaws.com")
 	}
 
-	if s3.InheritFromIAMRole {
-		section.Key("repo1-s3-key-type").SetValue(keyTypeAuto)
-	} else {
+	keyType := effectiveS3KeyType(s3)
+	section.Key("repo1-s3-key-type").SetValue(keyType)
+
+	if s3.AccessKeyID != nil {
 		accessKey, err := resolveSecretKeyRef(ctx, k8sClient, namespace, s3.AccessKeyID)
 		if err != nil {
 			return fmt.Errorf("resolving S3 access key: %w", err)
 		}
+		section.Key("repo1-s3-key").SetValue(accessKey)
+	}
+	if s3.SecretAccessKey != nil {
 		secretKey, err := resolveSecretKeyRef(ctx, k8sClient, namespace, s3.SecretAccessKey)
 		if err != nil {
 			return fmt.Errorf("resolving S3 secret key: %w", err)
 		}
-		section.Key("repo1-s3-key").SetValue(accessKey)
 		section.Key("repo1-s3-key-secret").SetValue(secretKey)
 	}
 

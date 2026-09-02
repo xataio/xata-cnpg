@@ -185,7 +185,7 @@ type PgBackRestCipher struct {
 }
 
 // PgBackRestS3 defines the S3-compatible storage configuration for pgbackrest.
-// +kubebuilder:validation:XValidation:rule="(self.inheritFromIAMRole == true) != (has(self.accessKeyId) && has(self.secretAccessKey))",message="either inheritFromIAMRole or both accessKeyId and secretAccessKey must be specified, but not both"
+// +kubebuilder:validation:XValidation:rule="has(self.accessKeyId) == has(self.secretAccessKey)",message="accessKeyId and secretAccessKey must be specified together"
 type PgBackRestS3 struct {
 	// The S3 bucket name
 	Bucket string `json:"bucket"`
@@ -201,10 +201,19 @@ type PgBackRestS3 struct {
 	// The reference to the secret access key
 	// +optional
 	SecretAccessKey *SecretKeySelector `json:"secretAccessKey,omitempty"`
-	// Use IAM role-based authentication (e.g. IRSA, instance profile).
-	// Sets pgbackrest repo1-s3-key-type=auto.
+	// Deprecated: use KeyType instead. This field is retained for existing
+	// resources. When KeyType is empty, resources without static credentials
+	// use the auto provider regardless of this value.
 	// +optional
 	InheritFromIAMRole bool `json:"inheritFromIAMRole,omitempty"`
+	// Selects the pgbackrest S3 credential provider. The value is passed through
+	// to repo1-s3-key-type. When empty, it defaults to auto unless both static
+	// credential references are present, in which case it defaults to shared for
+	// backward compatibility. Auto retrieves temporary credentials from the
+	// instance metadata service; it does not select web-id or pod-id.
+	// +optional
+	// +kubebuilder:validation:Enum=shared;auto;web-id;pod-id
+	KeyType string `json:"keyType,omitempty"`
 }
 
 // PgBackRestRetention defines the backup retention policy for pgbackrest.

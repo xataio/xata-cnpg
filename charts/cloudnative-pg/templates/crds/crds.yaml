@@ -2220,9 +2220,23 @@ spec:
                                 type: string
                               inheritFromIAMRole:
                                 description: |-
-                                  Use IAM role-based authentication (e.g. IRSA, instance profile).
-                                  Sets pgbackrest repo1-s3-key-type=auto.
+                                  Deprecated: use KeyType instead. This field is retained for existing
+                                  resources. When KeyType is empty, resources without static credentials
+                                  use the auto provider regardless of this value.
                                 type: boolean
+                              keyType:
+                                description: |-
+                                  Selects the pgbackrest S3 credential provider. The value is passed through
+                                  to repo1-s3-key-type. When empty, it defaults to auto unless both static
+                                  credential references are present, in which case it defaults to shared for
+                                  backward compatibility. Auto retrieves temporary credentials from the
+                                  instance metadata service; it does not select web-id or pod-id.
+                                enum:
+                                - shared
+                                - auto
+                                - web-id
+                                - pod-id
+                                type: string
                               region:
                                 description: The S3 region
                                 type: string
@@ -2244,10 +2258,9 @@ spec:
                             - region
                             type: object
                             x-kubernetes-validations:
-                            - message: either inheritFromIAMRole or both accessKeyId
-                                and secretAccessKey must be specified, but not both
-                              rule: (self.inheritFromIAMRole == true) != (has(self.accessKeyId)
-                                && has(self.secretAccessKey))
+                            - message: accessKeyId and secretAccessKey must be specified
+                                together
+                              rule: has(self.accessKeyId) == has(self.secretAccessKey)
                         type: object
                         x-kubernetes-validations:
                         - message: exactly one of s3, gcs, or azure must be specified
@@ -4177,9 +4190,23 @@ spec:
                                   type: string
                                 inheritFromIAMRole:
                                   description: |-
-                                    Use IAM role-based authentication (e.g. IRSA, instance profile).
-                                    Sets pgbackrest repo1-s3-key-type=auto.
+                                    Deprecated: use KeyType instead. This field is retained for existing
+                                    resources. When KeyType is empty, resources without static credentials
+                                    use the auto provider regardless of this value.
                                   type: boolean
+                                keyType:
+                                  description: |-
+                                    Selects the pgbackrest S3 credential provider. The value is passed through
+                                    to repo1-s3-key-type. When empty, it defaults to auto unless both static
+                                    credential references are present, in which case it defaults to shared for
+                                    backward compatibility. Auto retrieves temporary credentials from the
+                                    instance metadata service; it does not select web-id or pod-id.
+                                  enum:
+                                  - shared
+                                  - auto
+                                  - web-id
+                                  - pod-id
+                                  type: string
                                 region:
                                   description: The S3 region
                                   type: string
@@ -4202,10 +4229,9 @@ spec:
                               - region
                               type: object
                               x-kubernetes-validations:
-                              - message: either inheritFromIAMRole or both accessKeyId
-                                  and secretAccessKey must be specified, but not both
-                                rule: (self.inheritFromIAMRole == true) != (has(self.accessKeyId)
-                                  && has(self.secretAccessKey))
+                              - message: accessKeyId and secretAccessKey must be specified
+                                  together
+                                rule: has(self.accessKeyId) == has(self.secretAccessKey)
                           type: object
                           x-kubernetes-validations:
                           - message: exactly one of s3, gcs, or azure must be specified

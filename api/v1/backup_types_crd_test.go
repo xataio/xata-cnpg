@@ -100,4 +100,27 @@ var _ = Describe("PgBackRest repository CRD schema", func() {
 		Expect(azure.XValidations[0].Rule).To(Equal(
 			"(has(self.keyType) && (self.keyType == 'shared' || self.keyType == 'sas')) == has(self.keyRef)"))
 	})
+
+	It("describes the s3 credential providers", func() {
+		s3 := loadRepositorySchema().Properties["s3"]
+
+		Expect(s3.Required).To(ConsistOf("bucket", "region"))
+		Expect(s3.Properties).To(HaveKey("accessKeyId"))
+		Expect(s3.Properties).To(HaveKey("secretAccessKey"))
+		Expect(s3.Properties).To(HaveKey("inheritFromIAMRole"))
+		Expect(s3.Properties).ToNot(HaveKey("processCommand"))
+
+		keyType := s3.Properties["keyType"]
+		Expect(keyType.Enum).To(ConsistOf(
+			apiextensionsv1.JSON{Raw: []byte(`"shared"`)},
+			apiextensionsv1.JSON{Raw: []byte(`"auto"`)},
+			apiextensionsv1.JSON{Raw: []byte(`"web-id"`)},
+			apiextensionsv1.JSON{Raw: []byte(`"pod-id"`)},
+		))
+		Expect(keyType.Default).To(BeNil())
+
+		Expect(s3.XValidations).To(HaveLen(1))
+		Expect(s3.XValidations[0].Rule).To(Equal(
+			"has(self.accessKeyId) == has(self.secretAccessKey)"))
+	})
 })

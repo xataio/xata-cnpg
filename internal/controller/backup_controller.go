@@ -87,6 +87,7 @@ type BackupReconciler struct {
 
 	instanceStatusClient remote.InstanceClient
 	vsr                  *volumesnapshot.Reconciler
+	backupAttempts       backupAttemptDeduper
 }
 
 // NewBackupReconciler properly initializes the BackupReconciler
@@ -131,6 +132,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	switch backup.Status.Phase {
 	case apiv1.BackupPhaseFailed, apiv1.BackupPhaseCompleted, apiv1.BackupPhaseCancelled:
+		r.recordBackupAttempt(&backup)
 		return ctrl.Result{}, nil
 	}
 

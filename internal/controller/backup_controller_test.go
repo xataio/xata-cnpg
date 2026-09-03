@@ -24,9 +24,11 @@ import (
 	"time"
 
 	volumesnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -728,5 +730,42 @@ var _ = Describe("waitForBackupPod", func() {
 		var stored apiv1.Backup
 		Expect(env.client.Get(ctx, client.ObjectKeyFromObject(backup), &stored)).To(Succeed())
 		Expect(stored.Status.Phase).To(BeEquivalentTo(apiv1.BackupPhaseFailed))
+	})
+})
+
+var _ = Describe("backup attempt metric dedupe", func() {
+	var env *testingEnvironment
+	BeforeEach(func() { env = buildTestEnvironment() })
+
+	It("counts a terminal backup once no matter how many times it is reconciled", func(ctx context.Context) {
+		ns := newFakeNamespace(env.client)
+
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{Name: "backup-dedupe-test", Namespace: ns},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: "cluster-example"},
+				Method:  apiv1.BackupMethodPgBackRest,
+			},
+			Status: apiv1.BackupStatus{
+				Phase:  apiv1.BackupPhaseCompleted,
+				Method: apiv1.BackupMethodPgBackRest,
+			},
+		}
+		Expect(env.client.Create(ctx, backup)).To(Succeed())
+
+		counter := backupAttemptsTotal.WithLabelValues(
+			string(apiv1.BackupPhaseCompleted), string(apiv1.BackupMethodPgBackRest), "")
+		before := testutil.ToFloat64(counter)
+
+		req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(backup)}
+
+		_, err := env.backupReconciler.Reconcile(ctx, req)
+		Expect(err).ToNot(HaveOccurred())
+		_, err = env.backupReconciler.Reconcile(ctx, req)
+		Expect(err).ToNot(HaveOccurred())
+		_, err = env.backupReconciler.Reconcile(ctx, req)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(testutil.ToFloat64(counter) - before).To(Equal(1.0))
 	})
 })

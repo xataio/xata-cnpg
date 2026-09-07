@@ -147,11 +147,11 @@ func (r *InstanceReconciler) Reconcile(
 	// Reconcile secrets and cryptographic material
 	// This doesn't need the PG connection or PGDATA, but it needs to reload PG in case of changes
 	reloadNeeded, err := r.certificateReconciler.RefreshSecrets(ctx, cluster)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("while refreshing secrets: %w", err)
-	}
 	if reloadNeeded && cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
 		r.pgBackRestReloadPending.Store(true)
+	}
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("while refreshing secrets: %w", err)
 	}
 
 	// While waiting for PGDATA, skip all remaining reconciliation steps that
@@ -1152,7 +1152,10 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		return fmt.Errorf("writing pgbackrest config: %w", err)
 	}
 	if err := r.reconcilePgBackRestTLSServer(ctx, configChanged); err != nil {
-		return err
+		// Keep PostgreSQL management and config generation publication running.
+		// The pending flag retains the TLS work for the next reconcile.
+		log.FromContext(ctx).Error(err,
+			"Failed to apply pgbackrest TLS server configuration, will retry on next reconcile")
 	}
 
 	// pgbackrest has no log management of its own; bound the log files here

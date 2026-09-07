@@ -79,8 +79,8 @@ func (r *Reconciler) RefreshSecrets(
 
 	secretRefresher := func(cb executor) error {
 		localChanged, err := cb(ctx, cluster)
+		changed = changed || localChanged
 		if err == nil {
-			changed = changed || localChanged
 			return nil
 		}
 
@@ -337,7 +337,7 @@ func (r *Reconciler) refreshCertificateFilesFromSecret(
 
 	privateKeyIsChanged, err := fileutils.WriteFileAtomic(privateKeyLocation, privateKey, 0o600)
 	if err != nil {
-		return false, fmt.Errorf("while writing server private key: %w", err)
+		return certificateIsChanged, fmt.Errorf("while writing server private key: %w", err)
 	}
 
 	if privateKeyIsChanged {

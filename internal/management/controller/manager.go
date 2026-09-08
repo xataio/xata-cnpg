@@ -53,6 +53,7 @@ type InstanceReconciler struct {
 
 	systemInitialization  *concurrency.Executed
 	firstReconcileDone    atomic.Bool
+	reloadPending         atomic.Bool
 	metricsServerExporter *metricserver.Exporter
 
 	certificateReconciler *instancecertificate.Reconciler

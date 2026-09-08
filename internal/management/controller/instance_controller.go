@@ -147,6 +147,9 @@ func (r *InstanceReconciler) Reconcile(
 	// Reconcile secrets and cryptographic material
 	// This doesn't need the PG connection or PGDATA, but it needs to reload PG in case of changes
 	reloadNeeded, err := r.certificateReconciler.RefreshSecrets(ctx, cluster)
+	if reloadNeeded {
+		r.markReloadPending()
+	}
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("while refreshing secrets: %w", err)
 	}
@@ -197,10 +200,12 @@ func (r *InstanceReconciler) Reconcile(
 	}
 
 	reloadConfigNeeded, err := r.refreshConfigurationFiles(ctx, cluster)
+	if reloadConfigNeeded {
+		r.markReloadPending()
+	}
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	reloadNeeded = reloadNeeded || reloadConfigNeeded
 
 	// here we execute initialization tasks that need to be executed only on the first reconciliation loop
 	if !r.firstReconcileDone.Load() {
@@ -212,10 +217,12 @@ func (r *InstanceReconciler) Reconcile(
 
 	// Reconcile cluster role without DB
 	reloadClusterRoleConfig, err := r.reconcileClusterRoleWithoutDB(ctx, cluster)
+	if reloadClusterRoleConfig {
+		r.markReloadPending()
+	}
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	reloadNeeded = reloadNeeded || reloadClusterRoleConfig
 
 	r.systemInitialization.Broadcast()
 
@@ -264,29 +271,8 @@ func (r *InstanceReconciler) Reconcile(
 	}
 	restarted = restarted || restartedInplace
 
-	if reloadNeeded && !restarted {
-		contextLogger.Info("reloading the instance")
-
-		// IMPORTANT
-		//
-		// We are unsure of the state of the PostgreSQL configuration
-		// meanwhile a new configuration is applied.
-		//
-		// For this reason, before applying a new configuration we
-		// reset the FailoverQuorum object - de facto preventing any failover -
-		// and we update it after.
-		if err = r.resetFailoverQuorumObject(ctx, cluster); err != nil {
-			return reconcile.Result{}, err
-		}
-		if err = r.instance.Reload(ctx); err != nil {
-			return reconcile.Result{}, fmt.Errorf("while reloading the instance: %w", err)
-		}
-		if err = r.processConfigReloadAndManageRestart(ctx, cluster); err != nil {
-			return reconcile.Result{}, fmt.Errorf("cannot apply new PostgreSQL configuration: %w", err)
-		}
-
-		// Reload pgbackrest TLS server to pick up rotated certificates
-		r.pgBackRestTLSServer.Reload()
+	if err = r.reconcilePendingReload(ctx, cluster, restarted); err != nil {
+		return reconcile.Result{}, err
 	}
 
 	if err = r.updateFailoverQuorumObject(ctx, cluster); err != nil {
@@ -408,6 +394,51 @@ func (r *InstanceReconciler) restartPrimaryInplaceIfRequested(
 		)
 	}
 	return false, nil
+}
+
+func (r *InstanceReconciler) markReloadPending() {
+	r.reloadPending.Store(true)
+}
+
+func (r *InstanceReconciler) reconcilePendingReload(
+	ctx context.Context,
+	cluster *apiv1.Cluster,
+	restarted bool,
+) error {
+	if !r.reloadPending.Load() {
+		return nil
+	}
+
+	if restarted {
+		r.pgBackRestTLSServer.Reload()
+		r.reloadPending.Store(false)
+		return nil
+	}
+
+	log.FromContext(ctx).Info("reloading the instance")
+
+	// IMPORTANT
+	//
+	// We are unsure of the state of the PostgreSQL configuration
+	// meanwhile a new configuration is applied.
+	//
+	// For this reason, before applying a new configuration we
+	// reset the FailoverQuorum object - de facto preventing any failover -
+	// and we update it after.
+	if err := r.resetFailoverQuorumObject(ctx, cluster); err != nil {
+		return err
+	}
+	if err := r.instance.Reload(ctx); err != nil {
+		return fmt.Errorf("while reloading the instance: %w", err)
+	}
+	if err := r.processConfigReloadAndManageRestart(ctx, cluster); err != nil {
+		return fmt.Errorf("cannot apply new PostgreSQL configuration: %w", err)
+	}
+
+	// Reload pgbackrest TLS server to pick up rotated certificates
+	r.pgBackRestTLSServer.Reload()
+	r.reloadPending.Store(false)
+	return nil
 }
 
 func (r *InstanceReconciler) refreshConfigurationFiles(

@@ -42,13 +42,16 @@ import (
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/pkg/concurrency"
+	"github.com/xataio/xata-cnpg/pkg/executablehash"
 	"github.com/xataio/xata-cnpg/pkg/management"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/constants"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/probes"
 	"github.com/xataio/xata-cnpg/pkg/management/upgrade"
 	"github.com/xataio/xata-cnpg/pkg/management/url"
+	pgstatus "github.com/xataio/xata-cnpg/pkg/postgres"
 	"github.com/xataio/xata-cnpg/pkg/utils"
+	"github.com/xataio/xata-cnpg/pkg/versions"
 )
 
 const errCodeAnotherRequestInProgress = "ANOTHER_REQUEST_IN_PROGRESS"
@@ -274,16 +277,22 @@ func (ws *remoteWebserverEndpoints) isServerReady(w http.ResponseWriter, req *ht
 
 // This probe is for the instance status, including replication
 func (ws *remoteWebserverEndpoints) pgStatus(w http.ResponseWriter, _ *http.Request) {
-	// While waiting for PGDATA, return a minimal status without attempting PG connections.
-	// Setting mightBeUnavailable tells the operator not to treat connection errors as failures.
+	var status *pgstatus.PostgresqlStatus
+	var err error
 	if ws.instance.WaitingForPGData() {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"mightBeUnavailable":true}`)
-		return
+		// Report the manager identity so online upgrades work before PGDATA arrives.
+		// Keep PostgreSQL unavailable and do not attempt database connections.
+		status = &pgstatus.PostgresqlStatus{
+			MightBeUnavailable:         true,
+			InstanceManagerVersion:     versions.Version,
+			InstanceArch:               ws.instance.GetArchitecture(),
+			IsInstanceManagerUpgrading: ws.instance.InstanceManagerIsUpgrading.Load(),
+		}
+		status.ExecutableHash, err = executablehash.Get()
+	} else {
+		status, err = ws.instance.GetStatus()
 	}
 
-	// Extract the status of the current instance
-	status, err := ws.instance.GetStatus()
 	if err != nil {
 		log.Debug(
 			"Instance status probe failing",
@@ -292,19 +301,15 @@ func (ws *remoteWebserverEndpoints) pgStatus(w http.ResponseWriter, _ *http.Requ
 		return
 	}
 
-	// Marshal the status back to the operator
+	// Encode the status as JSON for the operator.
 	log.Trace("Instance status probe succeeding")
-	js, err := json.Marshal(status)
-	if err != nil {
-		log.Warning(
-			"Internal error marshalling instance status",
-			"err", err.Error())
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(js)
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.Warning(
+			"Error writing instance status",
+			"err", err.Error())
+		http.Error(w, "Failed to write instance status", http.StatusInternalServerError)
+	}
 }
 
 func (ws *remoteWebserverEndpoints) pgControlData(w http.ResponseWriter, _ *http.Request) {

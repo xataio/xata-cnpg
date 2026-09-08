@@ -38,7 +38,7 @@ var _ = Describe("Connection profile defaults", func() {
 			cfg := parseConfig()
 			profile.Enrich(cfg)
 
-			Expect(cfg.RuntimeParams).To(HaveKeyWithValue("search_path", `"$user", public`))
+			Expect(cfg.RuntimeParams).To(HaveKeyWithValue("search_path", "pg_catalog"))
 
 			// Verify the pre-existing defaults are still present.
 			Expect(cfg.RuntimeParams).To(HaveKeyWithValue("client_encoding", "UTF8"))

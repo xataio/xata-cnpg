@@ -88,8 +88,10 @@ func fillDefaultParameters(config *pgx.ConnConfig) {
 	config.RuntimeParams["datestyle"] = "ISO"
 }
 
-// pinSearchPath pins search_path via the startup packet so it cannot be overridden by
-// database- or role-level defaults.
+// pinSearchPath pins search_path via the startup packet so it cannot be
+// overridden by database- or role-level defaults. Code paths that need a
+// writable schema (CREATE EXTENSION, user-supplied SQL) opt in by setting
+// search_path locally for the duration of that operation.
 func pinSearchPath(config *pgx.ConnConfig) {
-	config.RuntimeParams["search_path"] = `"$user", public`
+	config.RuntimeParams["search_path"] = "pg_catalog"
 }

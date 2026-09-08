@@ -62,9 +62,14 @@ func (s *TLSServer) Start(ctx context.Context) error {
 		// An online instance manager upgrade uses syscall.Exec, which leaves the
 		// pgbackrest child running while replacing all manager state. Adopt that
 		// process just as the new manager adopts an existing PostgreSQL postmaster.
+		// Reload it before adoption because the new manager cannot know which
+		// configuration the existing process has loaded.
+		if err := process.Signal(syscall.SIGHUP); err != nil {
+			return fmt.Errorf("reloading adopted pgbackrest TLS server process %d: %w", process.Pid, err)
+		}
 		s.process = process
 		s.running = true
-		contextLog.Info("adopted running pgbackrest TLS server", "pid", process.Pid)
+		contextLog.Info("adopted and reloaded running pgbackrest TLS server", "pid", process.Pid)
 		go s.monitor(contextLog, process, func() error {
 			state, err := process.Wait()
 			if err != nil {
@@ -132,15 +137,19 @@ func (s *TLSServer) Stop() {
 
 // Reload sends SIGHUP to the pgbackrest server, causing it to re-read
 // its configuration and TLS certificates from disk.
-func (s *TLSServer) Reload() {
+func (s *TLSServer) Reload() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if !s.running || s.process == nil {
-		return
+		return nil
 	}
 
-	_ = s.process.Signal(syscall.SIGHUP)
+	if err := s.process.Signal(syscall.SIGHUP); err != nil {
+		return fmt.Errorf("signaling pgbackrest TLS server process %d: %w", s.process.Pid, err)
+	}
+
+	return nil
 }
 
 // IsRunning returns true if the TLS server process is alive.

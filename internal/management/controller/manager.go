@@ -40,6 +40,16 @@ import (
 	instancecertificate "github.com/xataio/xata-cnpg/pkg/reconciler/instance/certificate"
 )
 
+type pgBackRestTLSServer interface {
+	Start(context.Context) error
+	Reload() error
+	IsRunning() bool
+}
+
+type certificateRefresher interface {
+	RefreshSecrets(context.Context, *apiv1.Cluster) (bool, error)
+}
+
 // InstanceReconciler reconciles the status of the Cluster resource with
 // the one of this PostgreSQL instance. Also, the configuration in the
 // ConfigMap is applied when needed
@@ -55,7 +65,7 @@ type InstanceReconciler struct {
 	firstReconcileDone    atomic.Bool
 	metricsServerExporter *metricserver.Exporter
 
-	certificateReconciler *instancecertificate.Reconciler
+	certificateReconciler certificateRefresher
 	pluginRepository      repository.Interface
 
 	// pgBackRestStanzaCreated holds the name of the pgbackrest stanza that was
@@ -63,7 +73,8 @@ type InstanceReconciler struct {
 	// change of stanza name triggers stanza-create for the new stanza instead
 	// of being skipped.
 	pgBackRestStanzaCreated atomic.Pointer[string]
-	pgBackRestTLSServer     pgbackrest.TLSServer
+	pgBackRestReloadPending atomic.Bool
+	pgBackRestTLSServer     pgBackRestTLSServer
 }
 
 // NewInstanceReconciler creates a new instance reconciler
@@ -82,6 +93,7 @@ func NewInstanceReconciler(
 		metricsServerExporter: metricsExporter,
 		certificateReconciler: instancecertificate.NewReconciler(client, instance),
 		pluginRepository:      pluginRepository,
+		pgBackRestTLSServer:   &pgbackrest.TLSServer{},
 	}
 }
 

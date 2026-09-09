@@ -819,6 +819,13 @@ func (r *BackupReconciler) getBackupTargetPod(ctx context.Context,
 	if backup.Spec.Target != "" {
 		backupTarget = backup.Spec.Target
 	}
+	// A pgBackRest backup that already failed on a standby is handed back by the
+	// instance manager for a retry on the primary, which needs neither a
+	// connection to another pod nor a matching pgbackrest version. This
+	// overrides the configured target on purpose.
+	if _, fellBack := backup.Annotations[utils.PgBackRestPrimaryFallback]; fellBack {
+		backupTarget = apiv1.BackupTargetPrimary
+	}
 	postgresqlStatusList := r.instanceStatusClient.GetStatusFromInstances(ctx, pods)
 	for _, item := range postgresqlStatusList.Items {
 		if !item.IsPodReady {

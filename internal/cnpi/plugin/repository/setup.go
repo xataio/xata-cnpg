@@ -22,9 +22,12 @@ package repository
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"os"
 	"path"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/jackc/puddle/v2"
@@ -62,6 +65,23 @@ type Interface interface {
 type data struct {
 	mux                  sync.Mutex
 	pluginConnectionPool map[string]*puddle.Pool[connection.Interface]
+
+	// inFlightAcquisitions tracks how many GetConnection attempts are
+	// currently running, so that pool close operations can record whether
+	// they raced with an acquisition
+	inFlightAcquisitions atomic.Int64
+}
+
+// getPool returns the connection pool currently registered for the given
+// plugin name. The map lookup is done under the mutex: the map is mutated
+// by setPluginProtocol and ForgetPlugin, and an unprotected read is a data
+// race that can crash the process.
+func (r *data) getPool(name string) (*puddle.Pool[connection.Interface], bool) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	pool, ok := r.pluginConnectionPool[name]
+	return pool, ok
 }
 
 // pluginSetupOptions are the options to be used when setting up
@@ -129,7 +149,7 @@ func (r *data) setPluginProtocol(name string, protocol connection.Protocol, opts
 
 	if oldPool, alreadyRegistered := r.pluginConnectionPool[name]; alreadyRegistered {
 		if opts.forceRegistration {
-			oldPool.Close()
+			r.closePool(name, oldPool, "forced re-registration")
 		} else {
 			return &ErrPluginAlreadyRegistered{
 				Name: name,
@@ -148,7 +168,36 @@ func (r *data) setPluginProtocol(name string, protocol connection.Protocol, opts
 	if err != nil {
 		return err
 	}
+
+	log.FromContext(context.Background()).
+		WithName("plugin_repository").
+		Info("Created plugin connection pool",
+			"pluginName", name,
+			"pool", fmt.Sprintf("%p", r.pluginConnectionPool[name]),
+		)
 	return nil
+}
+
+// closePool closes a plugin connection pool, recording why it is being
+// closed and whether the close raced with in-flight connection
+// acquisitions. It must be called with the mutex held.
+//
+// Note that pool.Close() blocks until every acquired resource has been
+// released or destroyed, so the duration is also worth recording.
+func (r *data) closePool(name string, pool *puddle.Pool[connection.Interface], reason string) {
+	logger := log.FromContext(context.Background()).
+		WithName("plugin_repository").
+		WithValues(
+			"pluginName", name,
+			"pool", fmt.Sprintf("%p", pool),
+			"reason", reason,
+			"inFlightAcquisitions", r.inFlightAcquisitions.Load(),
+		)
+
+	logger.Info("Closing plugin connection pool")
+	startTime := time.Now()
+	pool.Close()
+	logger.Info("Closed plugin connection pool", "duration", time.Since(startTime).String())
 }
 
 func (r *data) ForgetPlugin(name string) {
@@ -160,7 +209,7 @@ func (r *data) ForgetPlugin(name string) {
 		return
 	}
 
-	pool.Close()
+	r.closePool(name, pool, "plugin forgotten")
 	delete(r.pluginConnectionPool, name)
 }
 
@@ -230,7 +279,7 @@ func (r *data) Close() {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
-	for _, pool := range r.pluginConnectionPool {
-		pool.Close()
+	for name, pool := range r.pluginConnectionPool {
+		r.closePool(name, pool, "repository shutdown")
 	}
 }

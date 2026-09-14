@@ -4,6 +4,7 @@ package v1
 
 import (
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corev1 "k8s.io/client-go/applyconfigurations/core/v1"
 )
 
@@ -50,6 +51,14 @@ type PgBouncerSpecApplyConfiguration struct {
 	// client connections until this value is set to `false` (default). Internally,
 	// the operator calls PgBouncer's `PAUSE` and `RESUME` commands.
 	Paused *bool `json:"paused,omitempty"`
+	// PauseDuringSwitchover when true, automatically pauses this pooler
+	// during switchover/failover operations on the referenced cluster
+	// to minimize client connection failures.
+	PauseDuringSwitchover *bool `json:"pauseDuringSwitchover,omitempty"`
+	// PauseDuringSwitchoverTimeout is the maximum duration to keep the pooler
+	// paused during switchover. If the switchover doesn't complete within
+	// this time, the pooler will be automatically resumed.
+	PauseDuringSwitchoverTimeout *metav1.Duration `json:"pauseDuringSwitchoverTimeout,omitempty"`
 }
 
 // PgBouncerSpecApplyConfiguration constructs a declarative configuration of the PgBouncerSpec type for use with
@@ -143,5 +152,21 @@ func (b *PgBouncerSpecApplyConfiguration) WithPgHBA(values ...string) *PgBouncer
 // If called multiple times, the Paused field is set to the value of the last call.
 func (b *PgBouncerSpecApplyConfiguration) WithPaused(value bool) *PgBouncerSpecApplyConfiguration {
 	b.Paused = &value
+	return b
+}
+
+// WithPauseDuringSwitchover sets the PauseDuringSwitchover field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PauseDuringSwitchover field is set to the value of the last call.
+func (b *PgBouncerSpecApplyConfiguration) WithPauseDuringSwitchover(value bool) *PgBouncerSpecApplyConfiguration {
+	b.PauseDuringSwitchover = &value
+	return b
+}
+
+// WithPauseDuringSwitchoverTimeout sets the PauseDuringSwitchoverTimeout field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PauseDuringSwitchoverTimeout field is set to the value of the last call.
+func (b *PgBouncerSpecApplyConfiguration) WithPauseDuringSwitchoverTimeout(value metav1.Duration) *PgBouncerSpecApplyConfiguration {
+	b.PauseDuringSwitchoverTimeout = &value
 	return b
 }

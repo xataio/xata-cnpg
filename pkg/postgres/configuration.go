@@ -569,8 +569,15 @@ var (
 			SharedPreloadLibraries: "",
 		},
 		MandatorySettings: SettingsCollection{
+			// The trailing "# pgbackrest" is a shell comment. PostgreSQL runs
+			// archive_command through a shell, so the comment is ignored at
+			// execution. It is present only so pgbackrest's archive-check finds
+			// its own name in archive_command (checkArchiveCommand does a
+			// substring match on "pgbackrest"). Without it the check fails with
+			// ArchiveCommandInvalidError, and we would have to disable the
+			// whole archive-check, losing the end-of-backup WAL verification.
 			"archive_command": fmt.Sprintf(
-				"/controller/manager wal-archive --log-destination %s/%s.json %%p",
+				"/controller/manager wal-archive --log-destination %s/%s.json %%p # pgbackrest",
 				LogPath, LogFileName),
 			"hot_standby":             "true",
 			"listen_addresses":        "*",

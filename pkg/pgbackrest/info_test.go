@@ -382,3 +382,51 @@ func TestBackupInfoSize(t *testing.T) {
 		t.Errorf("unexpected repo size: %d", full.Info.Repository.Size)
 	}
 }
+
+func TestStanzaMissing(t *testing.T) {
+	tests := []struct {
+		name          string
+		code          int
+		expectMissing bool
+	}{
+		{"ok", StanzaStatusOK, false},
+		{"missing stanza path", StanzaStatusMissingPath, true},
+		{"no valid backups", StanzaStatusNoValidBackups, false},
+		{"missing stanza data", StanzaStatusMissingData, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stanza StanzaInfo
+			stanza.Status.Code = tt.code
+			if stanza.StanzaMissing() != tt.expectMissing {
+				t.Errorf("code %d: expected StanzaMissing %v, got %v",
+					tt.code, tt.expectMissing, stanza.StanzaMissing())
+			}
+		})
+	}
+}
+
+func TestStanzaMissingFromJSON(t *testing.T) {
+	// This is what pgbackrest info prints, with exit code 0, for a stanza
+	// that does not exist in the repository.
+	missingJSON := `[
+	  {
+	    "name": "no-such-stanza",
+	    "backup": [],
+	    "status": {
+	      "code": 1,
+	      "message": "missing stanza path"
+	    }
+	  }
+	]`
+
+	var stanzas []StanzaInfo
+	if err := json.Unmarshal([]byte(missingJSON), &stanzas); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	if !stanzas[0].StanzaMissing() {
+		t.Error("expected StanzaMissing to be true for status code 1")
+	}
+}

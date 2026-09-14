@@ -147,6 +147,9 @@ func (r *InstanceReconciler) Reconcile(
 	// Reconcile secrets and cryptographic material
 	// This doesn't need the PG connection or PGDATA, but it needs to reload PG in case of changes
 	reloadNeeded, err := r.certificateReconciler.RefreshSecrets(ctx, cluster)
+	if reloadNeeded && cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+		r.pgBackRestReloadPending.Store(true)
+	}
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("while refreshing secrets: %w", err)
 	}
@@ -284,9 +287,6 @@ func (r *InstanceReconciler) Reconcile(
 		if err = r.processConfigReloadAndManageRestart(ctx, cluster); err != nil {
 			return reconcile.Result{}, fmt.Errorf("cannot apply new PostgreSQL configuration: %w", err)
 		}
-
-		// Reload pgbackrest TLS server to pick up rotated certificates
-		r.pgBackRestTLSServer.Reload()
 	}
 
 	if err = r.updateFailoverQuorumObject(ctx, cluster); err != nil {
@@ -1136,14 +1136,33 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		})
 	}
 
+	// The role comes from the cluster status. During a switchover this pod's
+	// PGDATA may still be a primary flushing leftover WAL (ArchiveAllReadyWALs)
+	// while the status already names the new primary; it then gets the replica
+	// config, which is fine: pg1 is the local instance in both variants, so
+	// archive-push and archive-get run locally either way.
 	isPrimary := r.instance.GetPodName() == cluster.Status.CurrentPrimary
 	content, err := pgbackrest.GenerateConfig(ctx, r.GetClient(), cluster, r.instance.PgData, isPrimary)
 	if err != nil {
 		return fmt.Errorf("generating pgbackrest config: %w", err)
 	}
 
-	if _, err := pgbackrest.WriteConfigFile(content); err != nil {
+	configChanged, err := pgbackrest.WriteConfigFile(content, r.instance.PgData)
+	if err != nil {
 		return fmt.Errorf("writing pgbackrest config: %w", err)
+	}
+	if err := r.reconcilePgBackRestTLSServer(ctx, configChanged); err != nil {
+		// Keep PostgreSQL management and config generation publication running.
+		// The pending flag retains the TLS work for the next reconcile.
+		log.FromContext(ctx).Error(err,
+			"Failed to apply pgbackrest TLS server configuration, will retry on next reconcile")
+	}
+
+	// pgbackrest has no log management of its own; bound the log files here
+	// since there is no logrotate in the container. Failures are not fatal:
+	// rotation is retried on the next reconcile.
+	if err := pgbackrest.RotateLogs(r.instance.PgData, cluster.GetPgBackRestStanzaName()); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to rotate pgbackrest logs, will retry on next reconcile")
 	}
 
 	// Stanza creation is only needed on the primary — the stanza metadata
@@ -1164,14 +1183,39 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		r.pgBackRestStanzaCreated.Store(&stanza)
 	}
 
-	// Start the pgbackrest TLS server if not already running.
-	// All pods run the server so backup-standby works after switchovers.
-	if !r.pgBackRestTLSServer.IsRunning() {
-		if err := r.pgBackRestTLSServer.Start(ctx); err != nil {
-			log.FromContext(ctx).Error(err, "Failed to start pgbackrest TLS server")
-		}
+	// Publish the generation whose pgbackrest configuration is now fully
+	// applied on this pod. Backups wait on this before running pgbackrest.
+	r.instance.PgBackRestAppliedGeneration.Store(cluster.Generation)
+
+	return nil
+}
+
+// reconcilePgBackRestTLSServer ensures that the server has loaded the current
+// configuration. A failed reload remains pending because the file is already
+// current and will not report another content change on the next reconcile.
+func (r *InstanceReconciler) reconcilePgBackRestTLSServer(ctx context.Context, configChanged bool) error {
+	if configChanged {
+		r.pgBackRestReloadPending.Store(true)
 	}
 
+	if !r.pgBackRestTLSServer.IsRunning() {
+		if err := r.pgBackRestTLSServer.Start(ctx); err != nil {
+			return fmt.Errorf("starting pgbackrest TLS server: %w", err)
+		}
+		r.pgBackRestReloadPending.Store(false)
+		return nil
+	}
+
+	if !r.pgBackRestReloadPending.Load() {
+		return nil
+	}
+
+	if err := r.pgBackRestTLSServer.Reload(); err != nil {
+		return fmt.Errorf("reloading pgbackrest TLS server: %w", err)
+	}
+
+	r.pgBackRestReloadPending.Store(false)
+	log.FromContext(ctx).Info("reloaded pgbackrest TLS server configuration")
 	return nil
 }
 

@@ -11,6 +11,10 @@ type PoolerStatusApplyConfiguration struct {
 	Secrets *PoolerSecretsApplyConfiguration `json:"secrets,omitempty"`
 	// The number of pods trying to be scheduled
 	Instances *int32 `json:"instances,omitempty"`
+	// PausedForSwitchover indicates this pooler was automatically paused for switchover
+	PausedForSwitchover *bool `json:"pausedForSwitchover,omitempty"`
+	// PausedForSwitchoverTimestamp is when this pooler was paused (RFC3339Micro)
+	PausedForSwitchoverTimestamp *string `json:"pausedForSwitchoverTimestamp,omitempty"`
 }
 
 // PoolerStatusApplyConfiguration constructs a declarative configuration of the PoolerStatus type for use with
@@ -32,5 +36,21 @@ func (b *PoolerStatusApplyConfiguration) WithSecrets(value *PoolerSecretsApplyCo
 // If called multiple times, the Instances field is set to the value of the last call.
 func (b *PoolerStatusApplyConfiguration) WithInstances(value int32) *PoolerStatusApplyConfiguration {
 	b.Instances = &value
+	return b
+}
+
+// WithPausedForSwitchover sets the PausedForSwitchover field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PausedForSwitchover field is set to the value of the last call.
+func (b *PoolerStatusApplyConfiguration) WithPausedForSwitchover(value bool) *PoolerStatusApplyConfiguration {
+	b.PausedForSwitchover = &value
+	return b
+}
+
+// WithPausedForSwitchoverTimestamp sets the PausedForSwitchoverTimestamp field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PausedForSwitchoverTimestamp field is set to the value of the last call.
+func (b *PoolerStatusApplyConfiguration) WithPausedForSwitchoverTimestamp(value string) *PoolerStatusApplyConfiguration {
+	b.PausedForSwitchoverTimestamp = &value
 	return b
 }

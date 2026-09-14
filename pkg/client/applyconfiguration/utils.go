@@ -138,10 +138,16 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.OptionSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PasswordState"):
 		return &apiv1.PasswordStateApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("PgBackRestAzure"):
+		return &apiv1.PgBackRestAzureApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("PgBackRestCipher"):
+		return &apiv1.PgBackRestCipherApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PgBackRestConfiguration"):
 		return &apiv1.PgBackRestConfigurationApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PgBackRestExternalCluster"):
 		return &apiv1.PgBackRestExternalClusterApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("PgBackRestGCS"):
+		return &apiv1.PgBackRestGCSApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PgBackRestOptions"):
 		return &apiv1.PgBackRestOptionsApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PgBackRestRepository"):

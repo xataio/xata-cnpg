@@ -30,11 +30,15 @@ import (
 	"strings"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
+
+	"github.com/xataio/xata-cnpg/pkg/postgres"
 )
 
 const (
+	dataDirectory = postgres.ScratchDataDirectory + "/pgbackrest"
+
 	// ConfigFilePath is the location of the pgbackrest configuration file.
-	ConfigFilePath = "/controller/pgbackrest/pgbackrest.conf"
+	ConfigFilePath = dataDirectory + "/pgbackrest.conf"
 
 	// pgbackrestBinary is the pgbackrest executable name.
 	pgbackrestBinary = "pgbackrest"
@@ -65,6 +69,25 @@ func IsStanzaMissingFromRepo(err error) bool {
 		return false
 	}
 	return cmdErr.ExitCode == 103 && strings.Contains(cmdErr.Stderr, "FileMissingError")
+}
+
+// lockAcquireExitCode is the pgbackrest exit code (LockAcquireError) returned
+// when a command cannot acquire its lock because another pgbackrest process is
+// already holding it.
+const lockAcquireExitCode = 50
+
+// IsLockBusy reports whether a pgbackrest error indicates the command could not
+// acquire its lock because another pgbackrest process holds it. stanza-create,
+// backup and expire all share pgbackrest's "backup" lock, so a backup triggered
+// at cluster adoption can race the stanza-create that runs on the same event and
+// fail with this error. The contention is transient — it clears as soon as the
+// other process releases the lock — so callers can safely retry.
+func IsLockBusy(err error) bool {
+	var cmdErr *CommandError
+	if !errors.As(err, &cmdErr) {
+		return false
+	}
+	return cmdErr.ExitCode == lockAcquireExitCode
 }
 
 // CommandError is returned when a pgbackrest command fails.
@@ -153,7 +176,7 @@ func Backup(ctx context.Context, stanzaName string, backupType string, annotatio
 	contextLog := log.FromContext(ctx)
 	contextLog.Info("Starting pgbackrest backup", "stanza", stanzaName, "type", backupType)
 
-	args := []string{"--stanza=" + stanzaName, "backup", "--type=" + backupType, "--no-archive-check"}
+	args := []string{"--stanza=" + stanzaName, "backup", "--type=" + backupType}
 	if annotation != "" {
 		args = append(args, "--annotation="+annotation)
 	}

@@ -27,16 +27,6 @@ This is Xata's fork of [CloudNativePG](https://github.com/cloudnative-pg/cloudna
 - Verifies CRDs are up to date (both `config/crd` and `charts/`)
 - Builds and pushes image + Helm chart
 
-**Creating a test PR in infra-new:**
-
-Include `[create-pr]` in your commit message to automatically create a PR in the infra-new repo that updates the cloudnative-pg chart version. This is useful for testing changes in dev environments.
-
-```bash
-git commit -m "My changes [create-pr]"
-```
-
-> ⚠️ **Use with care:** This updates the chart version in the `xata-cnpg-1.28.0` component, which may affect multiple stages. Only merge for dev testing and revert before deploying to staging/production.
-
 **Artifacts:**
 
 | Artifact | Location |

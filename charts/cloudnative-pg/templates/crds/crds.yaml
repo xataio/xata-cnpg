@@ -2007,7 +2007,7 @@ spec:
                             type: integer
                           processMax:
                             description: Maximum number of parallel processes for
-                              backup/restore.
+                              backup.
                             minimum: 1
                             type: integer
                           repoPath:
@@ -2018,6 +2018,13 @@ spec:
                               incarnation from existing data under the default path, or to restore
                               from a custom path.
                             type: string
+                          restoreProcessMax:
+                            description: |-
+                              Maximum number of parallel processes for restore. Defaults to a higher
+                              value than ProcessMax because PostgreSQL is not running during restore,
+                              so the full CPU is available for pgbackrest.
+                            minimum: 1
+                            type: integer
                           retention:
                             description: Backup retention policy.
                             properties:
@@ -2061,11 +2068,131 @@ spec:
                           azure:
                             description: PgBackRestAzure defines the Azure Blob Storage
                               configuration for pgbackrest.
+                            properties:
+                              account:
+                                description: The Azure storage account name
+                                type: string
+                              container:
+                                description: The Azure Blob Storage container name
+                                type: string
+                              endpoint:
+                                description: |-
+                                  The Azure Blob Storage endpoint, overriding the default
+                                  <account>.blob.core.windows.net. Rarely needed, mostly for testing
+                                  against Azurite.
+                                type: string
+                              keyRef:
+                                description: |-
+                                  The reference to a Secret holding the storage account shared key when
+                                  keyType is "shared", or a SAS token when keyType is "sas". Required
+                                  for those key types, must be unset for "auto".
+                                properties:
+                                  key:
+                                    description: The key to select
+                                    type: string
+                                  name:
+                                    description: Name of the referent.
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              keyType:
+                                default: auto
+                                description: |-
+                                  KeyType selects the authentication method. "auto" requests a
+                                  managed-identity token from instance metadata (the AKS path,
+                                  pgbackrest >= 2.58). "shared" reads the storage account shared key
+                                  from KeyRef. "sas" reads a shared access signature token from KeyRef.
+                                enum:
+                                - auto
+                                - shared
+                                - sas
+                                type: string
+                            required:
+                            - account
+                            - container
+                            type: object
+                            x-kubernetes-validations:
+                            - message: keyRef must be set when keyType is shared or
+                                sas, and must not be set when keyType is auto
+                              rule: (has(self.keyType) && (self.keyType == 'shared'
+                                || self.keyType == 'sas')) == has(self.keyRef)
+                          cipher:
+                            description: Cipher configures client-side encryption
+                              for this repository.
+                            properties:
+                              passphrase:
+                                description: Passphrase references the Secret key
+                                  that contains the repository passphrase.
+                                properties:
+                                  key:
+                                    description: The key to select
+                                    type: string
+                                  name:
+                                    description: Name of the referent.
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              type:
+                                description: Type is the cipher used by pgbackrest.
+                                enum:
+                                - aes-256-cbc
+                                type: string
+                            required:
+                            - passphrase
+                            - type
                             type: object
                           gcs:
                             description: PgBackRestGCS defines the Google Cloud Storage
                               configuration for pgbackrest.
+                            properties:
+                              bucket:
+                                description: The GCS bucket name
+                                type: string
+                              endpoint:
+                                description: |-
+                                  The GCS endpoint, overriding the automatic endpoint discovery.
+                                  Rarely needed, mostly for testing against GCS emulators.
+                                type: string
+                              keyRef:
+                                description: |-
+                                  The reference to a Secret holding the service account JSON key when
+                                  keyType is "service", or a bearer token when keyType is "token".
+                                  Required for those key types, must be unset for "auto".
+                                properties:
+                                  key:
+                                    description: The key to select
+                                    type: string
+                                  name:
+                                    description: Name of the referent.
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              keyType:
+                                default: auto
+                                description: |-
+                                  KeyType selects the authentication method. "auto" uses Workload
+                                  Identity / Application Default Credentials (the GKE path). "service"
+                                  reads a service account JSON key from KeyRef. "token" uses a bearer
+                                  token from KeyRef.
+                                enum:
+                                - auto
+                                - service
+                                - token
+                                type: string
+                            required:
+                            - bucket
                             type: object
+                            x-kubernetes-validations:
+                            - message: keyRef must be set when keyType is service
+                                or token, and must not be set when keyType is auto
+                              rule: (has(self.keyType) && (self.keyType == 'service'
+                                || self.keyType == 'token')) == has(self.keyRef)
                           s3:
                             description: PgBackRestS3 defines the S3-compatible storage
                               configuration for pgbackrest.
@@ -2093,9 +2220,23 @@ spec:
                                 type: string
                               inheritFromIAMRole:
                                 description: |-
-                                  Use IAM role-based authentication (e.g. IRSA, instance profile).
-                                  Sets pgbackrest repo1-s3-key-type=auto.
+                                  Deprecated: use KeyType instead. This field is retained for existing
+                                  resources. When KeyType is empty, resources without static credentials
+                                  use the auto provider regardless of this value.
                                 type: boolean
+                              keyType:
+                                description: |-
+                                  Selects the pgbackrest S3 credential provider. The value is passed through
+                                  to repo1-s3-key-type. When empty, it defaults to auto unless both static
+                                  credential references are present, in which case it defaults to shared for
+                                  backward compatibility. Auto retrieves temporary credentials from the
+                                  instance metadata service; it does not select web-id or pod-id.
+                                enum:
+                                - shared
+                                - auto
+                                - web-id
+                                - pod-id
+                                type: string
                               region:
                                 description: The S3 region
                                 type: string
@@ -2117,10 +2258,9 @@ spec:
                             - region
                             type: object
                             x-kubernetes-validations:
-                            - message: either inheritFromIAMRole or both accessKeyId
-                                and secretAccessKey must be specified, but not both
-                              rule: (self.inheritFromIAMRole == true) != (has(self.accessKeyId)
-                                && has(self.secretAccessKey))
+                            - message: accessKeyId and secretAccessKey must be specified
+                                together
+                              rule: has(self.accessKeyId) == has(self.secretAccessKey)
                         type: object
                         x-kubernetes-validations:
                         - message: exactly one of s3, gcs, or azure must be specified
@@ -3837,7 +3977,7 @@ spec:
                               type: integer
                             processMax:
                               description: Maximum number of parallel processes for
-                                backup/restore.
+                                backup.
                               minimum: 1
                               type: integer
                             repoPath:
@@ -3848,6 +3988,13 @@ spec:
                                 incarnation from existing data under the default path, or to restore
                                 from a custom path.
                               type: string
+                            restoreProcessMax:
+                              description: |-
+                                Maximum number of parallel processes for restore. Defaults to a higher
+                                value than ProcessMax because PostgreSQL is not running during restore,
+                                so the full CPU is available for pgbackrest.
+                              minimum: 1
+                              type: integer
                             retention:
                               description: Backup retention policy.
                               properties:
@@ -3891,11 +4038,131 @@ spec:
                             azure:
                               description: PgBackRestAzure defines the Azure Blob
                                 Storage configuration for pgbackrest.
+                              properties:
+                                account:
+                                  description: The Azure storage account name
+                                  type: string
+                                container:
+                                  description: The Azure Blob Storage container name
+                                  type: string
+                                endpoint:
+                                  description: |-
+                                    The Azure Blob Storage endpoint, overriding the default
+                                    <account>.blob.core.windows.net. Rarely needed, mostly for testing
+                                    against Azurite.
+                                  type: string
+                                keyRef:
+                                  description: |-
+                                    The reference to a Secret holding the storage account shared key when
+                                    keyType is "shared", or a SAS token when keyType is "sas". Required
+                                    for those key types, must be unset for "auto".
+                                  properties:
+                                    key:
+                                      description: The key to select
+                                      type: string
+                                    name:
+                                      description: Name of the referent.
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                keyType:
+                                  default: auto
+                                  description: |-
+                                    KeyType selects the authentication method. "auto" requests a
+                                    managed-identity token from instance metadata (the AKS path,
+                                    pgbackrest >= 2.58). "shared" reads the storage account shared key
+                                    from KeyRef. "sas" reads a shared access signature token from KeyRef.
+                                  enum:
+                                  - auto
+                                  - shared
+                                  - sas
+                                  type: string
+                              required:
+                              - account
+                              - container
+                              type: object
+                              x-kubernetes-validations:
+                              - message: keyRef must be set when keyType is shared
+                                  or sas, and must not be set when keyType is auto
+                                rule: (has(self.keyType) && (self.keyType == 'shared'
+                                  || self.keyType == 'sas')) == has(self.keyRef)
+                            cipher:
+                              description: Cipher configures client-side encryption
+                                for this repository.
+                              properties:
+                                passphrase:
+                                  description: Passphrase references the Secret key
+                                    that contains the repository passphrase.
+                                  properties:
+                                    key:
+                                      description: The key to select
+                                      type: string
+                                    name:
+                                      description: Name of the referent.
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                type:
+                                  description: Type is the cipher used by pgbackrest.
+                                  enum:
+                                  - aes-256-cbc
+                                  type: string
+                              required:
+                              - passphrase
+                              - type
                               type: object
                             gcs:
                               description: PgBackRestGCS defines the Google Cloud
                                 Storage configuration for pgbackrest.
+                              properties:
+                                bucket:
+                                  description: The GCS bucket name
+                                  type: string
+                                endpoint:
+                                  description: |-
+                                    The GCS endpoint, overriding the automatic endpoint discovery.
+                                    Rarely needed, mostly for testing against GCS emulators.
+                                  type: string
+                                keyRef:
+                                  description: |-
+                                    The reference to a Secret holding the service account JSON key when
+                                    keyType is "service", or a bearer token when keyType is "token".
+                                    Required for those key types, must be unset for "auto".
+                                  properties:
+                                    key:
+                                      description: The key to select
+                                      type: string
+                                    name:
+                                      description: Name of the referent.
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                keyType:
+                                  default: auto
+                                  description: |-
+                                    KeyType selects the authentication method. "auto" uses Workload
+                                    Identity / Application Default Credentials (the GKE path). "service"
+                                    reads a service account JSON key from KeyRef. "token" uses a bearer
+                                    token from KeyRef.
+                                  enum:
+                                  - auto
+                                  - service
+                                  - token
+                                  type: string
+                              required:
+                              - bucket
                               type: object
+                              x-kubernetes-validations:
+                              - message: keyRef must be set when keyType is service
+                                  or token, and must not be set when keyType is auto
+                                rule: (has(self.keyType) && (self.keyType == 'service'
+                                  || self.keyType == 'token')) == has(self.keyRef)
                             s3:
                               description: PgBackRestS3 defines the S3-compatible
                                 storage configuration for pgbackrest.
@@ -3923,9 +4190,23 @@ spec:
                                   type: string
                                 inheritFromIAMRole:
                                   description: |-
-                                    Use IAM role-based authentication (e.g. IRSA, instance profile).
-                                    Sets pgbackrest repo1-s3-key-type=auto.
+                                    Deprecated: use KeyType instead. This field is retained for existing
+                                    resources. When KeyType is empty, resources without static credentials
+                                    use the auto provider regardless of this value.
                                   type: boolean
+                                keyType:
+                                  description: |-
+                                    Selects the pgbackrest S3 credential provider. The value is passed through
+                                    to repo1-s3-key-type. When empty, it defaults to auto unless both static
+                                    credential references are present, in which case it defaults to shared for
+                                    backward compatibility. Auto retrieves temporary credentials from the
+                                    instance metadata service; it does not select web-id or pod-id.
+                                  enum:
+                                  - shared
+                                  - auto
+                                  - web-id
+                                  - pod-id
+                                  type: string
                                 region:
                                   description: The S3 region
                                   type: string
@@ -3948,10 +4229,9 @@ spec:
                               - region
                               type: object
                               x-kubernetes-validations:
-                              - message: either inheritFromIAMRole or both accessKeyId
-                                  and secretAccessKey must be specified, but not both
-                                rule: (self.inheritFromIAMRole == true) != (has(self.accessKeyId)
-                                  && has(self.secretAccessKey))
+                              - message: accessKeyId and secretAccessKey must be specified
+                                  together
+                                rule: has(self.accessKeyId) == has(self.secretAccessKey)
                           type: object
                           x-kubernetes-validations:
                           - message: exactly one of s3, gcs, or azure must be specified

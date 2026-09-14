@@ -55,6 +55,41 @@ var _ = Describe("test metrics parsing", func() {
 		exporter = NewExporter(instance, fakePluginCollector{})
 	})
 
+	It("exposes instance manager information while waiting for PGDATA", func() {
+		instance := postgres.NewInstance().
+			WithNamespace("database").
+			WithClusterName("cluster-example").
+			WithPodName("cluster-example-1")
+		instance.SetWaitingForPGData(true)
+		exporter = NewExporter(instance, fakePluginCollector{})
+		exporter.getExecutableHash = func() (string, error) {
+			return "test-hash", nil
+		}
+
+		registry := prometheus.NewRegistry()
+		registry.MustRegister(exporter)
+		metrics, err := registry.Gather()
+		Expect(err).ToNot(HaveOccurred())
+
+		metric := getMetric(metrics, "cnpg_instance_manager_info")
+		Expect(metric).ToNot(BeNil())
+		Expect(metric.GetMetric()).To(HaveLen(1))
+		Expect(metric.GetMetric()[0].GetGauge().GetValue()).To(BeEquivalentTo(1))
+
+		labels := make(map[string]string)
+		for _, label := range metric.GetMetric()[0].GetLabel() {
+			labels[label.GetName()] = label.GetValue()
+		}
+		Expect(labels).To(SatisfyAll(
+			HaveKeyWithValue("namespace", "database"),
+			HaveKeyWithValue("cluster", "cluster-example"),
+			HaveKeyWithValue("pod", "cluster-example-1"),
+			HaveKeyWithValue("architecture", instance.GetArchitecture()),
+			HaveKeyWithValue("executable_hash", "test-hash"),
+		))
+		Expect(getMetric(metrics, "cnpg_collector_up")).To(BeNil())
+	})
+
 	It("fails if there's no cluster in the cache", func() {
 		exporter.collectFromPrimaryFirstPointOnTimeRecovery()
 		exporter.collectFromPrimaryLastAvailableBackupTimestamp()

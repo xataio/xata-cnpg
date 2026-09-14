@@ -22,9 +22,16 @@ type PgBackRestS3ApplyConfiguration struct {
 	AccessKeyID *api.SecretKeySelector `json:"accessKeyId,omitempty"`
 	// The reference to the secret access key
 	SecretAccessKey *api.SecretKeySelector `json:"secretAccessKey,omitempty"`
-	// Use IAM role-based authentication (e.g. IRSA, instance profile).
-	// Sets pgbackrest repo1-s3-key-type=auto.
+	// Deprecated: use KeyType instead. This field is retained for existing
+	// resources. When KeyType is empty, resources without static credentials
+	// use the auto provider regardless of this value.
 	InheritFromIAMRole *bool `json:"inheritFromIAMRole,omitempty"`
+	// Selects the pgbackrest S3 credential provider. The value is passed through
+	// to repo1-s3-key-type. When empty, it defaults to auto unless both static
+	// credential references are present, in which case it defaults to shared for
+	// backward compatibility. Auto retrieves temporary credentials from the
+	// instance metadata service; it does not select web-id or pod-id.
+	KeyType *string `json:"keyType,omitempty"`
 }
 
 // PgBackRestS3ApplyConfiguration constructs a declarative configuration of the PgBackRestS3 type for use with
@@ -78,5 +85,13 @@ func (b *PgBackRestS3ApplyConfiguration) WithSecretAccessKey(value api.SecretKey
 // If called multiple times, the InheritFromIAMRole field is set to the value of the last call.
 func (b *PgBackRestS3ApplyConfiguration) WithInheritFromIAMRole(value bool) *PgBackRestS3ApplyConfiguration {
 	b.InheritFromIAMRole = &value
+	return b
+}
+
+// WithKeyType sets the KeyType field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the KeyType field is set to the value of the last call.
+func (b *PgBackRestS3ApplyConfiguration) WithKeyType(value string) *PgBackRestS3ApplyConfiguration {
+	b.KeyType = &value
 	return b
 }

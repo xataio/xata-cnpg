@@ -148,3 +148,48 @@ func TestIsStanzaMissingFromRepo(t *testing.T) {
 		})
 	}
 }
+
+func TestIsLockBusy(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			"lock acquire failure with exit 50",
+			&CommandError{
+				Command:  "backup",
+				ExitCode: 50,
+				Stderr:   "ERROR: [050]: unable to acquire lock: Resource temporarily unavailable",
+			},
+			true,
+		},
+		{
+			"different exit code",
+			&CommandError{
+				Command:  "backup",
+				ExitCode: 1,
+				Stderr:   "some other failure",
+			},
+			false,
+		},
+		{
+			"nil error",
+			nil,
+			false,
+		},
+		{
+			"non-CommandError",
+			fmt.Errorf("some error"),
+			false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsLockBusy(tt.err); got != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, got)
+			}
+		})
+	}
+}

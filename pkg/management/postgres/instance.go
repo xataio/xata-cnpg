@@ -233,6 +233,15 @@ type Instance struct {
 
 	serverCertificateHandler serverCertificateHandler
 
+	// PgBackRestAppliedGeneration is the Cluster generation whose pgbackrest
+	// configuration was last successfully applied by the instance reconciler
+	// (config file written and, on the primary, stanza created). Backups wait
+	// on it before invoking pgbackrest, so they never run against a config
+	// file older than the spec they were computed from (e.g. right after
+	// warm-pool adoption changes the stanza name). Zero until the first
+	// successful pass after process start.
+	PgBackRestAppliedGeneration atomic.Int64
+
 	// Cluster is the cluster this instance belongs to
 	Cluster *apiv1.Cluster
 }

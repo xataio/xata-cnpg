@@ -238,25 +238,25 @@ func (r *instanceClientImpl) UpgradeInstanceManager(
 	pod *corev1.Pod,
 	availableArchitecture *utils.AvailableArchitecture,
 ) error {
-	contextLogger := log.FromContext(ctx)
-
 	binaryFileStream, err := availableArchitecture.FileStream()
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if binaryErr := binaryFileStream.Close(); binaryErr != nil {
-			contextLogger.Error(err, "while closing the binaryFileStream")
-		}
-	}()
 
+	return r.upgradeInstanceManager(ctx, pod, binaryFileStream)
+}
+
+func (r *instanceClientImpl) upgradeInstanceManager(
+	ctx context.Context,
+	pod *corev1.Pod,
+	binaryFileStream io.ReadCloser,
+) error {
 	scheme := GetStatusSchemeFromPod(pod)
 	updateURL := url.Build(scheme.ToString(), pod.Status.PodIP, url.PathUpdate, url.StatusPort)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, updateURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, updateURL, binaryFileStream)
 	if err != nil {
-		return err
+		return errors.Join(err, binaryFileStream.Close())
 	}
-	req.Body = binaryFileStream
 
 	r.Timeout = noRequestTimeout
 	resp, err := r.Do(req) //nolint:gosec // URL built from internal pod IP

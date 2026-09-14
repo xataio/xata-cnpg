@@ -425,6 +425,36 @@ var _ = Describe("pgbackrest secrets", func() {
 		Expect(secrets).To(ContainElements("s3-access-key", "s3-secret-key"))
 	})
 
+	It("returns cipher secrets for external pgbackrest repositories", func() {
+		cluster := apiv1.Cluster{
+			Spec: apiv1.ClusterSpec{
+				ExternalClusters: []apiv1.ExternalCluster{
+					{
+						Name: "restore-source",
+						PgBackRest: &apiv1.PgBackRestExternalCluster{
+							Repository: apiv1.PgBackRestRepository{
+								S3: &apiv1.PgBackRestS3{
+									Bucket:             "test-bucket",
+									Region:             "us-east-1",
+									InheritFromIAMRole: true,
+								},
+								Cipher: &apiv1.PgBackRestCipher{
+									Type: "aes-256-cbc",
+									Passphrase: apiv1.SecretKeySelector{
+										LocalObjectReference: apiv1.LocalObjectReference{Name: "restore-cipher"},
+										Key:                  "passphrase",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		Expect(externalClusterSecrets(cluster)).To(ConsistOf("restore-cipher"))
+	})
+
 	It("includes pgbackrest secrets in backup secrets list", func() {
 		cluster := apiv1.Cluster{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},

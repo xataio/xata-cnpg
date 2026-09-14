@@ -27,6 +27,7 @@ import (
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,11 +36,42 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/resources"
 	"github.com/xataio/xata-cnpg/pkg/resources/status"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
 // AnnotationKeyBackupCR is the pgbackrest annotation key used to link a
 // backup in the repository to the Kubernetes Backup CR that triggered it.
 const AnnotationKeyBackupCR = "backup-cr"
+
+// stanzaWaitAttempts and stanzaWaitInterval control how long the backup waits
+// for the stanza to be ready before starting. The reconciler creates the stanza
+// asynchronously, and a backup triggered by ScheduledBackup immediate:true can
+// race it.
+//
+// backupRetryAttempts and backupRetryInitialDelay bound how aggressively a
+// failed pgbackrest backup is retried.
+const (
+	stanzaWaitAttempts = 12
+	stanzaWaitInterval = 5 * time.Second
+
+	backupRetryAttempts     = 4
+	backupRetryInitialDelay = 10 * time.Second
+)
+
+// appliedConfigWaitTimeout and appliedConfigWaitInterval control how long the
+// backup waits for the instance reconciler to apply the pgbackrest
+// configuration of the Cluster generation the backup was computed from. The
+// stanza on the command line comes from a fresh Cluster read, while pgbackrest
+// reads everything else from the config file the reconciler writes; running
+// before the reconciler catches up fails with "backup command requires option:
+// pg1-path" (e.g. right after warm-pool adoption renames the stanza). The
+// timeout is a backstop for a permanently failing reconciler (e.g. a broken
+// secret reference); expiry means "the reconciler has not applied this spec",
+// never plain lag.
+var (
+	appliedConfigWaitTimeout  = 5 * time.Minute
+	appliedConfigWaitInterval = 2 * time.Second
+)
 
 // PgBackRestBackupCommand represents a pgbackrest backup being executed.
 type PgBackRestBackupCommand struct {
@@ -104,6 +136,73 @@ func (b *PgBackRestBackupCommand) Start(ctx context.Context) error {
 	return nil
 }
 
+// failBackup records a backup failure. On a standby it hands the backup back to
+// the backup controller for one retry on the primary instead of failing it.
+//
+// A standby backup depends on things a primary-local backup does not: a TLS
+// connection to the primary, the same pgbackrest version on both pods, the
+// pgbackrest port on the -rw service, and a network path between them. All of
+// those have broken in production, and each one stops backups on every slot
+// until someone notices. Rather than enumerate the causes, any standby failure
+// is retried on the primary, which needs none of them.
+//
+// Clearing the phase and the elected instance sends the Backup back through the
+// normal flow; getBackupTargetPod reads PgBackRestPrimaryFallback and elects the
+// primary. The annotation also bounds this to one extra attempt: a backup that
+// fails again with it already set is failed normally, so the failure is recorded
+// and alarms fire. The role comes from this pod's own PGDATA rather than the
+// cluster status, so no other component has to agree with it.
+func (b *PgBackRestBackupCommand) failBackup(ctx context.Context, cause error) {
+	if _, alreadyFellBack := b.Backup.Annotations[utils.PgBackRestPrimaryFallback]; !alreadyFellBack {
+		// A failure to read PGDATA is not a reason to skip reporting the
+		// original failure, so treat an unknown role as primary.
+		if isPrimary, err := b.Instance.IsPrimary(); err == nil && !isPrimary {
+			if err := b.handBackToPrimary(ctx, cause); err != nil {
+				b.Log.Error(err, "Could not hand the backup back for a retry on the primary")
+			} else {
+				return
+			}
+		}
+	}
+
+	_ = status.FlagBackupAsFailed(ctx, b.Client, b.Backup, b.Cluster, cause)
+}
+
+// handBackToPrimary marks the backup for a retry on the primary and clears the
+// state that keeps it bound to this standby.
+func (b *PgBackRestBackupCommand) handBackToPrimary(ctx context.Context, cause error) error {
+	b.statusMu.Lock()
+	defer b.statusMu.Unlock()
+
+	// Annotate before clearing the status. If the status patch below fails, the
+	// annotation makes the next attempt fail normally rather than loop.
+	origBackup := b.Backup.DeepCopy()
+	if b.Backup.Annotations == nil {
+		b.Backup.Annotations = map[string]string{}
+	}
+	b.Backup.Annotations[utils.PgBackRestPrimaryFallback] = "true"
+	if err := b.Client.Patch(ctx, b.Backup, client.MergeFrom(origBackup)); err != nil {
+		return fmt.Errorf("annotating backup for the primary retry: %w", err)
+	}
+
+	b.Log.Info("Backup failed on this standby, retrying on the primary",
+		"cluster", b.Cluster.Name, "standby", b.Instance.GetPodName(), "cause", cause.Error())
+	b.Recorder.Eventf(b.Backup, "Warning", "RetryingOnPrimary",
+		"Backup failed on standby %v, retrying on the primary: %v",
+		b.Instance.GetPodName(), cause.Error())
+
+	origBackup = b.Backup.DeepCopy()
+	// The error is kept for diagnostics; the phase is what the controller acts on.
+	b.Backup.Status.Phase = ""
+	b.Backup.Status.Error = cause.Error()
+	b.Backup.Status.InstanceID = nil
+	if err := b.Client.Status().Patch(ctx, b.Backup, client.MergeFrom(origBackup)); err != nil {
+		return fmt.Errorf("clearing backup status for the primary retry: %w", err)
+	}
+
+	return nil
+}
+
 // run executes the pgbackrest backup command and updates the status.
 // This method runs in a dedicated goroutine.
 func (b *PgBackRestBackupCommand) run(ctx context.Context) {
@@ -120,7 +219,14 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	if err := b.retryWithRefreshedCluster(ctx, func() error {
 		return status.PatchConditionsWithOptimisticLock(ctx, b.Client, b.Cluster, apiv1.BackupStartingCondition)
 	}); err != nil {
-		b.Log.Error(err, "Error changing backup condition (backup started)")
+		if apierrs.IsNotFound(err) {
+			// The cluster was deleted mid-backup (hibernation or branch
+			// deletion) — there is nothing left to update.
+			b.Log.Info("Cluster gone, skipping backup started condition update",
+				"err", err.Error())
+		} else {
+			b.Log.Error(err, "Error changing backup condition (backup started)")
+		}
 	}
 
 	backupType := b.Backup.Spec.PgBackRestBackupType
@@ -135,13 +241,31 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	progressCtx, stopProgress := context.WithCancel(ctx)
 	go b.pollProgress(progressCtx)
 
-	err := pgbackrest.Backup(ctx, b.Cluster.GetPgBackRestStanzaName(), string(backupType), annotation)
+	if err := b.waitForAppliedConfig(ctx); err != nil {
+		stopProgress()
+		b.Log.Error(err, "Backup failed: pgbackrest configuration not applied")
+		b.Recorder.Event(b.Backup, "Normal", "Failed", "pgbackrest configuration not applied after waiting")
+		b.failBackup(ctx, err)
+		return
+	}
+
+	stanza := b.Cluster.GetPgBackRestStanzaName()
+
+	if err := b.waitForStanza(ctx, stanza); err != nil {
+		stopProgress()
+		b.Log.Error(err, "Backup failed: stanza not ready")
+		b.Recorder.Event(b.Backup, "Normal", "Failed", "Stanza not ready after waiting")
+		b.failBackup(ctx, err)
+		return
+	}
+
+	err := b.runBackupWithRetry(ctx, stanza, string(backupType), annotation)
 	stopProgress()
 
 	if err != nil {
 		b.Log.Error(err, "Backup failed")
 		b.Recorder.Event(b.Backup, "Normal", "Failed", "Backup failed")
-		_ = status.FlagBackupAsFailed(ctx, b.Client, b.Backup, b.Cluster, err)
+		b.failBackup(ctx, err)
 		return
 	}
 
@@ -164,8 +288,123 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	if err := b.retryWithRefreshedCluster(ctx, func() error {
 		return status.PatchConditionsWithOptimisticLock(ctx, b.Client, b.Cluster, apiv1.BackupSucceededCondition)
 	}); err != nil {
-		b.Log.Error(err, "Can't update the cluster with the completed backup data")
+		if apierrs.IsNotFound(err) {
+			// The cluster was deleted mid-backup (hibernation or branch
+			// deletion) — there is nothing left to update.
+			b.Log.Info("Cluster gone, skipping backup succeeded condition update",
+				"err", err.Error())
+		} else {
+			b.Log.Error(err, "Can't update the cluster with the completed backup data")
+		}
 	}
+}
+
+// waitForAppliedConfig waits until the instance reconciler has applied the
+// pgbackrest configuration for a Cluster generation at least as new as the
+// one this backup was computed from. This is an exact readiness signal: the
+// backup's --stanza flag and the config file pgbackrest reads then describe
+// the same spec. On timeout the reconciler is genuinely stuck (it never
+// applied this spec), and the error says so together with the generation it
+// last applied.
+func (b *PgBackRestBackupCommand) waitForAppliedConfig(ctx context.Context) error {
+	target := b.Cluster.Generation
+	deadline := time.Now().Add(appliedConfigWaitTimeout)
+
+	logged := false
+	for {
+		applied := b.Instance.PgBackRestAppliedGeneration.Load()
+		if applied >= target {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf(
+				"pgbackrest configuration for cluster generation %d not applied after %s "+
+					"(last applied generation %d): the instance reconciler is not applying the spec",
+				target, appliedConfigWaitTimeout, applied)
+		}
+		if !logged {
+			b.Log.Info("Waiting for the pgbackrest configuration to be applied",
+				"targetGeneration", target, "appliedGeneration", applied)
+			logged = true
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(appliedConfigWaitInterval):
+		}
+	}
+}
+
+// waitForStanza polls pgbackrest info until the stanza exists or the timeout
+// is reached. The reconciler creates the stanza asynchronously, and a backup
+// triggered at cluster adoption (ScheduledBackup immediate:true) can race it.
+// Waiting here instead of retrying the backup avoids wasting time on a backup
+// that would fail immediately due to a missing stanza or lock contention.
+//
+// A nil error from Info is not enough: pgbackrest info exits 0 for a stanza
+// that does not exist and reports the absence only in status.code, so the
+// status is checked explicitly.
+func (b *PgBackRestBackupCommand) waitForStanza(ctx context.Context, stanza string) error {
+	for attempt := 1; attempt <= stanzaWaitAttempts; attempt++ {
+		info, err := pgbackrest.Info(ctx, stanza)
+		if err == nil {
+			if !info.StanzaMissing() {
+				return nil
+			}
+			err = fmt.Errorf("stanza status %d (%s)", info.Status.Code, info.Status.Message)
+		}
+
+		b.Log.Info("Waiting for stanza to be ready",
+			"stanza", stanza, "attempt", attempt, "maxAttempts", stanzaWaitAttempts,
+			"error", err.Error())
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(stanzaWaitInterval):
+		}
+	}
+	return fmt.Errorf("stanza %s not ready after %d attempts", stanza, stanzaWaitAttempts)
+}
+
+// runBackupWithRetry runs a pgbackrest backup, retrying on any failure up to
+// backupRetryAttempts with exponential backoff. Early backups commonly fail for
+// transient reasons — racing the adoption-time stanza-create (lock contention or
+// the stanza not yet existing), a transient S3 error, a pod rollout. The lockContention
+// flag in the log distinguishes the most common cause. A backup that keeps
+// failing after all attempts (e.g. genuine misconfiguration) is returned so the
+// Backup CR is marked failed.
+func (b *PgBackRestBackupCommand) runBackupWithRetry(
+	ctx context.Context, stanza, backupType, annotation string,
+) error {
+	delay := backupRetryInitialDelay
+	var err error
+	for attempt := 1; attempt <= backupRetryAttempts; attempt++ {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+
+		err = pgbackrest.Backup(ctx, stanza, backupType, annotation)
+		if err == nil {
+			return nil
+		}
+		if attempt == backupRetryAttempts {
+			break
+		}
+
+		b.Log.Info("pgbackrest backup failed, retrying",
+			"attempt", attempt, "maxAttempts", backupRetryAttempts,
+			"retryDelay", delay.String(), "lockContention", pgbackrest.IsLockBusy(err),
+			"error", err.Error())
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+		delay *= 2
+	}
+	return err
 }
 
 // pollProgress periodically checks pgbackrest info for backup progress
@@ -279,7 +518,14 @@ func (b *PgBackRestBackupCommand) populateBackupDetails(ctx context.Context) {
 		}
 		return b.Client.Status().Patch(ctx, b.Cluster, client.MergeFrom(origCluster))
 	}); err != nil {
-		b.Log.Error(err, "while setting firstRecoverabilityPoint and lastSuccessfulBackup")
+		if apierrs.IsNotFound(err) {
+			// The cluster was deleted mid-backup (hibernation or branch
+			// deletion) — there is nothing left to update.
+			b.Log.Info("Cluster gone, skipping firstRecoverabilityPoint and lastSuccessfulBackup update",
+				"err", err.Error())
+		} else {
+			b.Log.Error(err, "while setting firstRecoverabilityPoint and lastSuccessfulBackup")
+		}
 	}
 }
 

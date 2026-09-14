@@ -101,6 +101,18 @@ func (r *ClusterReconciler) rolloutRequiredInstances(
 		return true, r.upgradePod(ctx, cluster, postgresqlStatus.Pod, restartMessage)
 	}
 
+	// A noop-bootstrap cluster can have a ready instance while it waits for
+	// external PGDATA. The instance is the target primary, but PostgreSQL is not
+	// running yet, so CurrentPrimary is intentionally empty. Any required pod
+	// rollout has already been handled above.
+	if primaryPostgresqlStatus == nil &&
+		cluster.Spec.Bootstrap != nil &&
+		cluster.Spec.Bootstrap.Noop != nil &&
+		cluster.Status.CurrentPrimary == "" &&
+		cluster.Status.TargetPrimary != "" {
+		return false, nil
+	}
+
 	// report an error if there is no primary. This condition should never happen because
 	// `reconcileTargetPrimaryFromPods()` is executed before this function
 	if primaryPostgresqlStatus == nil {

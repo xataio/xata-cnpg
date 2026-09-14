@@ -387,7 +387,7 @@ func (info InitInfo) restoreViaPgBackRest(
 		return "", fmt.Errorf("generating pgbackrest config for restore: %w", err)
 	}
 
-	if _, err := pgbackrest.WriteConfigFile(configContent); err != nil {
+	if _, err := pgbackrest.WriteConfigFile(configContent, info.PgData); err != nil {
 		return "", fmt.Errorf("writing pgbackrest config for restore: %w", err)
 	}
 

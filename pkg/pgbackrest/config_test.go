@@ -21,6 +21,9 @@ package pgbackrest
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/ini.v1"
@@ -28,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 )
@@ -73,16 +77,17 @@ func TestApplyOptionDefaults_PriorityNotOverridden(t *testing.T) {
 
 func TestApplyOptionDefaults_ProcessMax(t *testing.T) {
 	tests := []struct {
-		name       string
-		cpuRequest string
-		expected   int
+		name            string
+		cpuRequest      string
+		expectedBackup  int
+		expectedRestore int
 	}{
-		{"micro 250m", "250m", 1},
-		{"small 500m", "500m", 1},
-		{"medium 1000m", "1000m", 1},
-		{"large 2000m", "2000m", 2},
-		{"xlarge 4000m", "4000m", 4},
-		{"2xlarge 8000m", "8000m", 8},
+		{"micro 250m", "250m", 1, 1},
+		{"small 500m", "500m", 1, 1},
+		{"medium 1000m", "1000m", 1, 2},
+		{"large 2000m", "2000m", 2, 4},
+		{"xlarge 4000m", "4000m", 4, 8},
+		{"2xlarge 8000m", "8000m", 8, 16},
 	}
 
 	for _, tt := range tests {
@@ -100,8 +105,11 @@ func TestApplyOptionDefaults_ProcessMax(t *testing.T) {
 			opts := &apiv1.PgBackRestOptions{}
 			applyOptionDefaults(opts, cluster)
 
-			if opts.ProcessMax == nil || *opts.ProcessMax != tt.expected {
-				t.Errorf("expected processMax %d for %s, got %v", tt.expected, tt.cpuRequest, opts.ProcessMax)
+			if opts.ProcessMax == nil || *opts.ProcessMax != tt.expectedBackup {
+				t.Errorf("expected backup processMax %d for %s, got %v", tt.expectedBackup, tt.cpuRequest, opts.ProcessMax)
+			}
+			if opts.RestoreProcessMax == nil || *opts.RestoreProcessMax != tt.expectedRestore {
+				t.Errorf("expected restore processMax %d for %s, got %v", tt.expectedRestore, tt.cpuRequest, opts.RestoreProcessMax)
 			}
 		})
 	}
@@ -119,11 +127,15 @@ func TestApplyOptionDefaults_ProcessMaxNotOverridden(t *testing.T) {
 	}
 
 	userMax := 2
-	opts := &apiv1.PgBackRestOptions{ProcessMax: &userMax}
+	userRestoreMax := 6
+	opts := &apiv1.PgBackRestOptions{ProcessMax: &userMax, RestoreProcessMax: &userRestoreMax}
 	applyOptionDefaults(opts, cluster)
 
 	if *opts.ProcessMax != 2 {
 		t.Errorf("expected user processMax 2, got %v", *opts.ProcessMax)
+	}
+	if *opts.RestoreProcessMax != 6 {
+		t.Errorf("expected user restoreProcessMax 6, got %v", *opts.RestoreProcessMax)
 	}
 }
 
@@ -164,6 +176,19 @@ func TestApplyOptionDefaults_RepoPathNotOverridden(t *testing.T) {
 
 	if opts.RepoPath != "custom-path" {
 		t.Errorf("expected repoPath custom-path, got %s", opts.RepoPath)
+	}
+}
+
+func TestConfigureRestoreOptions_ProcessMax(t *testing.T) {
+	cfg := ini.Empty()
+	section := cfg.Section("global:restore")
+
+	restoreMax := 4
+	opts := &apiv1.PgBackRestOptions{RestoreProcessMax: &restoreMax}
+	configureRestoreOptions(opts, section)
+
+	if v := section.Key("process-max").String(); v != "4" {
+		t.Errorf("expected restore process-max 4, got %s", v)
 	}
 }
 
@@ -361,15 +386,16 @@ func TestConfigureOptions_CommandScoping(t *testing.T) {
 	cfg := ini.Empty()
 
 	opts := &apiv1.PgBackRestOptions{
-		CompressType:     "lz4",
-		ProcessMax:       ptr.To(2),
-		Priority:         ptr.To(19),
-		ArchiveAsync:     ptr.To(true),
-		StartFast:        ptr.To(true),
-		BackupStandby:    ptr.To(true),
-		Bundle:           ptr.To(true),
-		BlockIncremental: ptr.To(true),
-		Delta:            ptr.To(true),
+		CompressType:      "lz4",
+		ProcessMax:        ptr.To(2),
+		RestoreProcessMax: ptr.To(4),
+		Priority:          ptr.To(19),
+		ArchiveAsync:      ptr.To(true),
+		StartFast:         ptr.To(true),
+		BackupStandby:     ptr.To(true),
+		Bundle:            ptr.To(true),
+		BlockIncremental:  ptr.To(true),
+		Delta:             ptr.To(true),
 	}
 
 	configureOptions(opts, cfg)
@@ -414,6 +440,11 @@ func TestConfigureOptions_CommandScoping(t *testing.T) {
 		t.Errorf("expected delta in restore section, got %s", v)
 	}
 
+	// Restore section should have its own process-max (different from global)
+	if v := restore.Key("process-max").String(); v != "4" {
+		t.Errorf("expected process-max 4 in restore section, got %s", v)
+	}
+
 	// Restore section should NOT have other options
 	if restore.HasKey("start-fast") {
 		t.Error("start-fast should not be in restore section")
@@ -452,6 +483,7 @@ func TestGenerateBaseConfig_TLSAndPaths(t *testing.T) {
 		{"tls address", global, "tls-server-address", "*"},
 		{"tls auth", global, "tls-server-auth", "streaming_replica=*"},
 		{"spool path", global, "spool-path", "/var/lib/postgresql/data/pgbackrest/spool"},
+		{"legacy IAM authentication", global, "repo1-s3-key-type", "auto"},
 		{"pg1 path", stanza, "pg1-path", "/var/lib/postgresql/data/pgdata"},
 	}
 
@@ -461,6 +493,353 @@ func TestGenerateBaseConfig_TLSAndPaths(t *testing.T) {
 				t.Errorf("expected %s=%s, got %s", tt.key, tt.expected, v)
 			}
 		})
+	}
+}
+
+func TestEffectiveS3KeyType(t *testing.T) {
+	tests := []struct {
+		name               string
+		keyType            string
+		inheritFromIAMRole bool
+		staticCredentials  bool
+		want               string
+	}{
+		{name: "defaults to auto", want: keyTypeAuto},
+		{name: "legacy true defaults to auto", inheritFromIAMRole: true, want: keyTypeAuto},
+		{name: "legacy false defaults to auto", want: keyTypeAuto},
+		{name: "legacy static credentials default to shared", staticCredentials: true, want: keyTypeShared},
+		{name: "explicit shared", keyType: "shared", want: "shared"},
+		{name: "explicit auto", keyType: "auto", want: "auto"},
+		{name: "explicit web identity", keyType: "web-id", want: "web-id"},
+		{name: "explicit pod identity", keyType: "pod-id", want: "pod-id"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s3 := &apiv1.PgBackRestS3{
+				KeyType:            tt.keyType,
+				InheritFromIAMRole: tt.inheritFromIAMRole,
+			}
+			if tt.staticCredentials {
+				s3.AccessKeyID = &apiv1.SecretKeySelector{}
+				s3.SecretAccessKey = &apiv1.SecretKeySelector{}
+			}
+
+			got := effectiveS3KeyType(s3)
+			if got != tt.want {
+				t.Fatalf("expected key type %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestGenerateBaseConfig_S3CredentialProviders(t *testing.T) {
+	for _, keyType := range []string{"shared", "auto", "web-id", "pod-id"} {
+		t.Run(keyType, func(t *testing.T) {
+			s3 := &apiv1.PgBackRestS3{
+				Bucket:  "test-bucket",
+				Region:  "us-east-1",
+				KeyType: keyType,
+			}
+
+			cfg, err := generateBaseConfig(
+				context.Background(), nil, "default",
+				&apiv1.PgBackRestRepository{S3: s3},
+				"test-cluster", "/var/lib/postgresql/data/pgdata",
+			)
+			if err != nil {
+				t.Fatalf("generateBaseConfig failed: %v", err)
+			}
+
+			global := cfg.Section("global")
+			if got := global.Key("repo1-s3-key-type").String(); got != keyType {
+				t.Fatalf("expected S3 key type %q, got %q", keyType, got)
+			}
+		})
+	}
+}
+
+func TestGenerateBaseConfig_S3StaticCredentials(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "s3-credentials", Namespace: "default"},
+		Data: map[string][]byte{
+			"access-key-id":     []byte("access-key"),
+			"secret-access-key": []byte("secret-key"),
+		},
+	}
+	k8sClient := fake.NewClientBuilder().WithObjects(secret).Build()
+	repo := &apiv1.PgBackRestRepository{
+		S3: &apiv1.PgBackRestS3{
+			Bucket: "test-bucket",
+			Region: "us-east-1",
+			AccessKeyID: &apiv1.SecretKeySelector{
+				LocalObjectReference: apiv1.LocalObjectReference{Name: secret.Name},
+				Key:                  "access-key-id",
+			},
+			SecretAccessKey: &apiv1.SecretKeySelector{
+				LocalObjectReference: apiv1.LocalObjectReference{Name: secret.Name},
+				Key:                  "secret-access-key",
+			},
+		},
+	}
+
+	cfg, err := generateBaseConfig(
+		context.Background(), k8sClient, "default",
+		repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+	)
+	if err != nil {
+		t.Fatalf("generateBaseConfig failed: %v", err)
+	}
+
+	global := cfg.Section("global")
+	if got := global.Key("repo1-s3-key-type").String(); got != keyTypeShared {
+		t.Fatalf("expected S3 key type %q, got %q", keyTypeShared, got)
+	}
+	if got := global.Key("repo1-s3-key").String(); got != "access-key" {
+		t.Fatalf("expected resolved access key, got %q", got)
+	}
+	if got := global.Key("repo1-s3-key-secret").String(); got != "secret-key" {
+		t.Fatalf("expected resolved secret key, got %q", got)
+	}
+}
+
+func TestGenerateBaseConfig_GCS(t *testing.T) {
+	tests := map[string]struct {
+		gcs        *apiv1.PgBackRestGCS
+		wantKeys   map[string]string
+		absentKeys []string
+	}{
+		"defaults to auto key type": {
+			gcs: &apiv1.PgBackRestGCS{
+				Bucket: "test-gcs-bucket",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":         "gcs",
+				"repo1-gcs-bucket":   "test-gcs-bucket",
+				"repo1-gcs-key-type": "auto",
+			},
+			absentKeys: []string{"repo1-gcs-endpoint"},
+		},
+		"explicit auto key type": {
+			gcs: &apiv1.PgBackRestGCS{
+				Bucket:  "test-gcs-bucket",
+				KeyType: "auto",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":         "gcs",
+				"repo1-gcs-bucket":   "test-gcs-bucket",
+				"repo1-gcs-key-type": "auto",
+			},
+		},
+		"endpoint override": {
+			gcs: &apiv1.PgBackRestGCS{
+				Bucket:   "test-gcs-bucket",
+				Endpoint: "fake-gcs:4443",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":         "gcs",
+				"repo1-gcs-bucket":   "test-gcs-bucket",
+				"repo1-gcs-key-type": "auto",
+				"repo1-gcs-endpoint": "fake-gcs:4443",
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			repo := &apiv1.PgBackRestRepository{GCS: tt.gcs}
+
+			cfg, err := generateBaseConfig(
+				context.Background(), nil, "default",
+				repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+			)
+			if err != nil {
+				t.Fatalf("generateBaseConfig failed: %v", err)
+			}
+
+			global := cfg.Section("global")
+			for key, expected := range tt.wantKeys {
+				if v := global.Key(key).String(); v != expected {
+					t.Errorf("expected %s=%s, got %q", key, expected, v)
+				}
+			}
+			for _, key := range tt.absentKeys {
+				if global.HasKey(key) {
+					t.Errorf("%s should not be set", key)
+				}
+			}
+			for _, key := range global.KeyStrings() {
+				if strings.HasPrefix(key, "repo1-s3-") {
+					t.Errorf("no repo1-s3-* keys expected for a GCS repository, found %s", key)
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateBaseConfig_GCSUnsupportedKeyTypes(t *testing.T) {
+	for _, keyType := range []string{"service", "token"} {
+		t.Run(keyType, func(t *testing.T) {
+			repo := &apiv1.PgBackRestRepository{
+				GCS: &apiv1.PgBackRestGCS{
+					Bucket:  "test-gcs-bucket",
+					KeyType: keyType,
+					KeyRef:  &apiv1.SecretKeySelector{},
+				},
+			}
+
+			_, err := generateBaseConfig(
+				context.Background(), nil, "default",
+				repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+			)
+			if err == nil {
+				t.Fatalf("expected an error for unsupported key type %q", keyType)
+			}
+		})
+	}
+}
+
+func TestGenerateBaseConfig_Azure(t *testing.T) {
+	tests := map[string]struct {
+		azure      *apiv1.PgBackRestAzure
+		wantKeys   map[string]string
+		absentKeys []string
+	}{
+		"defaults to auto key type": {
+			azure: &apiv1.PgBackRestAzure{
+				Account:   "testaccount",
+				Container: "backups",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":            "azure",
+				"repo1-azure-account":   "testaccount",
+				"repo1-azure-container": "backups",
+				"repo1-azure-key-type":  "auto",
+			},
+			absentKeys: []string{"repo1-azure-endpoint"},
+		},
+		"explicit auto key type": {
+			azure: &apiv1.PgBackRestAzure{
+				Account:   "testaccount",
+				Container: "backups",
+				KeyType:   "auto",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":            "azure",
+				"repo1-azure-account":   "testaccount",
+				"repo1-azure-container": "backups",
+				"repo1-azure-key-type":  "auto",
+			},
+		},
+		"endpoint override": {
+			azure: &apiv1.PgBackRestAzure{
+				Account:   "testaccount",
+				Container: "backups",
+				Endpoint:  "azurite:10000",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":            "azure",
+				"repo1-azure-account":   "testaccount",
+				"repo1-azure-container": "backups",
+				"repo1-azure-key-type":  "auto",
+				"repo1-azure-endpoint":  "azurite:10000",
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			repo := &apiv1.PgBackRestRepository{Azure: tt.azure}
+
+			cfg, err := generateBaseConfig(
+				context.Background(), nil, "default",
+				repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+			)
+			if err != nil {
+				t.Fatalf("generateBaseConfig failed: %v", err)
+			}
+
+			global := cfg.Section("global")
+			for key, expected := range tt.wantKeys {
+				if v := global.Key(key).String(); v != expected {
+					t.Errorf("expected %s=%s, got %q", key, expected, v)
+				}
+			}
+			for _, key := range tt.absentKeys {
+				if global.HasKey(key) {
+					t.Errorf("%s should not be set", key)
+				}
+			}
+			for _, key := range global.KeyStrings() {
+				if strings.HasPrefix(key, "repo1-s3-") || strings.HasPrefix(key, "repo1-gcs-") {
+					t.Errorf("no repo1-s3-* or repo1-gcs-* keys expected for an Azure repository, found %s", key)
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateBaseConfig_AzureUnsupportedKeyTypes(t *testing.T) {
+	for _, keyType := range []string{"shared", "sas"} {
+		t.Run(keyType, func(t *testing.T) {
+			repo := &apiv1.PgBackRestRepository{
+				Azure: &apiv1.PgBackRestAzure{
+					Account:   "testaccount",
+					Container: "backups",
+					KeyType:   keyType,
+					KeyRef:    &apiv1.SecretKeySelector{},
+				},
+			}
+
+			_, err := generateBaseConfig(
+				context.Background(), nil, "default",
+				repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+			)
+			if err == nil {
+				t.Fatalf("expected an error for unsupported key type %q", keyType)
+			}
+		})
+	}
+}
+
+func TestGenerateBaseConfig_RepositoryCipher(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pgbackrest-cipher",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{"passphrase": []byte("repository-passphrase")},
+	}
+	k8sClient := fake.NewClientBuilder().WithObjects(secret).Build()
+	repo := &apiv1.PgBackRestRepository{
+		S3: &apiv1.PgBackRestS3{
+			Bucket:             "test-bucket",
+			Region:             "us-east-1",
+			InheritFromIAMRole: true,
+		},
+		Cipher: &apiv1.PgBackRestCipher{
+			Type: "aes-256-cbc",
+			Passphrase: apiv1.SecretKeySelector{
+				LocalObjectReference: apiv1.LocalObjectReference{Name: secret.Name},
+				Key:                  "passphrase",
+			},
+		},
+	}
+
+	cfg, err := generateBaseConfig(
+		context.Background(), k8sClient, "default",
+		repo, "test-cluster", "/var/lib/postgresql/data/pgdata",
+	)
+	if err != nil {
+		t.Fatalf("generateBaseConfig failed: %v", err)
+	}
+
+	global := cfg.Section("global")
+	if got := global.Key("repo1-cipher-type").String(); got != "aes-256-cbc" {
+		t.Errorf("expected repo1-cipher-type aes-256-cbc, got %q", got)
+	}
+	if got := global.Key("repo1-cipher-pass").String(); got != "repository-passphrase" {
+		t.Errorf("expected resolved repo1-cipher-pass, got %q", got)
 	}
 }
 
@@ -476,12 +855,13 @@ func TestConfigureReplicaStanza(t *testing.T) {
 		key      string
 		expected string
 	}{
-		{"pg1-host", "pg1-host", "test-cluster-rw"},
-		{"pg1-host-type", "pg1-host-type", "tls"},
-		{"pg1-host-ca-file", "pg1-host-ca-file", "/controller/certificates/server-ca.crt"},
-		{"pg1-host-cert-file", "pg1-host-cert-file", "/controller/certificates/streaming_replica.crt"},
-		{"pg1-host-key-file", "pg1-host-key-file", "/controller/certificates/streaming_replica.key"},
+		{"pg1-path", "pg1-path", "/pgdata"},
 		{"pg2-path", "pg2-path", "/pgdata"},
+		{"pg2-host", "pg2-host", "test-cluster-rw"},
+		{"pg2-host-type", "pg2-host-type", "tls"},
+		{"pg2-host-ca-file", "pg2-host-ca-file", "/controller/certificates/server-ca.crt"},
+		{"pg2-host-cert-file", "pg2-host-cert-file", "/controller/certificates/streaming_replica.crt"},
+		{"pg2-host-key-file", "pg2-host-key-file", "/controller/certificates/streaming_replica.key"},
 	}
 
 	for _, tt := range tests {
@@ -490,6 +870,15 @@ func TestConfigureReplicaStanza(t *testing.T) {
 				t.Errorf("expected %s=%s, got %s", tt.key, tt.expected, v)
 			}
 		})
+	}
+
+	// pg1 must stay local: any pg1-host* key makes pgbackrest refuse to run
+	// archive-get/archive-push/restore on the replica (error 072), which
+	// breaks restore_command for standbys.
+	for _, key := range stanza.KeyStrings() {
+		if strings.HasPrefix(key, "pg1-host") {
+			t.Errorf("replica stanza must not set %s", key)
+		}
 	}
 }
 
@@ -575,7 +964,7 @@ func TestGenerateConfig_StanzaName(t *testing.T) {
 }
 
 // TestGenerateConfig_ReplicaStanzaUsesLiveClusterHost verifies that on a
-// replica the stanza section follows the stanza override, but pg1-host still
+// replica the stanza section follows the stanza override, but pg2-host still
 // points at the live cluster's -rw service (not the stanza name).
 func TestGenerateConfig_ReplicaStanzaUsesLiveClusterHost(t *testing.T) {
 	cluster := &apiv1.Cluster{
@@ -605,7 +994,77 @@ func TestGenerateConfig_ReplicaStanzaUsesLiveClusterHost(t *testing.T) {
 		t.Fatalf("parsing rendered config failed: %v", err)
 	}
 
-	if v := cfg.Section("branch-abc").Key("pg1-host").String(); v != "pool-cluster-xyz-rw" {
-		t.Errorf("expected pg1-host pool-cluster-xyz-rw (live cluster), got %q", v)
+	if v := cfg.Section("branch-abc").Key("pg2-host").String(); v != "pool-cluster-xyz-rw" {
+		t.Errorf("expected pg2-host pool-cluster-xyz-rw (live cluster), got %q", v)
+	}
+}
+
+// TestGenerateConfig_ReplicaKeepsPg1Local verifies that the rendered replica
+// configuration keeps pg1 as the local instance and puts the remote primary on
+// pg2. pgbackrest's archive-get, archive-push and restore refuse to run when
+// the default pg (pg1) has a pg-host set (error 072); with pg1-host on
+// replicas, standbys could never fetch WAL from the repository through
+// restore_command.
+func TestGenerateConfig_ReplicaKeepsPg1Local(t *testing.T) {
+	cluster := &apiv1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+		Spec: apiv1.ClusterSpec{
+			Backup: &apiv1.BackupConfiguration{
+				PgBackRest: &apiv1.PgBackRestConfiguration{
+					Repository: &apiv1.PgBackRestRepository{
+						S3: &apiv1.PgBackRestS3{
+							Bucket:             "test-bucket",
+							Region:             "us-east-1",
+							InheritFromIAMRole: true,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	content, err := GenerateConfig(context.Background(), nil, cluster, "/pgdata", false)
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+	cfg, err := ini.Load([]byte(content))
+	if err != nil {
+		t.Fatalf("parsing rendered config failed: %v", err)
+	}
+
+	stanza := cfg.Section(cluster.GetPgBackRestStanzaName())
+	if v := stanza.Key("pg1-path").String(); v != "/pgdata" {
+		t.Errorf("expected pg1-path /pgdata (local standby), got %q", v)
+	}
+	if v := stanza.Key("pg2-host").String(); v != "test-cluster-rw" {
+		t.Errorf("expected pg2-host test-cluster-rw (remote primary), got %q", v)
+	}
+	for _, key := range stanza.KeyStrings() {
+		if strings.HasPrefix(key, "pg1-host") {
+			t.Errorf("rendered replica stanza must not set %s", key)
+		}
+	}
+}
+
+// TestEnsureWorkingDirectories guards against the working directories drifting
+// from the config values: log-path in particular must exist before pgbackrest
+// runs, since pgbackrest never creates it and silently disables file logging
+// when it is missing.
+func TestEnsureWorkingDirectories(t *testing.T) {
+	pgData := filepath.Join(t.TempDir(), "pgdata")
+
+	if err := ensureWorkingDirectories(pgData); err != nil {
+		t.Fatalf("ensureWorkingDirectories: %v", err)
+	}
+
+	for _, subdir := range []string{"spool", "log", "lock"} {
+		path := filepath.Join(workingDir(pgData), subdir)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("expected directory %s to exist: %v", path, err)
+		}
+		if !info.IsDir() {
+			t.Errorf("expected %s to be a directory", path)
+		}
 	}
 }

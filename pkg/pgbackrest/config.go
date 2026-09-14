@@ -39,7 +39,7 @@ import (
 // GenerateConfig builds a pgbackrest.conf INI configuration from the cluster
 // spec. It resolves S3 credentials from Kubernetes secrets.
 // isPrimary controls whether this pod gets replica-specific config for
-// backup-standby (pg1-host pointing to the primary via TLS).
+// backup-standby (pg2-host pointing to the primary via TLS).
 func GenerateConfig(
 	ctx context.Context,
 	k8sClient client.Client,
@@ -65,12 +65,12 @@ func GenerateConfig(
 	applyOptionDefaults(opts, cluster)
 	configureOptions(opts, cfg)
 
-	// On replicas, configure pg1 as the remote primary (via TLS) and pg2 as
-	// the local standby. This enables backup-standby: pgbackrest copies files
+	// On replicas, keep pg1 as the local standby and add pg2 as the remote
+	// primary (via TLS). This enables backup-standby: pgbackrest copies files
 	// locally from the replica while coordinating with the primary over TLS.
 	if !isPrimary {
 		// The section key is the stanza identity; the clusterName arg is the
-		// live cluster used to reach the primary (pg1-host: <name>-rw), so it
+		// live cluster used to reach the primary (pg2-host: <name>-rw), so it
 		// must stay the actual Cluster name even when the stanza is overridden.
 		configureReplicaStanza(cfg.Section(cluster.GetPgBackRestStanzaName()), cluster.Name, pgDataPath)
 	}
@@ -115,17 +115,37 @@ func generateBaseConfig(
 	cfg := ini.Empty()
 	global := cfg.Section("global")
 
-	// S3 configuration
+	// Repository storage configuration. The CRD guarantees exactly one
+	// backend is set; the checks are independent as a defensive measure.
 	if repo.S3 != nil {
 		if err := configureS3(ctx, k8sClient, namespace, repo.S3, global); err != nil {
 			return nil, fmt.Errorf("configuring S3: %w", err)
 		}
 	}
+	if repo.GCS != nil {
+		if err := configureGCS(repo.GCS, global); err != nil {
+			return nil, fmt.Errorf("configuring GCS: %w", err)
+		}
+	}
+
+	if repo.Azure != nil {
+		if err := configureAzure(repo.Azure, global); err != nil {
+			return nil, fmt.Errorf("configuring Azure: %w", err)
+		}
+	}
+	if repo.Cipher != nil {
+		passphrase, err := resolveSecretKeyRef(ctx, k8sClient, namespace, &repo.Cipher.Passphrase)
+		if err != nil {
+			return nil, fmt.Errorf("resolving repository cipher passphrase: %w", err)
+		}
+		global.Key("repo1-cipher-type").SetValue(repo.Cipher.Type)
+		global.Key("repo1-cipher-pass").SetValue(passphrase)
+	}
 
 	// pgbackrest working directories — stored on the PGDATA PVC (outside the
 	// pgdata/ subdirectory) so each cluster uses its own dedicated storage
 	// instead of shared node scratch space.
-	pgbackrestDir := filepath.Dir(pgDataPath) + "/pgbackrest"
+	pgbackrestDir := workingDir(pgDataPath)
 	global.Key("spool-path").SetValue(pgbackrestDir + "/spool")
 	global.Key("log-path").SetValue(pgbackrestDir + "/log")
 	global.Key("lock-path").SetValue(pgbackrestDir + "/lock")
@@ -156,15 +176,39 @@ func renderConfig(cfg *ini.File) (string, error) {
 	return buf.String(), nil
 }
 
-// WriteConfigFile writes the pgbackrest configuration to ConfigFilePath.
-// It creates the parent directory if it doesn't exist.
-// Returns true if the file content changed, false if it was already up to date.
-func WriteConfigFile(content string) (bool, error) {
-	dir := filepath.Dir(ConfigFilePath)
-	for _, subdir := range []string{"", "log", "lock"} {
-		if err := os.MkdirAll(filepath.Join(dir, subdir), 0o700); err != nil {
-			return false, fmt.Errorf("creating directory %s: %w", filepath.Join(dir, subdir), err)
+// workingDir returns the pgbackrest working directory on the PGDATA volume.
+// Both the configuration values (spool-path, log-path, lock-path) and the
+// directory creation in WriteConfigFile derive from it so they cannot drift
+// apart.
+func workingDir(pgDataPath string) string {
+	return filepath.Dir(pgDataPath) + "/pgbackrest"
+}
+
+// ensureWorkingDirectories creates the pgbackrest working directories on the
+// PGDATA volume. pgbackrest creates the spool and lock paths on demand, but
+// never the log path — without it every command warns and file logging is
+// silently disabled.
+func ensureWorkingDirectories(pgDataPath string) error {
+	for _, subdir := range []string{"spool", "log", "lock"} {
+		path := filepath.Join(workingDir(pgDataPath), subdir)
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			return fmt.Errorf("creating directory %s: %w", path, err)
 		}
+	}
+	return nil
+}
+
+// WriteConfigFile writes the pgbackrest configuration to ConfigFilePath.
+// It creates the config parent directory and the pgbackrest working
+// directories on the PGDATA volume.
+// Returns true if the file content changed, false if it was already up to date.
+func WriteConfigFile(content, pgDataPath string) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(ConfigFilePath), 0o700); err != nil {
+		return false, fmt.Errorf("creating directory %s: %w", filepath.Dir(ConfigFilePath), err)
+	}
+
+	if err := ensureWorkingDirectories(pgDataPath); err != nil {
+		return false, err
 	}
 
 	existing, err := os.ReadFile(ConfigFilePath)
@@ -177,6 +221,26 @@ func WriteConfigFile(content string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+const (
+	keyTypeAuto   = "auto"
+	keyTypeShared = "shared"
+)
+
+// effectiveS3KeyType returns the explicitly selected pgBackRest provider. New
+// resources default to auto. Existing resources with static credential
+// references retain pgBackRest's shared-key behavior.
+func effectiveS3KeyType(s3 *apiv1.PgBackRestS3) string {
+	if s3.KeyType != "" {
+		return s3.KeyType
+	}
+
+	if s3.AccessKeyID != nil && s3.SecretAccessKey != nil {
+		return keyTypeShared
+	}
+
+	return keyTypeAuto
 }
 
 // configureS3 sets S3-specific keys in the [global] section.
@@ -200,19 +264,79 @@ func configureS3(
 		section.Key("repo1-s3-endpoint").SetValue("s3." + s3.Region + ".amazonaws.com")
 	}
 
-	if s3.InheritFromIAMRole {
-		section.Key("repo1-s3-key-type").SetValue("auto")
-	} else {
+	keyType := effectiveS3KeyType(s3)
+	section.Key("repo1-s3-key-type").SetValue(keyType)
+
+	if s3.AccessKeyID != nil {
 		accessKey, err := resolveSecretKeyRef(ctx, k8sClient, namespace, s3.AccessKeyID)
 		if err != nil {
 			return fmt.Errorf("resolving S3 access key: %w", err)
 		}
+		section.Key("repo1-s3-key").SetValue(accessKey)
+	}
+	if s3.SecretAccessKey != nil {
 		secretKey, err := resolveSecretKeyRef(ctx, k8sClient, namespace, s3.SecretAccessKey)
 		if err != nil {
 			return fmt.Errorf("resolving S3 secret key: %w", err)
 		}
-		section.Key("repo1-s3-key").SetValue(accessKey)
 		section.Key("repo1-s3-key-secret").SetValue(secretKey)
+	}
+
+	return nil
+}
+
+// configureGCS sets GCS-specific keys in the [global] section.
+func configureGCS(gcs *apiv1.PgBackRestGCS, section *ini.Section) error {
+	section.Key("repo1-type").SetValue("gcs")
+	section.Key("repo1-gcs-bucket").SetValue(gcs.Bucket)
+
+	if gcs.Endpoint != "" {
+		section.Key("repo1-gcs-endpoint").SetValue(gcs.Endpoint)
+	}
+
+	keyType := gcs.KeyType
+	if keyType == "" {
+		// pgbackrest defaults repo1-gcs-key-type to "service", so "auto"
+		// (workload identity / ADC) must be set explicitly.
+		keyType = keyTypeAuto
+	}
+	section.Key("repo1-gcs-key-type").SetValue(keyType)
+
+	if keyType != keyTypeAuto {
+		// The "service" and "token" key types need repo1-gcs-key to point at
+		// a file on disk holding the service account JSON or bearer token.
+		// Plumbing the KeyRef secret to a file on the pod is not wired up
+		// yet, so only "auto" is supported for now.
+		return fmt.Errorf("gcs key type %q is not supported yet, only \"auto\" is", keyType)
+	}
+
+	return nil
+}
+
+// configureAzure sets Azure-specific keys in the [global] section.
+func configureAzure(azure *apiv1.PgBackRestAzure, section *ini.Section) error {
+	section.Key("repo1-type").SetValue("azure")
+	section.Key("repo1-azure-account").SetValue(azure.Account)
+	section.Key("repo1-azure-container").SetValue(azure.Container)
+
+	if azure.Endpoint != "" {
+		section.Key("repo1-azure-endpoint").SetValue(azure.Endpoint)
+	}
+
+	keyType := azure.KeyType
+	if keyType == "" {
+		// pgbackrest defaults repo1-azure-key-type to "shared", so "auto"
+		// (managed identity via instance metadata, pgbackrest >= 2.58) must
+		// be set explicitly.
+		keyType = keyTypeAuto
+	}
+	section.Key("repo1-azure-key-type").SetValue(keyType)
+
+	if keyType != keyTypeAuto {
+		// The "shared" and "sas" key types need repo1-azure-key holding the
+		// account key or SAS token. Plumbing the KeyRef secret is not wired
+		// up yet, so only "auto" is supported for now.
+		return fmt.Errorf("azure key type %q is not supported yet, only \"auto\" is", keyType)
 	}
 
 	return nil
@@ -251,6 +375,20 @@ func applyOptionDefaults(opts *apiv1.PgBackRestOptions, cluster *apiv1.Cluster) 
 				processMax = 1
 			}
 			opts.ProcessMax = &processMax
+		}
+	}
+	if opts.RestoreProcessMax == nil {
+		cpuRequest := cluster.Spec.Resources.Requests.Cpu()
+		if cpuRequest != nil && !cpuRequest.IsZero() {
+			// During restore PostgreSQL is not running, so shared_buffers and
+			// other PG memory is free. We use 2x the backup process-max. Each
+			// process uses ~230MB; the freed shared_buffers (~25% of RAM) more
+			// than covers the extra memory at every instance size.
+			restoreMax := int(cpuRequest.MilliValue()/1000) * 2
+			if restoreMax < 1 {
+				restoreMax = 1
+			}
+			opts.RestoreProcessMax = &restoreMax
 		}
 	}
 	if opts.RepoPath == "" {
@@ -338,6 +476,9 @@ func configureRestoreOptions(opts *apiv1.PgBackRestOptions, section *ini.Section
 	if opts.Delta != nil && *opts.Delta {
 		section.Key("delta").SetValue("y")
 	}
+	if opts.RestoreProcessMax != nil {
+		section.Key("process-max").SetValue(strconv.Itoa(*opts.RestoreProcessMax))
+	}
 }
 
 // resolveSecretKeyRef fetches a Kubernetes secret and extracts the value
@@ -370,18 +511,23 @@ func resolveSecretKeyRef(
 }
 
 // configureReplicaStanza sets up the stanza section on a replica for
-// backup-standby mode. pg1 is the remote primary (accessed via TLS for
-// pg_backup_start/stop and remaining files), pg2 is the local standby
-// where the bulk of the file copy happens.
+// backup-standby mode. pg1 stays the local standby (pg1-path is already set
+// by generateBaseConfig), where the bulk of the file copy happens; pg2 is the
+// remote primary, reached via TLS for pg_backup_start/stop and the files that
+// must come from the primary.
+//
+// The local instance must be pg1: pgbackrest's archive-get, archive-push and
+// restore commands refuse to run when the default pg index (pg1) has a pg-host
+// set ("command must be run on the PostgreSQL host", error 072). With pg1-host
+// on replicas, restore_command could never fetch WAL from the repository. For
+// backup the index order is irrelevant: pgbackrest connects to every configured
+// pg and detects which one is the primary and which one is the standby.
 func configureReplicaStanza(stanza *ini.Section, clusterName string, pgDataPath string) {
-	// pg1 = remote primary (TLS connection for pg_backup_start/stop + remaining files)
-	// pg1-path is already set by generateBaseConfig — we add the host/TLS options.
-	stanza.Key("pg1-host").SetValue(clusterName + "-rw")
-	stanza.Key("pg1-host-type").SetValue("tls")
-	stanza.Key("pg1-host-ca-file").SetValue(postgres.ServerCACertificateLocation)
-	stanza.Key("pg1-host-cert-file").SetValue(postgres.StreamingReplicaCertificateLocation)
-	stanza.Key("pg1-host-key-file").SetValue(postgres.StreamingReplicaKeyLocation)
-
-	// pg2 = local standby (bulk file copy)
+	// pg2 = remote primary (TLS connection for pg_backup_start/stop + remaining files)
 	stanza.Key("pg2-path").SetValue(pgDataPath)
+	stanza.Key("pg2-host").SetValue(clusterName + "-rw")
+	stanza.Key("pg2-host-type").SetValue("tls")
+	stanza.Key("pg2-host-ca-file").SetValue(postgres.ServerCACertificateLocation)
+	stanza.Key("pg2-host-cert-file").SetValue(postgres.StreamingReplicaCertificateLocation)
+	stanza.Key("pg2-host-key-file").SetValue(postgres.StreamingReplicaKeyLocation)
 }

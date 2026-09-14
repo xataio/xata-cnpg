@@ -171,7 +171,7 @@ func archiveWALViaPgBackRest(ctx context.Context, cluster *apiv1.Cluster, pgData
 		return nil
 	}
 
-	walPath := filepath.Join(pgData, walName)
+	walPath := postgres.BuildWALPath(pgData, walName)
 	contextLog.Info("Archiving WAL via pgbackrest", "walName", walName, "walPath", walPath)
 
 	stanza := cluster.GetPgBackRestStanzaName()

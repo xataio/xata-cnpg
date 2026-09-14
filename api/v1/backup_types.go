@@ -51,6 +51,12 @@ const (
 	// BackupPhaseFailed means that the backup is failed
 	BackupPhaseFailed = "failed"
 
+	// BackupPhaseCancelled means that the backup was interrupted because the
+	// target cluster was hibernated or deleted. It is a terminal phase and,
+	// unlike BackupPhaseFailed, does not indicate a problem with the backup
+	// system: the cluster status is not updated and no alert should fire.
+	BackupPhaseCancelled = "cancelled"
+
 	// BackupPhaseWalArchivingFailing means wal archiving isn't properly working
 	BackupPhaseWalArchivingFailing = "walArchivingFailing"
 )
@@ -164,10 +170,22 @@ type PgBackRestRepository struct {
 	S3    *PgBackRestS3    `json:"s3,omitempty"`
 	GCS   *PgBackRestGCS   `json:"gcs,omitempty"`
 	Azure *PgBackRestAzure `json:"azure,omitempty"`
+	// Cipher configures client-side encryption for this repository.
+	// +optional
+	Cipher *PgBackRestCipher `json:"cipher,omitempty"`
+}
+
+// PgBackRestCipher defines client-side encryption for a pgbackrest repository.
+type PgBackRestCipher struct {
+	// Type is the cipher used by pgbackrest.
+	// +kubebuilder:validation:Enum=aes-256-cbc
+	Type string `json:"type"`
+	// Passphrase references the Secret key that contains the repository passphrase.
+	Passphrase SecretKeySelector `json:"passphrase"`
 }
 
 // PgBackRestS3 defines the S3-compatible storage configuration for pgbackrest.
-// +kubebuilder:validation:XValidation:rule="(self.inheritFromIAMRole == true) != (has(self.accessKeyId) && has(self.secretAccessKey))",message="either inheritFromIAMRole or both accessKeyId and secretAccessKey must be specified, but not both"
+// +kubebuilder:validation:XValidation:rule="has(self.accessKeyId) == has(self.secretAccessKey)",message="accessKeyId and secretAccessKey must be specified together"
 type PgBackRestS3 struct {
 	// The S3 bucket name
 	Bucket string `json:"bucket"`
@@ -183,10 +201,19 @@ type PgBackRestS3 struct {
 	// The reference to the secret access key
 	// +optional
 	SecretAccessKey *SecretKeySelector `json:"secretAccessKey,omitempty"`
-	// Use IAM role-based authentication (e.g. IRSA, instance profile).
-	// Sets pgbackrest repo1-s3-key-type=auto.
+	// Deprecated: use KeyType instead. This field is retained for existing
+	// resources. When KeyType is empty, resources without static credentials
+	// use the auto provider regardless of this value.
 	// +optional
 	InheritFromIAMRole bool `json:"inheritFromIAMRole,omitempty"`
+	// Selects the pgbackrest S3 credential provider. The value is passed through
+	// to repo1-s3-key-type. When empty, it defaults to auto unless both static
+	// credential references are present, in which case it defaults to shared for
+	// backward compatibility. Auto retrieves temporary credentials from the
+	// instance metadata service; it does not select web-id or pod-id.
+	// +optional
+	// +kubebuilder:validation:Enum=shared;auto;web-id;pod-id
+	KeyType string `json:"keyType,omitempty"`
 }
 
 // PgBackRestRetention defines the backup retention policy for pgbackrest.
@@ -222,10 +249,16 @@ type PgBackRestOptions struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=9
 	CompressLevel *int `json:"compressLevel,omitempty"`
-	// Maximum number of parallel processes for backup/restore.
+	// Maximum number of parallel processes for backup.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	ProcessMax *int `json:"processMax,omitempty"`
+	// Maximum number of parallel processes for restore. Defaults to a higher
+	// value than ProcessMax because PostgreSQL is not running during restore,
+	// so the full CPU is available for pgbackrest.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	RestoreProcessMax *int `json:"restoreProcessMax,omitempty"`
 	// Force an immediate checkpoint at backup start instead of
 	// waiting for the next scheduled checkpoint.
 	// +optional
@@ -278,7 +311,6 @@ type PgBackRestOptions struct {
 	// +optional
 	RepoPath string `json:"repoPath,omitempty"`
 	// TODO: add in future iterations:
-	// - encryption: cipherType, cipherPass
 	// - backup behavior: stopAuto, manifestSaveThreshold, resumeOff
 	// - network/performance: bufferSize, protocolTimeout, ioReadRateMax, ioWriteRateMax, ioBurstDurationSec
 	// - WAL: archiveTimeout, archiveMissing
@@ -286,12 +318,55 @@ type PgBackRestOptions struct {
 }
 
 // PgBackRestGCS defines the Google Cloud Storage configuration for pgbackrest.
-// TODO: implement in a future iteration
-type PgBackRestGCS struct{}
+// +kubebuilder:validation:XValidation:rule="(has(self.keyType) && (self.keyType == 'service' || self.keyType == 'token')) == has(self.keyRef)",message="keyRef must be set when keyType is service or token, and must not be set when keyType is auto"
+type PgBackRestGCS struct {
+	// The GCS bucket name
+	Bucket string `json:"bucket"`
+	// KeyType selects the authentication method. "auto" uses Workload
+	// Identity / Application Default Credentials (the GKE path). "service"
+	// reads a service account JSON key from KeyRef. "token" uses a bearer
+	// token from KeyRef.
+	// +optional
+	// +kubebuilder:validation:Enum=auto;service;token
+	// +kubebuilder:default:=auto
+	KeyType string `json:"keyType,omitempty"`
+	// The GCS endpoint, overriding the automatic endpoint discovery.
+	// Rarely needed, mostly for testing against GCS emulators.
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+	// The reference to a Secret holding the service account JSON key when
+	// keyType is "service", or a bearer token when keyType is "token".
+	// Required for those key types, must be unset for "auto".
+	// +optional
+	KeyRef *SecretKeySelector `json:"keyRef,omitempty"`
+}
 
 // PgBackRestAzure defines the Azure Blob Storage configuration for pgbackrest.
-// TODO: implement in a future iteration
-type PgBackRestAzure struct{}
+// +kubebuilder:validation:XValidation:rule="(has(self.keyType) && (self.keyType == 'shared' || self.keyType == 'sas')) == has(self.keyRef)",message="keyRef must be set when keyType is shared or sas, and must not be set when keyType is auto"
+type PgBackRestAzure struct {
+	// The Azure storage account name
+	Account string `json:"account"`
+	// The Azure Blob Storage container name
+	Container string `json:"container"`
+	// KeyType selects the authentication method. "auto" requests a
+	// managed-identity token from instance metadata (the AKS path,
+	// pgbackrest >= 2.58). "shared" reads the storage account shared key
+	// from KeyRef. "sas" reads a shared access signature token from KeyRef.
+	// +optional
+	// +kubebuilder:validation:Enum=auto;shared;sas
+	// +kubebuilder:default:=auto
+	KeyType string `json:"keyType,omitempty"`
+	// The Azure Blob Storage endpoint, overriding the default
+	// <account>.blob.core.windows.net. Rarely needed, mostly for testing
+	// against Azurite.
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+	// The reference to a Secret holding the storage account shared key when
+	// keyType is "shared", or a SAS token when keyType is "sas". Required
+	// for those key types, must be unset for "auto".
+	// +optional
+	KeyRef *SecretKeySelector `json:"keyRef,omitempty"`
+}
 
 // BackupSpec defines the desired state of Backup
 // +kubebuilder:validation:XValidation:rule="oldSelf == self",message="BackupSpec is immutable once set"

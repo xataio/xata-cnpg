@@ -15,6 +15,12 @@ env: # Print Makefile variables for debugging
 	@echo "GIT_COMMIT_FULL: $(GIT_COMMIT_FULL)"
 	@echo "GIT_COMMIT_SHORT: $(GIT_COMMIT_SHORT)"
 
+version: # Print the chart version for the current commit
+	@echo "0.0.0-$(VERSION)"
+
+registry: # Print the chart registry/repo
+	@echo "$(CHART_REGISTRY)"
+
 # Update CRDs from operator source.
 # Wraps output with Helm conditional so users can skip CRD installation via values.yaml (crds.create: false).
 # This matches upstream's release process: https://github.com/cloudnative-pg/charts/blob/main/RELEASE.md

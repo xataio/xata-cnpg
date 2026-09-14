@@ -21,6 +21,7 @@ package certificate
 
 import (
 	"crypto/tls"
+	"os"
 	"path"
 
 	"github.com/cloudnative-pg/machinery/pkg/fileutils"
@@ -54,6 +55,20 @@ var _ = Describe("refresh certificate files from a secret", func() {
 			corev1.TLSPrivateKeyKey: privateKeyContent,
 		},
 	}
+
+	It("reports a changed certificate when writing the private key fails", func(ctx SpecContext) {
+		tempDir := GinkgoT().TempDir()
+		certificateLocation := path.Join(tempDir, "tls.crt")
+		privateKeyLocation := path.Join(tempDir, "tls.key")
+		Expect(os.Mkdir(privateKeyLocation, 0o700)).To(Succeed())
+
+		changed, err := fakeReconciler.refreshCertificateFilesFromSecret(
+			ctx, &fakeSecret, certificateLocation, privateKeyLocation)
+
+		Expect(err).To(MatchError(ContainSubstring("while writing server private key")))
+		Expect(changed).To(BeTrue())
+		Expect(fileutils.ReadFile(certificateLocation)).To(Equal(publicKeyContent))
+	})
 
 	It("writing the required files into a directory", func(ctx SpecContext) {
 		tempDir := GinkgoT().TempDir()

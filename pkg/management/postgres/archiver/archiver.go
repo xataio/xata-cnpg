@@ -24,8 +24,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	barmanArchiver "github.com/cloudnative-pg/barman-cloud/pkg/archiver"
@@ -172,6 +175,13 @@ func archiveWALViaPgBackRest(ctx context.Context, cluster *apiv1.Cluster, pgData
 	}
 
 	walPath := postgres.BuildWALPath(pgData, walName)
+
+	// PostgreSQL and ArchiveAllReadyWALs also request backup history files by name.
+	if isEmptyBackupHistoryFile(walPath) {
+		contextLog.Warning("Skipping archive-push of empty backup history file", "walName", walName)
+		return nil
+	}
+
 	contextLog.Info("Archiving WAL via pgbackrest", "walName", walName, "walPath", walPath)
 
 	stanza := cluster.GetPgBackRestStanzaName()
@@ -193,7 +203,56 @@ func archiveWALViaPgBackRest(ctx context.Context, cluster *apiv1.Cluster, pgData
 		return pgbackrest.ArchivePush(ctx, stanza, walPath)
 	}
 
+	// Work around https://github.com/pgbackrest/pgbackrest/issues/2856.
+	if name, ok := emptyBackupHistoryFileFromError(err); ok {
+		if markErr := markEmptyBackupHistoryFileDone(filepath.Dir(walPath), name); markErr != nil {
+			return errors.Join(err, markErr)
+		}
+		contextLog.Warning("Marked empty backup history file as archived", "walName", name)
+		return pgbackrest.ArchivePush(ctx, stanza, walPath)
+	}
+
 	return err
+}
+
+// emptyBackupHistoryFileRe matches the archive-push error that pgBackRest 2.59
+// raises when an empty backup history file is first in its ready queue.
+var emptyBackupHistoryFileRe = regexp.MustCompile(
+	`size of WAL segment '([0-9A-F]{24}\.[0-9A-F]{8}\.backup)' is 0`)
+
+// emptyBackupHistoryFileFromError returns the name of the backup history file
+// when a pgbackrest error reports that the file has zero size.
+func emptyBackupHistoryFileFromError(err error) (string, bool) {
+	var cmdErr *pgbackrest.CommandError
+	if !errors.As(err, &cmdErr) {
+		return "", false
+	}
+	match := emptyBackupHistoryFileRe.FindStringSubmatch(cmdErr.Stderr)
+	if match == nil {
+		return "", false
+	}
+	return match[1], true
+}
+
+// isEmptyBackupHistoryFile reports whether walPath is a zero-size backup
+// history file.
+func isEmptyBackupHistoryFile(walPath string) bool {
+	if !strings.HasSuffix(walPath, ".backup") {
+		return false
+	}
+	info, err := os.Stat(walPath)
+	return err == nil && info.Size() == 0
+}
+
+// markEmptyBackupHistoryFileDone marks the backup history file name in walDir
+// as archived, as PostgreSQL does after a successful archive_command. It
+// refuses to mark a file that is not empty.
+func markEmptyBackupHistoryFileDone(walDir, name string) error {
+	if !isEmptyBackupHistoryFile(filepath.Join(walDir, name)) {
+		return fmt.Errorf("%s is not an empty backup history file", name)
+	}
+	statusDir := filepath.Join(walDir, "archive_status")
+	return os.Rename(filepath.Join(statusDir, name+".ready"), filepath.Join(statusDir, name+".done"))
 }
 
 func internalRun(

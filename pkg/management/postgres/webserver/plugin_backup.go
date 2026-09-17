@@ -164,8 +164,9 @@ func (b *PluginBackupCommand) markBackupAsFailed(ctx context.Context, failure er
 	contextLogger := log.FromContext(ctx)
 
 	// record the failure
-	contextLogger.Error(failure, "Backup failed")
-	b.Recorder.Event(b.Backup, "Normal", "Failed", "Backup failed")
+	reason := status.ClassifyBackupFailure(failure)
+	contextLogger.Error(failure, "Backup failed", "failureReason", reason)
+	b.Recorder.Eventf(b.Backup, "Normal", "Failed", "Backup failed: %s", reason)
 
 	_ = status.FlagBackupAsFailed(ctx, b.Client, b.Backup, b.Cluster, failure)
 }

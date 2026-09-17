@@ -124,3 +124,46 @@ var _ = Describe("PgBackRest repository CRD schema", func() {
 			"has(self.accessKeyId) == has(self.secretAccessKey)"))
 	})
 })
+
+var _ = Describe("Backup CRD schema", func() {
+	It("closes status.failureReason to the known BackupFailureReason values", func() {
+		data, err := os.ReadFile("../../config/crd/bases/postgresql.cnpg.io_backups.yaml")
+		Expect(err).ToNot(HaveOccurred())
+
+		var crd apiextensionsv1.CustomResourceDefinition
+		Expect(yaml.Unmarshal(data, &crd)).To(Succeed())
+		Expect(crd.Spec.Versions).To(HaveLen(1))
+
+		failureReason := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.
+			Properties["status"].
+			Properties["failureReason"]
+
+		Expect(failureReason.Type).To(Equal("string"))
+
+		enumValues := make([]string, 0, len(failureReason.Enum))
+		for _, v := range failureReason.Enum {
+			var s string
+			Expect(yaml.Unmarshal(v.Raw, &s)).To(Succeed())
+			enumValues = append(enumValues, s)
+		}
+
+		Expect(enumValues).To(ConsistOf(
+			string(BackupFailureReasonTargetPodTimeout),
+			string(BackupFailureReasonTargetPodError),
+			string(BackupFailureReasonClusterHibernated),
+			string(BackupFailureReasonClusterDeleted),
+			string(BackupFailureReasonConfigNotApplied),
+			string(BackupFailureReasonStanzaNotReady),
+			string(BackupFailureReasonLockContention),
+			string(BackupFailureReasonDBUnavailable),
+			string(BackupFailureReasonObjectStoreDenied),
+			string(BackupFailureReasonObjectStoreError),
+			string(BackupFailureReasonWalArchiving),
+			string(BackupFailureReasonExecFailed),
+			string(BackupFailureReasonVersionMismatch),
+			string(BackupFailureReasonStandbyUnreachable),
+			string(BackupFailureReasonPgBackRestError),
+			string(BackupFailureReasonOther),
+		))
+	})
+})

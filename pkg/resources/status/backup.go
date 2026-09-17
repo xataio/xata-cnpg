@@ -22,6 +22,7 @@ package status
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
@@ -31,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
@@ -104,7 +106,7 @@ func FlagBackupAsFailed(
 			return err
 		}
 		origBackup := livingBackup.DeepCopy()
-		livingBackup.Status.SetAsFailed(err)
+		livingBackup.Status.SetAsFailed(err, ClassifyBackupFailure(err))
 		livingBackup.Status.Method = livingBackup.Spec.Method
 		for _, transaction := range transactions {
 			transaction(&livingBackup)
@@ -240,4 +242,30 @@ func flagBackupAsCancelled(
 	}
 
 	return nil
+}
+
+// ClassifyBackupFailure returns the failure reason for a backup error.
+func ClassifyBackupFailure(err error) apiv1.BackupFailureReason {
+	if err == nil {
+		return ""
+	}
+
+	if reason, ok := pgbackrest.ClassifyExitCode(err); ok {
+		return reason
+	}
+
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "target pod not usable after waiting"):
+		return apiv1.BackupFailureReasonTargetPodTimeout
+	case strings.Contains(msg, "while getting pod:"),
+		strings.Contains(msg, "while ensuring target pod is healthy:"):
+		return apiv1.BackupFailureReasonTargetPodError
+	case strings.Contains(msg, "pgbackrest configuration") && strings.Contains(msg, "not applied after"):
+		return apiv1.BackupFailureReasonConfigNotApplied
+	case strings.Contains(msg, "stanza") && strings.Contains(msg, "not ready after"):
+		return apiv1.BackupFailureReasonStanzaNotReady
+	default:
+		return apiv1.BackupFailureReasonOther
+	}
 }

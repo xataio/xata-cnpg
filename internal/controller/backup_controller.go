@@ -948,6 +948,7 @@ func startInstanceManagerBackup(
 		log.FromContext(ctx).Error(err, "executing backup", "stdout", stdout, "stderr", stderr)
 		setCommandErr := func(backup *apiv1.Backup) {
 			backup.Status.CommandError = fmt.Sprintf("with stderr: %s, with stdout: %s", stderr, stdout)
+			backup.Status.FailureReason = apiv1.BackupFailureReasonExecFailed
 		}
 		return resourcestatus.FlagBackupAsFailed(ctx, client, backup, cluster, err, setCommandErr)
 	}

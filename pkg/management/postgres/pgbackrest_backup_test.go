@@ -120,6 +120,7 @@ var _ = Describe("failBackup", func() {
 			Expect(stored.Status.InstanceID).To(BeNil())
 			// The error text is kept so the reason for the retry is visible.
 			Expect(stored.Status.Error).To(ContainSubstring("exit code 56"))
+			Expect(stored.Status.FailureReason).To(BeEmpty())
 		})
 
 	It("does not stamp the cluster while a retry is still possible", func(ctx SpecContext) {
@@ -142,6 +143,7 @@ var _ = Describe("failBackup", func() {
 		stored := storedBackup(ctx)
 		Expect(stored.Annotations).ToNot(HaveKey(utils.PgBackRestPrimaryFallback))
 		Expect(stored.Status.Phase).To(BeEquivalentTo(apiv1.BackupPhaseFailed))
+		Expect(stored.Status.FailureReason).To(Equal(apiv1.BackupFailureReasonOther))
 	})
 
 	It("fails the backup when the standby retry has already happened", func(ctx SpecContext) {
@@ -151,6 +153,7 @@ var _ = Describe("failBackup", func() {
 
 		stored := storedBackup(ctx)
 		Expect(stored.Status.Phase).To(BeEquivalentTo(apiv1.BackupPhaseFailed))
+		Expect(stored.Status.FailureReason).To(Equal(apiv1.BackupFailureReasonOther))
 	})
 })
 

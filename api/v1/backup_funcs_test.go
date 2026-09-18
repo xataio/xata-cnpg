@@ -20,6 +20,7 @@ SPDX-License-Identifier: Apache-2.0
 package v1
 
 import (
+	"fmt"
 	"time"
 
 	volumesnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
@@ -497,5 +498,55 @@ var _ = Describe("BackupMethod", func() {
 
 	It("volumeSnapshot is managed by operator", func() {
 		Expect(BackupMethodVolumeSnapshot.IsManagedByOperator()).To(BeTrue())
+	})
+})
+
+var _ = Describe("SetAsFailed", func() {
+	It("records the phase, error and failure reason", func() {
+		status := BackupStatus{}
+		status.SetAsFailed(fmt.Errorf("boom"), BackupFailureReasonExecFailed)
+
+		Expect(status.Phase).To(BeEquivalentTo(BackupPhaseFailed))
+		Expect(status.Error).To(Equal("boom"))
+		Expect(status.FailureReason).To(Equal(BackupFailureReasonExecFailed))
+	})
+
+	It("clears the error when err is nil, but keeps the given reason", func() {
+		status := BackupStatus{Error: "stale error"}
+		status.SetAsFailed(nil, BackupFailureReasonOther)
+
+		Expect(status.Error).To(BeEmpty())
+		Expect(status.FailureReason).To(Equal(BackupFailureReasonOther))
+	})
+})
+
+var _ = Describe("SetAsCancelled", func() {
+	It("classifies a hibernated cluster", func() {
+		status := BackupStatus{}
+		status.SetAsCancelled("cluster is hibernated")
+
+		Expect(status.Phase).To(BeEquivalentTo(BackupPhaseCancelled))
+		Expect(status.FailureReason).To(Equal(BackupFailureReasonClusterHibernated))
+	})
+
+	It("classifies a deleted cluster", func() {
+		status := BackupStatus{}
+		status.SetAsCancelled("cluster has been deleted")
+
+		Expect(status.FailureReason).To(Equal(BackupFailureReasonClusterDeleted))
+	})
+
+	It("classifies a cluster that is being deleted", func() {
+		status := BackupStatus{}
+		status.SetAsCancelled("cluster is being deleted")
+
+		Expect(status.FailureReason).To(Equal(BackupFailureReasonClusterDeleted))
+	})
+
+	It("falls back to other for an unrecognized reason", func() {
+		status := BackupStatus{}
+		status.SetAsCancelled("something unexpected happened")
+
+		Expect(status.FailureReason).To(Equal(BackupFailureReasonOther))
 	})
 })

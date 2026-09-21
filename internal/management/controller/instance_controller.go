@@ -65,9 +65,27 @@ import (
 )
 
 const (
-	userSearchFunctionSchema = "public"
-	userSearchFunctionName   = "user_search"
-	userSearchFunction       = "SELECT usename, passwd FROM pg_catalog.pg_shadow WHERE usename=$1;"
+	userSearchFunctionSchema         = "public"
+	userSearchFunctionName           = "user_search"
+	userSearchFunction               = "SELECT usename, passwd FROM pg_catalog.pg_shadow WHERE usename=$1;"
+	userSearchFunctionSearchPath     = "pg_catalog, pg_temp"
+	userSearchFunctionDetectionQuery = `SELECT COALESCE(COUNT(*) = 1 AND bool_and(
+			oid = pg_catalog.to_regprocedure('%[1]s.%[2]s(text)')
+			AND prosrc = '%[3]s'
+			AND prosecdef
+			AND pg_catalog.pg_get_userbyid(proowner) = current_user
+			AND 'search_path=%[4]s' = ANY(proconfig)), false)
+		FROM pg_catalog.pg_proc
+		WHERE pronamespace = pg_catalog.to_regnamespace('%[1]s')
+		AND proname = '%[2]s'`
+	userSearchFunctionOverloadsQuery = `SELECT pg_catalog.pg_get_function_identity_arguments(oid)
+		FROM pg_catalog.pg_proc
+		WHERE pronamespace = pg_catalog.to_regnamespace('%s')
+		AND proname = '%s'`
+	poolerPrivilegesDetectionQuery = `SELECT pg_catalog.has_database_privilege('%[1]s', '%[2]s', 'CONNECT')
+		AND pg_catalog.has_schema_privilege('%[1]s', '%[3]s', 'USAGE')
+		AND pg_catalog.has_function_privilege('%[1]s', '%[3]s.%[4]s(text)', 'EXECUTE')
+		AND NOT pg_catalog.has_function_privilege('public', '%[3]s.%[4]s(text)', 'EXECUTE')`
 )
 
 // RetryUntilWalReceiverDown is the default retry configuration that is used
@@ -747,8 +765,10 @@ func (r *InstanceReconciler) reconcileExtensions(
 	return tx.Commit()
 }
 
-// ReconcileExtensions reconciles the expected extensions for this
-// PostgreSQL instance
+// reconcilePgbouncerAuthUser ensures that the role and the auth_query
+// function used by the PgBouncer integration exist in the superuser
+// database, and re-applies the privileges the role needs on every
+// reconciliation
 func (r *InstanceReconciler) reconcilePgbouncerAuthUser(
 	ctx context.Context,
 	db *sql.DB,
@@ -793,48 +813,124 @@ func (r *InstanceReconciler) reconcilePgbouncerAuthUser(
 		if err != nil {
 			return err
 		}
-
-		_, err = tx.Exec(fmt.Sprintf("GRANT CONNECT ON DATABASE %s TO %s",
-			apiv1.PoolerAuthDBName, apiv1.PGBouncerPoolerUserName))
-		if err != nil {
-			return err
-		}
 	}
 
-	var existsFunction bool
-	row = tx.QueryRow(fmt.Sprintf("SELECT COUNT(*) > 0 FROM pg_catalog.pg_proc WHERE proname='%s' and prosrc='%s'",
-		userSearchFunctionName,
-		userSearchFunction))
-	err = row.Scan(&existsFunction)
-	if err != nil {
+	if err := reconcileUserSearchFunction(ctx, tx); err != nil {
 		return err
 	}
-	if !existsFunction {
-		_, err = tx.Exec(fmt.Sprintf("CREATE OR REPLACE FUNCTION %s.%s(uname TEXT) "+
-			"RETURNS TABLE (usename name, passwd text) "+
-			"as '%s' "+
-			"LANGUAGE sql SECURITY DEFINER",
-			userSearchFunctionSchema,
-			userSearchFunctionName,
-			userSearchFunction))
-		if err != nil {
-			return err
-		}
-		_, err = tx.Exec(fmt.Sprintf("REVOKE ALL ON FUNCTION %s.%s(text) FROM public;",
-			userSearchFunctionSchema, userSearchFunctionName))
-		if err != nil {
-			return err
-		}
-		_, err = tx.Exec(fmt.Sprintf("GRANT EXECUTE ON FUNCTION %s.%s(text) TO %s",
-			userSearchFunctionSchema,
-			userSearchFunctionName,
-			apiv1.PGBouncerPoolerUserName))
-		if err != nil {
-			return err
-		}
+	if err := reconcilePoolerPrivileges(ctx, tx); err != nil {
+		return err
 	}
 
 	return tx.Commit()
+}
+
+func reconcileUserSearchFunction(ctx context.Context, tx *sql.Tx) error {
+	var existsFunction bool
+	row := tx.QueryRowContext(ctx, fmt.Sprintf(userSearchFunctionDetectionQuery,
+		userSearchFunctionSchema,
+		userSearchFunctionName,
+		userSearchFunction,
+		userSearchFunctionSearchPath))
+	if err := row.Scan(&existsFunction); err != nil {
+		return err
+	}
+	if existsFunction {
+		return nil
+	}
+
+	overloads, err := listUserSearchFunctionOverloads(ctx, tx)
+	if err != nil {
+		return err
+	}
+	log.FromContext(ctx).Info("Recreating the PgBouncer auth_query function",
+		"schema", userSearchFunctionSchema, "function", userSearchFunctionName, "droppedOverloads", overloads)
+	for _, arguments := range overloads {
+		_, err = tx.ExecContext(ctx, fmt.Sprintf("DROP FUNCTION %s.%s(%s)",
+			userSearchFunctionSchema, userSearchFunctionName, arguments))
+		if err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(fmt.Sprintf("CREATE FUNCTION %s.%s(uname TEXT) "+
+		"RETURNS TABLE (usename name, passwd text) "+
+		"as '%s' "+
+		"LANGUAGE sql SECURITY DEFINER "+
+		"SET search_path = %s",
+		userSearchFunctionSchema,
+		userSearchFunctionName,
+		userSearchFunction,
+		userSearchFunctionSearchPath))
+	return err
+}
+
+func reconcilePoolerPrivileges(ctx context.Context, tx *sql.Tx) error {
+	var privilegesGranted bool
+	row := tx.QueryRowContext(ctx, fmt.Sprintf(poolerPrivilegesDetectionQuery,
+		apiv1.PGBouncerPoolerUserName,
+		apiv1.PoolerAuthDBName,
+		userSearchFunctionSchema,
+		userSearchFunctionName))
+	err := row.Scan(&privilegesGranted)
+	if err != nil {
+		return err
+	}
+	if privilegesGranted {
+		return nil
+	}
+
+	log.FromContext(ctx).Info("Repairing the privileges of the PgBouncer auth_query role",
+		"role", apiv1.PGBouncerPoolerUserName, "schema", userSearchFunctionSchema, "function", userSearchFunctionName)
+	_, err = tx.Exec(fmt.Sprintf("GRANT CONNECT ON DATABASE %s TO %s",
+		apiv1.PoolerAuthDBName, apiv1.PGBouncerPoolerUserName))
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, fmt.Sprintf("GRANT USAGE ON SCHEMA %s TO %s",
+		userSearchFunctionSchema, apiv1.PGBouncerPoolerUserName))
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(fmt.Sprintf("REVOKE ALL ON FUNCTION %s.%s(text) FROM public;",
+		userSearchFunctionSchema, userSearchFunctionName))
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(fmt.Sprintf("GRANT EXECUTE ON FUNCTION %s.%s(text) TO %s",
+		userSearchFunctionSchema,
+		userSearchFunctionName,
+		apiv1.PGBouncerPoolerUserName))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// listUserSearchFunctionOverloads returns the identity arguments, as
+// rendered by PostgreSQL, of every function carrying the auth_query function
+// name in its schema
+func listUserSearchFunctionOverloads(ctx context.Context, tx *sql.Tx) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(userSearchFunctionOverloadsQuery,
+		userSearchFunctionSchema, userSearchFunctionName))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var overloads []string
+	for rows.Next() {
+		var arguments string
+		if err := rows.Scan(&arguments); err != nil {
+			return nil, err
+		}
+		overloads = append(overloads, arguments)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return overloads, nil
 }
 
 // reconcileClusterRoleWithoutDB updates this instance's configuration files

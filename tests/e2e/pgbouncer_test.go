@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -153,6 +155,10 @@ var _ = Describe("PGBouncer Connections", Label(tests.LabelServiceConnectivity),
 				assertReadWriteConnectionUsingPgBouncerService(namespace, clusterName,
 					poolerBasicAuthROSampleFile, false)
 			})
+		})
+
+		It("keeps authenticating after the public schema of the postgres database is recreated", func() {
+			assertPgBouncerAuthQueryIsRepaired(namespace, clusterName, poolerBasicAuthRWSampleFile)
 		})
 	})
 
@@ -349,4 +355,85 @@ func createAppClientCertificates(namespace, commonName, sourceCASecretName strin
 	Expect(err).ToNot(HaveOccurred())
 
 	return caCert, clientCert, clientKey
+}
+
+// assertPgBouncerAuthQueryIsRepaired recreates the public schema of the
+// postgres database as superuser, which drops the auth_query function and the
+// privileges of the pooler role, then expects the instance manager to restore
+// them and the logins through the pooler to succeed again
+func assertPgBouncerAuthQueryIsRepaired(namespace, clusterName, poolerYamlFilePath string) {
+	const breakingQuery = "DROP SCHEMA public CASCADE; CREATE SCHEMA public"
+
+	By("connecting through the pooler before breaking the auth_query lookup", func() {
+		assertReadWriteConnectionUsingPgBouncerService(namespace, clusterName, poolerYamlFilePath, true)
+	})
+
+	primaryPod, err := clusterutils.GetPrimary(env.Ctx, env.Client, namespace, clusterName)
+	Expect(err).ToNot(HaveOccurred())
+	primaryPodLocator := exec.PodLocator{
+		Namespace: primaryPod.Namespace,
+		PodName:   primaryPod.Name,
+	}
+	queryPostgresDatabase := func(query string) (string, error) {
+		out, _, err := exec.QueryInInstancePod(
+			env.Ctx, env.Client, env.Interface, env.RestClientConfig,
+			primaryPodLocator, testsUtils.PostgresDBName, query)
+		return strings.TrimSpace(out), err
+	}
+	triggerInstanceReconciliation := func() {
+		cluster, err := clusterutils.Get(env.Ctx, env.Client, namespace, clusterName)
+		Expect(err).ToNot(HaveOccurred())
+		originCluster := cluster.DeepCopy()
+		if cluster.Annotations == nil {
+			cluster.Annotations = make(map[string]string)
+		}
+		cluster.Annotations["e2e.cnpg.io/pgbouncer-auth-query-check"] = time.Now().Format(time.RFC3339Nano)
+		Expect(env.Client.Patch(env.Ctx, cluster, ctrlclient.MergeFrom(originCluster))).To(Succeed())
+	}
+
+	By(fmt.Sprintf("running %q in the postgres database", breakingQuery), func() {
+		_, err := queryPostgresDatabase(breakingQuery)
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	By("triggering a reconciliation of the instance", triggerInstanceReconciliation)
+
+	By("waiting for the privileges of the pooler role to be restored", func() {
+		privilegesQuery := fmt.Sprintf(
+			"SELECT pg_catalog.has_database_privilege('%[1]s', 'postgres', 'CONNECT') "+
+				"AND pg_catalog.has_schema_privilege('%[1]s', 'public', 'USAGE') "+
+				"AND pg_catalog.has_function_privilege('%[1]s', 'public.user_search(text)', 'EXECUTE') "+
+				"AND NOT pg_catalog.has_function_privilege('public', 'public.user_search(text)', 'EXECUTE')",
+			apiv1.PGBouncerPoolerUserName)
+		Eventually(func(g Gomega) {
+			out, err := queryPostgresDatabase(privilegesQuery)
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(out).To(Equal("t"))
+		}, RetryTimeout).Should(Succeed())
+	})
+
+	By("verifying that a further reconciliation does not rewrite the function", func() {
+		// The function is a single row of pg_proc: its xmin changes on every
+		// rewrite, so a stable xmin across a forced reconciliation proves
+		// that the steady state issues no DDL
+		functionXminQuery := "SELECT p.xmin FROM pg_catalog.pg_proc p " +
+			"JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace " +
+			"WHERE n.nspname = 'public' AND p.proname = 'user_search'"
+		xmin, err := queryPostgresDatabase(functionXminQuery)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(xmin).ToNot(BeEmpty())
+		Expect(xmin).ToNot(ContainSubstring("\n"), "exactly one user_search function is expected")
+
+		triggerInstanceReconciliation()
+
+		Consistently(func(g Gomega) {
+			out, err := queryPostgresDatabase(functionXminQuery)
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(out).To(Equal(xmin))
+		}, 20, 4).Should(Succeed())
+	})
+
+	By("connecting through the pooler after the repair", func() {
+		assertReadWriteConnectionUsingPgBouncerService(namespace, clusterName, poolerYamlFilePath, true)
+	})
 }

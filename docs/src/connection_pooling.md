@@ -197,19 +197,29 @@ PgBouncer’s `auth_query` option:
 ```sql
 CREATE OR REPLACE FUNCTION public.user_search(uname TEXT)
   RETURNS TABLE (usename name, passwd text)
-  LANGUAGE sql SECURITY DEFINER AS
+  LANGUAGE sql SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp AS
   'SELECT usename, passwd FROM pg_catalog.pg_shadow WHERE usename=$1;';
 ```
 
-Restrict and grant permissions on the lookup function:
+Grant access to the schema holding the function, then restrict and grant
+permissions on the lookup function itself:
 
 ```sql
+GRANT USAGE ON SCHEMA public
+  TO cnpg_pooler_pgbouncer;
+
 REVOKE ALL ON FUNCTION public.user_search(text)
   FROM public;
 
 GRANT EXECUTE ON FUNCTION public.user_search(text)
   TO cnpg_pooler_pgbouncer;
 ```
+
+The operator checks these privileges on every reconciliation of the cluster
+and re-applies them when any is missing, so a `public` schema that is
+recreated, or whose default `USAGE` privilege is revoked from `PUBLIC`, does
+not lock the pooler out of the lookup function.
 
 ### Custom authentication method
 

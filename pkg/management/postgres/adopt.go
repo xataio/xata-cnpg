@@ -225,7 +225,11 @@ func EnsureAdoptedPlatformObjects(ctx context.Context, pgData string, db *sql.DB
 		return err
 	}
 
-	return ensureApplicationDatabase(ctx, db)
+	if err := ensureApplicationDatabase(ctx, db); err != nil {
+		return err
+	}
+
+	return ensureApplicationRoleDatabaseAccess(ctx, db)
 }
 
 // ensurePlatformSuperuserRole creates the non-login role the managed application
@@ -340,6 +344,87 @@ func ensureApplicationDatabase(ctx context.Context, db *sql.DB) error {
 		pgx.Identifier{platformApplicationRole}.Sanitize(),
 	)); err != nil {
 		return fmt.Errorf("while setting the owner of %q: %w", platformApplicationDatabase, err)
+	}
+
+	return nil
+}
+
+// ensureApplicationRoleDatabaseAccess grants the application role every
+// database-level privilege on every database of the adopted cluster. The
+// databases that came with the source are owned by whatever roles the source
+// had, and the application role inherits nothing from them: without this it
+// cannot even create a schema in the database the adopted data actually lives
+// in. Table and schema access is not handled here, it comes with the
+// pg_read_all_data and pg_write_all_data memberships of platformSuperuserRole.
+//
+// Template databases are left alone. Anything granted on them would be copied
+// into every database created afterwards, and the platform never connects to
+// them. Databases already fully granted are skipped, so a reconcile against a
+// converged cluster does nothing.
+func ensureApplicationRoleDatabaseAccess(ctx context.Context, db *sql.DB) error {
+	contextLogger := log.FromContext(ctx).WithName("adopt_foreign_standby")
+
+	var roleExists bool
+	if err := db.QueryRowContext(ctx,
+		"SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)",
+		platformApplicationRole,
+	).Scan(&roleExists); err != nil {
+		return fmt.Errorf("while looking for role %q: %w", platformApplicationRole, err)
+	}
+	if !roleExists {
+		// The managed roles have not created it yet; a later reconcile will.
+		return nil
+	}
+
+	// ALL PRIVILEGES on a database is exactly CREATE, CONNECT and TEMP, so a
+	// database where the role already holds the three needs nothing. The
+	// privileges are tested one at a time: given a comma-separated list,
+	// has_database_privilege reports whether any of them is held, and CONNECT
+	// and TEMP are granted to PUBLIC by default, which would make every
+	// database look done.
+	rows, err := db.QueryContext(ctx, `
+		SELECT datname
+		FROM pg_database
+		WHERE NOT datistemplate
+		  AND NOT (has_database_privilege($1, oid, 'CREATE')
+		       AND has_database_privilege($1, oid, 'CONNECT')
+		       AND has_database_privilege($1, oid, 'TEMP'))
+		ORDER BY datname`,
+		platformApplicationRole,
+	)
+	if err != nil {
+		return fmt.Errorf("while listing the databases %q lacks access to: %w",
+			platformApplicationRole, err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			contextLogger.Error(closeErr, "while closing the database list")
+		}
+	}()
+
+	var databases []string
+	for rows.Next() {
+		var datname string
+		if err := rows.Scan(&datname); err != nil {
+			return fmt.Errorf("while reading the database list: %w", err)
+		}
+		databases = append(databases, datname)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("while reading the database list: %w", err)
+	}
+
+	for _, datname := range databases {
+		contextLogger.Info("Granting the application role full access to an adopted database",
+			"database", datname, "role", platformApplicationRole)
+
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("GRANT ALL PRIVILEGES ON DATABASE %s TO %s",
+			pgx.Identifier{datname}.Sanitize(),
+			pgx.Identifier{platformApplicationRole}.Sanitize(),
+		)); err != nil {
+			return fmt.Errorf("while granting %q access to database %q: %w",
+				platformApplicationRole, datname, err)
+		}
 	}
 
 	return nil

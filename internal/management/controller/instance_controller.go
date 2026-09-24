@@ -1479,6 +1479,13 @@ func (r *InstanceReconciler) refreshCredentialsFromSecret(
 		}
 	}
 
+	// A data directory adopted from a foreign primary brings none of this
+	// platform's roles with it, and the declarative managed roles cannot be
+	// applied until they exist. A no-op for every other instance.
+	if err := postgresManagement.EnsureAdoptedPlatformObjects(ctx, r.instance, db); err != nil {
+		return err
+	}
+
 	return nil
 }
 

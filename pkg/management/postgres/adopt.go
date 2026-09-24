@@ -22,6 +22,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path"
 
@@ -182,6 +183,10 @@ const platformSuperuserRole = "xata_superuser"
 const (
 	platformApplicationRole     = "xata"
 	platformApplicationDatabase = "xata"
+
+	// adoptedDefaultDatabase is where an adopted cluster's data is assumed to
+	// live: the database every PostgreSQL cluster is created with.
+	adoptedDefaultDatabase = "postgres"
 )
 
 // platformSuperuserGrants are the predefined roles platformSuperuserRole holds.
@@ -212,8 +217,8 @@ var platformSuperuserGrants = []string{
 //
 // TODO: seeding this belongs with whatever provisions a source cluster for
 // adoption, rather than being repaired here after the fact.
-func EnsureAdoptedPlatformObjects(ctx context.Context, pgData string, db *sql.DB) error {
-	adopted, err := fileutils.FileExists(path.Join(pgData, AdoptedMarkerFile))
+func EnsureAdoptedPlatformObjects(ctx context.Context, instance *Instance, db *sql.DB) error {
+	adopted, err := fileutils.FileExists(path.Join(instance.PgData, AdoptedMarkerFile))
 	if err != nil {
 		return fmt.Errorf("while looking for the adoption marker: %w", err)
 	}
@@ -229,7 +234,11 @@ func EnsureAdoptedPlatformObjects(ctx context.Context, pgData string, db *sql.DB
 		return err
 	}
 
-	return ensureApplicationRoleDatabaseAccess(ctx, db)
+	if err := ensureApplicationRoleDatabaseAccess(ctx, db); err != nil {
+		return err
+	}
+
+	return ensureApplicationRoleSchemaAccess(ctx, instance, db)
 }
 
 // ensurePlatformSuperuserRole creates the non-login role the managed application
@@ -312,13 +321,29 @@ func ensureApplicationDatabase(ctx context.Context, db *sql.DB) error {
 		}
 	}
 
-	// Hand it over once the managed application role shows up.
+	// Hand it over once the managed application role shows up. Only this
+	// database: the adopted one keeps its own owner, and its public schema is
+	// dealt with separately, which is how the platform sets a cluster up at
+	// initdb time.
+	return ensureDatabaseOwner(ctx, db, platformApplicationDatabase)
+}
+
+// ensureDatabaseOwner makes the application role the owner of one database, if
+// it is not already and the role exists yet.
+func ensureDatabaseOwner(ctx context.Context, db *sql.DB, datname string) error {
+	contextLogger := log.FromContext(ctx).WithName("adopt_foreign_standby")
+
 	var owner string
-	if err := db.QueryRowContext(ctx,
+	err := db.QueryRowContext(ctx,
 		`SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = $1`,
-		platformApplicationDatabase,
-	).Scan(&owner); err != nil {
-		return fmt.Errorf("while reading the owner of %q: %w", platformApplicationDatabase, err)
+		datname,
+	).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Nothing named that in this cluster.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("while reading the owner of %q: %w", datname, err)
 	}
 	if owner == platformApplicationRole {
 		return nil
@@ -336,14 +361,14 @@ func ensureApplicationDatabase(ctx context.Context, db *sql.DB) error {
 		return nil
 	}
 
-	contextLogger.Info("Handing the application database to the application role",
-		"database", platformApplicationDatabase, "owner", platformApplicationRole)
+	contextLogger.Info("Handing a database to the application role",
+		"database", datname, "owner", platformApplicationRole)
 
 	if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER DATABASE %s OWNER TO %s",
-		pgx.Identifier{platformApplicationDatabase}.Sanitize(),
+		pgx.Identifier{datname}.Sanitize(),
 		pgx.Identifier{platformApplicationRole}.Sanitize(),
 	)); err != nil {
-		return fmt.Errorf("while setting the owner of %q: %w", platformApplicationDatabase, err)
+		return fmt.Errorf("while setting the owner of %q: %w", datname, err)
 	}
 
 	return nil
@@ -425,6 +450,75 @@ func ensureApplicationRoleDatabaseAccess(ctx context.Context, db *sql.DB) error 
 			return fmt.Errorf("while granting %q access to database %q: %w",
 				platformApplicationRole, datname, err)
 		}
+	}
+
+	return nil
+}
+
+// ensureApplicationRoleSchemaAccess hands the public schema of the adopted
+// database to the application role, which is what lets it create tables there.
+//
+// Database-level privileges are not enough on their own: since PostgreSQL 15
+// the public schema is owned by pg_database_owner and PUBLIC holds only USAGE,
+// so a role that can connect and create schemas still cannot create a table in
+// public. This mirrors what the platform does at initdb time — it alters the
+// schema owner and grants CREATE on the database, and leaves the database owner
+// alone.
+//
+// Only the default database (postgres) is repaired. The application database created by
+// ensureApplicationDatabase is owned by the application role, and since
+// PostgreSQL 15 pg_database_owner resolves to whoever owns the database being
+// queried, so its public schema already resolves to the role and needs nothing.
+// On a pre-15 source public is owned outright by the role that ran initdb, and
+// every database would have to be visited.
+func ensureApplicationRoleSchemaAccess(ctx context.Context, instance *Instance, db *sql.DB) error {
+	contextLogger := log.FromContext(ctx).WithName("adopt_foreign_standby")
+
+	var roleExists bool
+	if err := db.QueryRowContext(ctx,
+		"SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)",
+		platformApplicationRole,
+	).Scan(&roleExists); err != nil {
+		return fmt.Errorf("while looking for role %q: %w", platformApplicationRole, err)
+	}
+	if !roleExists {
+		// The managed roles have not created it yet; a later reconcile will.
+		return nil
+	}
+
+	// pg_namespace is per-database, so unlike the database-level grants this
+	// needs a connection to the database being repaired.
+	targetDB, err := instance.ConnectionPool().Connection(adoptedDefaultDatabase)
+	if err != nil {
+		return fmt.Errorf("while connecting to database %q: %w", adoptedDefaultDatabase, err)
+	}
+
+	var owner string
+	err = targetDB.QueryRowContext(ctx,
+		"SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = 'public'",
+	).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No public schema to hand over.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("while reading the public schema owner of %q: %w",
+			adoptedDefaultDatabase, err)
+	}
+	if owner == platformApplicationRole {
+		return nil
+	}
+
+	contextLogger.Info("Handing the public schema of the adopted database to the application role",
+		"database", adoptedDefaultDatabase, "owner", platformApplicationRole)
+
+	// The role name is a compile-time constant, so the quoting cannot carry
+	// anything from outside this package.
+	if _, err := targetDB.ExecContext(ctx, fmt.Sprintf("ALTER SCHEMA public OWNER TO %s",
+		pgx.Identifier{platformApplicationRole}.Sanitize(),
+	)); err != nil {
+		return fmt.Errorf("while handing the public schema of %q to %q: %w",
+			adoptedDefaultDatabase, platformApplicationRole, err)
 	}
 
 	return nil

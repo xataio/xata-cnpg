@@ -68,10 +68,8 @@ type InstanceReconciler struct {
 	certificateReconciler certificateRefresher
 	pluginRepository      repository.Interface
 
-	// pgBackRestStanzaCreated holds the name of the pgbackrest stanza that was
-	// last created by this manager. It is a pointer (not a bool) so that a
-	// change of stanza name triggers stanza-create for the new stanza instead
-	// of being skipped.
+	// pgBackRestStanzaCreated records successful initialization. Configuration
+	// changes clear it so a new repository is initialized under the same stanza.
 	pgBackRestStanzaCreated atomic.Pointer[string]
 	pgBackRestReloadPending atomic.Bool
 	pgBackRestTLSServer     pgBackRestTLSServer

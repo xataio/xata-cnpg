@@ -26,12 +26,13 @@ import (
 	"strings"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
+
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/utils"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -64,6 +65,7 @@ func TestStanzaInitializationAfterConfigChange(t *testing.T) {
 printf '%s\n' "$*" >> "$STANZA_CALLS"
 if [ -f "$STANZA_FAIL" ]; then exit 1; fi
 `
+	// #nosec G306 -- The fake executable needs owner execute permission inside t.TempDir.
 	if err := os.WriteFile(filepath.Join(dir, "pgbackrest"), []byte(binary), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +105,7 @@ if [ -f "$STANZA_FAIL" ]; then exit 1; fi
 	if err := r.reconcilePgBackRestStanza(context.Background(), cluster, false); err != nil {
 		t.Fatal(err)
 	}
-	content, err := os.ReadFile(calls)
+	content, err := os.ReadFile(calls) // #nosec G304 -- Test-owned path inside t.TempDir.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +121,7 @@ func TestStanzaInitializationDeferredAfterConfigChange(t *testing.T) {
 			calls := filepath.Join(dir, "calls")
 			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 			t.Setenv("STANZA_CALLS", calls)
+			// #nosec G306 -- The fake executable needs owner execute permission inside t.TempDir.
 			if err := os.WriteFile(filepath.Join(dir, "pgbackrest"),
 				[]byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$STANZA_CALLS\"\n"), 0o700); err != nil {
 				t.Fatal(err)
@@ -154,7 +157,7 @@ func TestStanzaInitializationDeferredAfterConfigChange(t *testing.T) {
 			if err := r.reconcilePgBackRestStanza(context.Background(), cluster, false); err != nil {
 				t.Fatal(err)
 			}
-			content, err := os.ReadFile(calls)
+			content, err := os.ReadFile(calls) // #nosec G304 -- Test-owned path inside t.TempDir.
 			if err != nil {
 				t.Fatal(err)
 			}

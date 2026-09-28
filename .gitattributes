@@ -1,0 +1,17 @@
+# Collapse generated files in GitHub diffs and omit text patches in Git diffs.
+# Use git diff --text to inspect generated changes locally.
+
+# make generate
+/api/v1/zz_generated.deepcopy.go linguist-generated=true -diff
+/pkg/client/applyconfiguration/** linguist-generated=true -diff
+
+# make manifests
+/config/crd/bases/*.yaml linguist-generated=true -diff
+/config/rbac/role.yaml linguist-generated=true -diff
+/config/webhook/manifests.yaml linguist-generated=true -diff
+
+# make -C charts update-crds
+/charts/cloudnative-pg/templates/crds/crds.yaml linguist-generated=true -diff
+
+# make apidoc
+/docs/src/cloudnative-pg.v1.md linguist-generated=true -diff

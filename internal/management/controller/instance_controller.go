@@ -1165,28 +1165,38 @@ func (r *InstanceReconciler) reconcilePgBackRestConfig(ctx context.Context, clus
 		log.FromContext(ctx).Error(err, "Failed to rotate pgbackrest logs, will retry on next reconcile")
 	}
 
-	// Stanza creation is only needed on the primary — the stanza metadata
-	// lives in S3 and replicas access it directly from there. We re-run
-	// stanza-create whenever the stanza name changes (not just once), proactively
-	// initializes the new stanza instead of relying on the lazy WAL-archive
-	// recovery path. stanza-create is idempotent.
-	// While suspended, skip stanza-create so the cluster leaves no footprint in
-	// object storage; it runs on the next reconcile once the flag is cleared
-	// (e.g. on warm-pool adoption). archive_mode is untouched, so this is
-	// restart-free.
-	stanza := cluster.GetPgBackRestStanzaName()
-	if isPrimary && !cluster.IsPgBackRestSuspended() && stanzaCreateNeeded(r.pgBackRestStanzaCreated.Load(), stanza) {
-		if err := pgbackrest.StanzaCreate(ctx, stanza); err != nil {
-			log.FromContext(ctx).Error(err, "Failed to create pgbackrest stanza, will retry on next reconcile")
-			return nil
-		}
-		r.pgBackRestStanzaCreated.Store(&stanza)
+	if err := r.reconcilePgBackRestStanza(ctx, cluster, configChanged); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to create pgbackrest stanza, will retry on next reconcile")
+		return nil
 	}
 
 	// Publish the generation whose pgbackrest configuration is now fully
 	// applied on this pod. Backups wait on this before running pgbackrest.
 	r.instance.PgBackRestAppliedGeneration.Store(cluster.Generation)
 
+	return nil
+}
+
+// reconcilePgBackRestStanza initializes the repository after a configuration change.
+// Failed initialization remains pending even after the config file is up to date.
+func (r *InstanceReconciler) reconcilePgBackRestStanza(
+	ctx context.Context, cluster *apiv1.Cluster, configChanged bool,
+) error {
+	if configChanged {
+		r.pgBackRestStanzaCreated.Store(nil)
+	}
+	if r.instance.GetPodName() != cluster.Status.CurrentPrimary || cluster.IsPgBackRestSuspended() {
+		return nil
+	}
+
+	stanza := cluster.GetPgBackRestStanzaName()
+	if !stanzaCreateNeeded(r.pgBackRestStanzaCreated.Load(), stanza) {
+		return nil
+	}
+	if err := pgbackrest.StanzaCreate(ctx, stanza); err != nil {
+		return err
+	}
+	r.pgBackRestStanzaCreated.Store(&stanza)
 	return nil
 }
 

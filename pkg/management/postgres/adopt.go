@@ -24,6 +24,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path"
 
 	"github.com/cloudnative-pg/machinery/pkg/fileutils"
@@ -39,6 +40,12 @@ const (
 	// as an independent primary, so that a pod restart does not run the
 	// procedure again against an already promoted data directory.
 	AdoptedMarkerFile = ".xata-adopted"
+
+	// AdoptedRecoveryMarkerFile is written alongside AdoptedMarkerFile and
+	// removed once the adopted instance is a writable primary. Unlike
+	// AdoptedMarkerFile it never outlives the first replay, so replicas taken
+	// from the adopted primary later do not inherit it.
+	AdoptedRecoveryMarkerFile = ".xata-adopted-recovery"
 
 	// standbySignalFile marks a data directory as a standby for PostgreSQL 12
 	// and beyond.
@@ -112,12 +119,41 @@ func AdoptForeignStandby(ctx context.Context, pgData string) error {
 		return fmt.Errorf("while including the operator configuration: %w", err)
 	}
 
+	// Written before AdoptedMarkerFile: if the pod dies in between, adoption
+	// runs again and rewrites both.
+	if err := fileutils.CreateEmptyFile(path.Join(pgData, AdoptedRecoveryMarkerFile)); err != nil {
+		return fmt.Errorf("while writing the adoption recovery marker: %w", err)
+	}
+
 	if err := fileutils.CreateEmptyFile(path.Join(pgData, AdoptedMarkerFile)); err != nil {
 		return fmt.Errorf("while writing the adoption marker: %w", err)
 	}
 
 	contextLogger.Info("Data directory adapted, the instance will be promoted once it has replayed its WAL")
 
+	return nil
+}
+
+// IsAdoptedStandbyInRecovery reports whether the data directory was adopted from
+// a foreign standby and has not been promoted yet, that is, whether it is still
+// replaying the WAL it arrived with. PostgreSQL removes standby.signal on
+// promotion; the recovery marker goes once the instance is a writable primary.
+func IsAdoptedStandbyInRecovery(pgData string) bool {
+	for _, name := range []string{AdoptedRecoveryMarkerFile, standbySignalFile} {
+		exists, err := fileutils.FileExists(path.Join(pgData, name))
+		if err != nil || !exists {
+			return false
+		}
+	}
+	return true
+}
+
+// clearAdoptedRecoveryMarker removes AdoptedRecoveryMarkerFile, if present.
+func clearAdoptedRecoveryMarker(pgData string) error {
+	err := os.Remove(path.Join(pgData, AdoptedRecoveryMarkerFile))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("while removing the adoption recovery marker: %w", err)
+	}
 	return nil
 }
 
@@ -224,6 +260,11 @@ func EnsureAdoptedPlatformObjects(ctx context.Context, instance *Instance, db *s
 	}
 	if !adopted {
 		return nil
+	}
+
+	// Recovery is over, so the archive is the cluster's own again.
+	if err := clearAdoptedRecoveryMarker(instance.PgData); err != nil {
+		return err
 	}
 
 	if err := ensurePlatformSuperuserRole(ctx, db); err != nil {

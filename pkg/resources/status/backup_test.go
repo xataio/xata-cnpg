@@ -22,6 +22,7 @@ package status
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +33,7 @@ import (
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	schemeBuilder "github.com/xataio/xata-cnpg/internal/scheme"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -266,4 +268,63 @@ var _ = Describe("FlagBackupAsFailed", func() {
 		Expect(backup.Status.Phase).To(BeEquivalentTo(apiv1.BackupPhaseCancelled))
 		Expect(backup.Status.Error).To(ContainSubstring("cluster has been deleted"))
 	})
+
+	It("classifies an ordinary failure and records the failure reason", func(ctx SpecContext) {
+		cluster := &apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "cluster-exec-failed",
+				Namespace: "default",
+			},
+		}
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cluster.Name,
+				Namespace: cluster.Namespace,
+			},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: cluster.Name},
+			},
+			Status: apiv1.BackupStatus{Phase: apiv1.BackupPhaseRunning},
+		}
+		Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+		Expect(k8sClient.Create(ctx, backup)).To(Succeed())
+
+		err := FlagBackupAsFailed(ctx, k8sClient, backup, cluster,
+			fmt.Errorf("while getting pod: some transient error"))
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(backup.Status.Phase).To(BeEquivalentTo(apiv1.BackupPhaseFailed))
+		Expect(backup.Status.FailureReason).To(BeEquivalentTo(apiv1.BackupFailureReasonTargetPodError))
+	})
+})
+
+var _ = Describe("ClassifyBackupFailure", func() {
+	DescribeTable("maps an error to the expected failure reason",
+		func(err error, expected apiv1.BackupFailureReason) {
+			Expect(ClassifyBackupFailure(err)).To(Equal(expected))
+		},
+		Entry("nil error", nil, apiv1.BackupFailureReason("")),
+		Entry("target pod timeout",
+			fmt.Errorf("target pod not usable after waiting 15m0s: target pod not found"),
+			apiv1.BackupFailureReasonTargetPodTimeout),
+		Entry("target pod error while getting pod",
+			fmt.Errorf("while getting pod: pods \"pg-1\" not found"),
+			apiv1.BackupFailureReasonTargetPodError),
+		Entry("target pod error while ensuring healthy",
+			fmt.Errorf("while ensuring target pod is healthy: target pod pg-1 is not healthy for backup in cluster c"),
+			apiv1.BackupFailureReasonTargetPodError),
+		Entry("config not applied",
+			fmt.Errorf("pgbackrest configuration for cluster generation 5 not applied after 5m0s "+
+				"(last applied generation 3): the instance reconciler is not applying the spec"),
+			apiv1.BackupFailureReasonConfigNotApplied),
+		Entry("stanza not ready",
+			fmt.Errorf("stanza cluster-example not ready after 12 attempts"),
+			apiv1.BackupFailureReasonStanzaNotReady),
+		Entry("pgbackrest lock contention takes priority over text matching",
+			&pgbackrest.CommandError{Command: "backup", ExitCode: 50, Stderr: "unable to acquire lock"},
+			apiv1.BackupFailureReasonLockContention),
+		Entry("unrecognized error falls back to other, not empty",
+			errors.New("some completely unrelated failure"),
+			apiv1.BackupFailureReasonOther),
+	)
 })

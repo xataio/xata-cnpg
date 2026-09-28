@@ -61,6 +61,29 @@ const (
 	BackupPhaseWalArchivingFailing = "walArchivingFailing"
 )
 
+// BackupFailureReason is the class of error that failed or cancelled a backup.
+type BackupFailureReason string
+
+// Values of BackupFailureReason.
+const (
+	BackupFailureReasonTargetPodTimeout   BackupFailureReason = "target_pod_timeout"
+	BackupFailureReasonTargetPodError     BackupFailureReason = "target_pod_error"
+	BackupFailureReasonClusterHibernated  BackupFailureReason = "cluster_hibernated"
+	BackupFailureReasonClusterDeleted     BackupFailureReason = "cluster_deleted"
+	BackupFailureReasonConfigNotApplied   BackupFailureReason = "config_not_applied"
+	BackupFailureReasonStanzaNotReady     BackupFailureReason = "stanza_not_ready"
+	BackupFailureReasonLockContention     BackupFailureReason = "lock_contention"
+	BackupFailureReasonDBUnavailable      BackupFailureReason = "db_unavailable"
+	BackupFailureReasonObjectStoreDenied  BackupFailureReason = "object_store_denied"
+	BackupFailureReasonObjectStoreError   BackupFailureReason = "object_store_error"
+	BackupFailureReasonWalArchiving       BackupFailureReason = "wal_archiving"
+	BackupFailureReasonExecFailed         BackupFailureReason = "exec_failed"
+	BackupFailureReasonVersionMismatch    BackupFailureReason = "version_mismatch"
+	BackupFailureReasonStandbyUnreachable BackupFailureReason = "standby_unreachable"
+	BackupFailureReasonPgBackRestError    BackupFailureReason = "pgbackrest_error"
+	BackupFailureReasonOther              BackupFailureReason = "other"
+)
+
 // BarmanCredentials an object containing the potential credentials for each cloud provider
 // +kubebuilder:object:generate:=false
 type BarmanCredentials = barmanApi.BarmanCredentials
@@ -521,6 +544,11 @@ type BackupStatus struct {
 	// The detected error
 	// +optional
 	Error string `json:"error,omitempty"`
+
+	// FailureReason is the class of error that failed or cancelled the backup.
+	// +optional
+	// +kubebuilder:validation:Enum=target_pod_timeout;target_pod_error;cluster_hibernated;cluster_deleted;config_not_applied;stanza_not_ready;lock_contention;db_unavailable;object_store_denied;object_store_error;wal_archiving;exec_failed;version_mismatch;standby_unreachable;pgbackrest_error;other
+	FailureReason BackupFailureReason `json:"failureReason,omitempty"`
 
 	// Unused. Retained for compatibility with old versions.
 	// +optional

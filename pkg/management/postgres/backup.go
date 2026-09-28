@@ -155,8 +155,9 @@ func (b *BackupCommand) run(ctx context.Context) {
 
 	if err := b.takeBackup(ctx); err != nil {
 		// record the failure
-		b.Log.Error(err, "Backup failed")
-		b.Recorder.Event(b.Backup, "Normal", "Failed", "Backup failed")
+		reason := status.ClassifyBackupFailure(err)
+		b.Log.Error(err, "Backup failed", "failureReason", reason)
+		b.Recorder.Eventf(b.Backup, "Normal", "Failed", "Backup failed: %s", reason)
 
 		_ = status.FlagBackupAsFailed(ctx, b.Client, b.Backup, b.Cluster, err)
 	}

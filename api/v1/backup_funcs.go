@@ -39,8 +39,10 @@ import (
 // SetAsFailed marks a certain backup as invalid
 func (backupStatus *BackupStatus) SetAsFailed(
 	err error,
+	reason BackupFailureReason,
 ) {
 	backupStatus.Phase = BackupPhaseFailed
+	backupStatus.FailureReason = reason
 
 	if err != nil {
 		backupStatus.Error = err.Error()
@@ -54,7 +56,19 @@ func (backupStatus *BackupStatus) SetAsFailed(
 func (backupStatus *BackupStatus) SetAsCancelled(reason string) {
 	backupStatus.Phase = BackupPhaseCancelled
 	backupStatus.Error = reason
+	backupStatus.FailureReason = classifyCancellationReason(reason)
 	backupStatus.StoppedAt = ptr.To(metav1.Now())
+}
+
+func classifyCancellationReason(reason string) BackupFailureReason {
+	switch {
+	case strings.Contains(reason, "hibernat"):
+		return BackupFailureReasonClusterHibernated
+	case strings.Contains(reason, "delet"):
+		return BackupFailureReasonClusterDeleted
+	default:
+		return BackupFailureReasonOther
+	}
 }
 
 // SetAsFinalizing marks a certain backup as finalizing

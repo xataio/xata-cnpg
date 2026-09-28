@@ -55,6 +55,8 @@ type BackupStatusApplyConfiguration struct {
 	EndLSN *string `json:"endLSN,omitempty"`
 	// The detected error
 	Error *string `json:"error,omitempty"`
+	// FailureReason is the class of error that failed or cancelled the backup.
+	FailureReason *apiv1.BackupFailureReason `json:"failureReason,omitempty"`
 	// Unused. Retained for compatibility with old versions.
 	CommandOutput *string `json:"commandOutput,omitempty"`
 	// The backup command output in case of error
@@ -233,6 +235,14 @@ func (b *BackupStatusApplyConfiguration) WithEndLSN(value string) *BackupStatusA
 // If called multiple times, the Error field is set to the value of the last call.
 func (b *BackupStatusApplyConfiguration) WithError(value string) *BackupStatusApplyConfiguration {
 	b.Error = &value
+	return b
+}
+
+// WithFailureReason sets the FailureReason field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the FailureReason field is set to the value of the last call.
+func (b *BackupStatusApplyConfiguration) WithFailureReason(value apiv1.BackupFailureReason) *BackupStatusApplyConfiguration {
+	b.FailureReason = &value
 	return b
 }
 

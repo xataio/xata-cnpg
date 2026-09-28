@@ -243,8 +243,10 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 
 	if err := b.waitForAppliedConfig(ctx); err != nil {
 		stopProgress()
-		b.Log.Error(err, "Backup failed: pgbackrest configuration not applied")
-		b.Recorder.Event(b.Backup, "Normal", "Failed", "pgbackrest configuration not applied after waiting")
+		reason := status.ClassifyBackupFailure(err)
+		b.Log.Error(err, "Backup failed: pgbackrest configuration not applied", "failureReason", reason)
+		b.Recorder.Eventf(b.Backup, "Normal", "Failed",
+			"pgbackrest configuration not applied after waiting (%s)", reason)
 		b.failBackup(ctx, err)
 		return
 	}
@@ -253,8 +255,9 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 
 	if err := b.waitForStanza(ctx, stanza); err != nil {
 		stopProgress()
-		b.Log.Error(err, "Backup failed: stanza not ready")
-		b.Recorder.Event(b.Backup, "Normal", "Failed", "Stanza not ready after waiting")
+		reason := status.ClassifyBackupFailure(err)
+		b.Log.Error(err, "Backup failed: stanza not ready", "failureReason", reason)
+		b.Recorder.Eventf(b.Backup, "Normal", "Failed", "Stanza not ready after waiting (%s)", reason)
 		b.failBackup(ctx, err)
 		return
 	}
@@ -263,8 +266,9 @@ func (b *PgBackRestBackupCommand) run(ctx context.Context) {
 	stopProgress()
 
 	if err != nil {
-		b.Log.Error(err, "Backup failed")
-		b.Recorder.Event(b.Backup, "Normal", "Failed", "Backup failed")
+		reason := status.ClassifyBackupFailure(err)
+		b.Log.Error(err, "Backup failed", "failureReason", reason)
+		b.Recorder.Eventf(b.Backup, "Normal", "Failed", "Backup failed: %s", reason)
 		b.failBackup(ctx, err)
 		return
 	}

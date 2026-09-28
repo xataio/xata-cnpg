@@ -31,6 +31,7 @@ import (
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
 )
 
@@ -88,6 +89,52 @@ func IsLockBusy(err error) bool {
 		return false
 	}
 	return cmdErr.ExitCode == lockAcquireExitCode
+}
+
+const (
+	protocolExitCode    = 39
+	hostConnectExitCode = 49
+	fileMissingExitCode = 55
+	dbConnectExitCode   = 56
+)
+
+// ClassifyExitCode returns the failure reason for a pgbackrest CommandError, or false for any other error.
+func ClassifyExitCode(err error) (apiv1.BackupFailureReason, bool) {
+	var cmdErr *CommandError
+	if !errors.As(err, &cmdErr) {
+		return "", false
+	}
+
+	switch cmdErr.ExitCode {
+	case lockAcquireExitCode:
+		return apiv1.BackupFailureReasonLockContention, true
+	case dbConnectExitCode:
+		return apiv1.BackupFailureReasonDBUnavailable, true
+	case hostConnectExitCode:
+		return apiv1.BackupFailureReasonStandbyUnreachable, true
+	case fileMissingExitCode:
+		return apiv1.BackupFailureReasonStanzaNotReady, true
+	case protocolExitCode:
+		return classifyProtocolError(cmdErr.Stderr), true
+	default:
+		return apiv1.BackupFailureReasonPgBackRestError, true
+	}
+}
+
+func classifyProtocolError(stderr string) apiv1.BackupFailureReason {
+	switch {
+	case strings.Contains(stderr, "403") ||
+		strings.Contains(stderr, "Forbidden") ||
+		strings.Contains(stderr, "AccessDenied"):
+		return apiv1.BackupFailureReasonObjectStoreDenied
+	case strings.Contains(stderr, "greeting key 'version'"):
+		return apiv1.BackupFailureReasonVersionMismatch
+	case strings.Contains(stderr, fmt.Sprintf(":%d", TLSServerPort)) ||
+		strings.Contains(strings.ToLower(stderr), "tls"):
+		return apiv1.BackupFailureReasonStandbyUnreachable
+	default:
+		return apiv1.BackupFailureReasonObjectStoreError
+	}
 }
 
 // CommandError is returned when a pgbackrest command fails.

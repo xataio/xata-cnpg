@@ -288,6 +288,27 @@ spec:
               error:
                 description: The detected error
                 type: string
+              failureReason:
+                description: FailureReason is the class of error that failed or cancelled
+                  the backup.
+                enum:
+                - target_pod_timeout
+                - target_pod_error
+                - cluster_hibernated
+                - cluster_deleted
+                - config_not_applied
+                - stanza_not_ready
+                - lock_contention
+                - db_unavailable
+                - object_store_denied
+                - object_store_error
+                - wal_archiving
+                - exec_failed
+                - version_mismatch
+                - standby_unreachable
+                - pgbackrest_error
+                - other
+                type: string
               googleCredentials:
                 description: The credentials to use to upload data to Google Cloud
                   Storage

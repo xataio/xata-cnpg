@@ -38,6 +38,7 @@ import (
 	"github.com/xataio/xata-cnpg/internal/management/cache"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 	"github.com/xataio/xata-cnpg/pkg/management/url"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/resources/status"
 )
 
@@ -46,7 +47,7 @@ type localWebserverEndpoints struct {
 	instance      *postgres.Instance
 	eventRecorder record.EventRecorder
 
-	lastPITRUpdate time.Time
+	recoverability *recoverabilityTracker
 }
 
 // NewLocalWebServer returns a webserver that allows connection only from localhost
@@ -59,6 +60,8 @@ func NewLocalWebServer(
 		typedClient:   cli,
 		instance:      instance,
 		eventRecorder: recorder,
+
+		recoverability: newRecoverabilityTracker(pgbackrest.Info),
 	}
 
 	serveMux := http.NewServeMux()
@@ -325,27 +328,28 @@ func (ws *localWebserverEndpoints) setWALArchiveStatusCondition(w http.ResponseW
 		return
 	}
 
-	// Throttled PITR update: every 5 minutes, read pg_stat_archiver.last_archived_time
-	// and include it in the same status patch as the condition update.
-	// This runs inside archive_command (CLI hasn't exited), so pg_stat_archiver
-	// still shows WAL_N-1. WAL_N is in S3 (ArchivePush completed), acting as buffer.
-	// 5 minutes = archive_timeout default. If archive_timeout changes, this should too.
-	// While suspended, the archive wrapper acks WAL without pushing, so
-	// pg_stat_archiver reports archives that never reached the repository.
-	// Do not stamp LastRecoverabilityPoint from those.
-	// Before the first successful backup there is no base backup to restore
-	// from, so no point in time is recoverable: keep the field empty. This
-	// also keeps the last suspended-period archive time (still visible in
-	// pg_stat_archiver right after a pool adoption) out of the status.
+	// Read pg_stat_archiver.last_archived_time and include it in the same
+	// status patch as the condition update. This runs inside archive_command
+	// (CLI hasn't exited), so pg_stat_archiver still shows WAL_N-1. WAL_N is
+	// in the repository (ArchivePush completed), acting as buffer.
 	var modifier status.Modifier
-	if !cluster.IsPgBackRestSuspended() &&
-		cluster.Status.LastSuccessfulBackup != "" && //nolint:staticcheck
-		asr.Error == "" && time.Since(ws.lastPITRUpdate) >= 5*time.Minute {
-		if t := ws.readLastArchivedTime(); t != "" {
+	now := time.Now()
+	var stanza string
+	if cluster.Spec.Backup.IsPgBackRestConfigured() {
+		stanza = cluster.GetPgBackRestStanzaName()
+	}
+	if ws.recoverability.due(archiveInput{
+		now:              now,
+		suspended:        cluster.IsPgBackRestSuspended(),
+		archiveError:     asr.Error,
+		stanza:           stanza,
+		clusterHasBackup: cluster.Status.LastSuccessfulBackup != "", //nolint:staticcheck
+	}) {
+		if t := ws.readLastArchivedTime(); !t.IsZero() && ws.recoverability.accept(t, now) {
+			stamp := t.UTC().Format(time.RFC3339)
 			modifier = func(cluster *apiv1.Cluster) {
-				cluster.Status.LastRecoverabilityPoint = t
+				cluster.Status.LastRecoverabilityPoint = stamp
 			}
-			ws.lastPITRUpdate = time.Now()
 		}
 	}
 
@@ -369,21 +373,21 @@ func (ws *localWebserverEndpoints) setWALArchiveStatusCondition(w http.ResponseW
 }
 
 // readLastArchivedTime queries pg_stat_archiver for the last archived WAL
-// timestamp. Returns an RFC3339 string or empty on error.
-func (ws *localWebserverEndpoints) readLastArchivedTime() string {
+// timestamp. Returns the zero time on error or when nothing was archived.
+func (ws *localWebserverEndpoints) readLastArchivedTime() time.Time {
 	db, err := ws.instance.GetSuperUserDB()
 	if err != nil {
-		return ""
+		return time.Time{}
 	}
 
 	var lastArchivedTime *time.Time
 	if err := db.QueryRow("SELECT last_archived_time FROM pg_stat_archiver").Scan(&lastArchivedTime); err != nil {
-		return ""
+		return time.Time{}
 	}
 
 	if lastArchivedTime == nil {
-		return ""
+		return time.Time{}
 	}
 
-	return lastArchivedTime.UTC().Format(time.RFC3339)
+	return *lastArchivedTime
 }

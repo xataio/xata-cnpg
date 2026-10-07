@@ -269,6 +269,20 @@ func TestClassifyExitCode(t *testing.T) {
 			ok:       true,
 		},
 		{
+			name: "version mismatch, exit 56, standby handshake fails during a mixed rollout",
+			err: &CommandError{
+				Command:  "backup",
+				ExitCode: 56,
+				Stderr: "WARN: unable to check pg2: [ProtocolError] expected value '2.59.1' for greeting key " +
+					"'version' but got '2.59.0'\n" +
+					"HINT: is the same version of pgBackRest installed on the local and remote host?\n" +
+					"ERROR: [056]: unable to find primary cluster - cannot proceed\n" +
+					"HINT: are all available clusters in recovery?\n",
+			},
+			expected: apiv1.BackupFailureReasonVersionMismatch,
+			ok:       true,
+		},
+		{
 			name: "standby unreachable, exit 39, TLS connect failure on port 8432",
 			err: &CommandError{
 				Command:  "backup",
@@ -286,6 +300,55 @@ func TestClassifyExitCode(t *testing.T) {
 				Stderr:   "ERROR: [049]: unable to connect to 'cluster-example-rw:8432'",
 			},
 			expected: apiv1.BackupFailureReasonStandbyUnreachable,
+			ok:       true,
+		},
+		{
+			name: "object store error, exit 49, the S3 endpoint refuses the connection",
+			err: &CommandError{
+				Command:  "backup",
+				ExitCode: 49,
+				Stderr: "ERROR: [049]: unable to load info file '/c/backup/c/backup.info' or " +
+					"'/c/backup/c/backup.info.copy':\n" +
+					"HostConnectError: unable to connect to 'minio.example.svc:9000 (10.0.0.9)': " +
+					"[111] Connection refused\n" +
+					"[HostConnectError] on 10 retries from 105-60001ms: unable to connect to " +
+					"'minio.example.svc:9000 (10.0.0.9)': [111] Connection refused\n" +
+					"HINT: backup.info cannot be opened and is required to perform a backup.\n",
+			},
+			expected: apiv1.BackupFailureReasonObjectStoreError,
+			ok:       true,
+		},
+		{
+			name: "standby unreachable, exit 49, error raised from a remote pg host",
+			err: &CommandError{
+				Command:  "backup",
+				ExitCode: 49,
+				Stderr: "ERROR: [049]: raised from remote-0 tls protocol on 'cluster-example-2': " +
+					"unable to connect to 'cluster-example-2.svc (10.0.0.2)': [111] Connection refused",
+			},
+			expected: apiv1.BackupFailureReasonStandbyUnreachable,
+			ok:       true,
+		},
+		{
+			name: "wal archiving, exit 82, the backup stop segment never reached the repository",
+			err: &CommandError{
+				Command:  "backup",
+				ExitCode: 82,
+				Stderr: "ERROR: [082]: WAL segment 000000010000000000000005 was not archived before the 60000ms timeout\n" +
+					"HINT: check the archive_command to ensure that all options are correct (especially --stanza).",
+			},
+			expected: apiv1.BackupFailureReasonWalArchiving,
+			ok:       true,
+		},
+		{
+			name: "generic pgbackrest error, exit 82, standby does not replay in time",
+			err: &CommandError{
+				Command:  "backup",
+				ExitCode: 82,
+				Stderr: "ERROR: [082]: timeout before standby replayed to 0/5000028 - only reached 0/4000000\n" +
+					"HINT: is replication running and current on the standby?",
+			},
+			expected: apiv1.BackupFailureReasonPgBackRestError,
 			ok:       true,
 		},
 		{

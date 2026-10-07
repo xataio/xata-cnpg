@@ -303,6 +303,33 @@ func TestClassifyExitCode(t *testing.T) {
 			ok:       true,
 		},
 		{
+			name: "object store error, exit 49, the S3 endpoint refuses the connection",
+			err: &CommandError{
+				Command:  "backup",
+				ExitCode: 49,
+				Stderr: "ERROR: [049]: unable to load info file '/c/backup/c/backup.info' or " +
+					"'/c/backup/c/backup.info.copy':\n" +
+					"HostConnectError: unable to connect to 'minio.example.svc:9000 (10.0.0.9)': " +
+					"[111] Connection refused\n" +
+					"[HostConnectError] on 10 retries from 105-60001ms: unable to connect to " +
+					"'minio.example.svc:9000 (10.0.0.9)': [111] Connection refused\n" +
+					"HINT: backup.info cannot be opened and is required to perform a backup.\n",
+			},
+			expected: apiv1.BackupFailureReasonObjectStoreError,
+			ok:       true,
+		},
+		{
+			name: "standby unreachable, exit 49, error raised from a remote pg host",
+			err: &CommandError{
+				Command:  "backup",
+				ExitCode: 49,
+				Stderr: "ERROR: [049]: raised from remote-0 tls protocol on 'cluster-example-2': " +
+					"unable to connect to 'cluster-example-2.svc (10.0.0.2)': [111] Connection refused",
+			},
+			expected: apiv1.BackupFailureReasonStandbyUnreachable,
+			ok:       true,
+		},
+		{
 			name: "generic pgbackrest error for an exit code with no dedicated reason",
 			err: &CommandError{
 				Command:  "backup",

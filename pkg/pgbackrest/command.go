@@ -118,7 +118,7 @@ func ClassifyExitCode(err error) (apiv1.BackupFailureReason, bool) {
 	case dbConnectExitCode:
 		return apiv1.BackupFailureReasonDBUnavailable, true
 	case hostConnectExitCode:
-		return apiv1.BackupFailureReasonStandbyUnreachable, true
+		return classifyHostConnectError(cmdErr.Stderr), true
 	case fileMissingExitCode:
 		return apiv1.BackupFailureReasonStanzaNotReady, true
 	case protocolExitCode:
@@ -140,6 +140,17 @@ func classifyProtocolError(stderr string) apiv1.BackupFailureReason {
 	default:
 		return apiv1.BackupFailureReasonObjectStoreError
 	}
+}
+
+// classifyHostConnectError separates a pg host from the object store. A pg
+// host listens on TLSServerPort, and an error from a remote pgbackrest carries
+// the "raised from remote" prefix. Any other host is the object store.
+func classifyHostConnectError(stderr string) apiv1.BackupFailureReason {
+	if strings.Contains(stderr, fmt.Sprintf(":%d", TLSServerPort)) ||
+		strings.Contains(stderr, "raised from remote") {
+		return apiv1.BackupFailureReasonStandbyUnreachable
+	}
+	return apiv1.BackupFailureReasonObjectStoreError
 }
 
 func isVersionMismatch(stderr string) bool {

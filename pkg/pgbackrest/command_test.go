@@ -330,6 +330,28 @@ func TestClassifyExitCode(t *testing.T) {
 			ok:       true,
 		},
 		{
+			name: "wal archiving, exit 82, the backup stop segment never reached the repository",
+			err: &CommandError{
+				Command:  "backup",
+				ExitCode: 82,
+				Stderr: "ERROR: [082]: WAL segment 000000010000000000000005 was not archived before the 60000ms timeout\n" +
+					"HINT: check the archive_command to ensure that all options are correct (especially --stanza).",
+			},
+			expected: apiv1.BackupFailureReasonWalArchiving,
+			ok:       true,
+		},
+		{
+			name: "generic pgbackrest error, exit 82, standby does not replay in time",
+			err: &CommandError{
+				Command:  "backup",
+				ExitCode: 82,
+				Stderr: "ERROR: [082]: timeout before standby replayed to 0/5000028 - only reached 0/4000000\n" +
+					"HINT: is replication running and current on the standby?",
+			},
+			expected: apiv1.BackupFailureReasonPgBackRestError,
+			ok:       true,
+		},
+		{
 			name: "generic pgbackrest error for an exit code with no dedicated reason",
 			err: &CommandError{
 				Command:  "backup",

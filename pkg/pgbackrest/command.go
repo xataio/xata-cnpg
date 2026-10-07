@@ -92,10 +92,11 @@ func IsLockBusy(err error) bool {
 }
 
 const (
-	protocolExitCode    = 39
-	hostConnectExitCode = 49
-	fileMissingExitCode = 55
-	dbConnectExitCode   = 56
+	protocolExitCode       = 39
+	hostConnectExitCode    = 49
+	fileMissingExitCode    = 55
+	dbConnectExitCode      = 56
+	archiveTimeoutExitCode = 82
 )
 
 // ClassifyExitCode returns the failure reason for a pgbackrest CommandError, or false for any other error.
@@ -123,6 +124,8 @@ func ClassifyExitCode(err error) (apiv1.BackupFailureReason, bool) {
 		return apiv1.BackupFailureReasonStanzaNotReady, true
 	case protocolExitCode:
 		return classifyProtocolError(cmdErr.Stderr), true
+	case archiveTimeoutExitCode:
+		return classifyArchiveTimeoutError(cmdErr.Stderr), true
 	default:
 		return apiv1.BackupFailureReasonPgBackRestError, true
 	}
@@ -151,6 +154,16 @@ func classifyHostConnectError(stderr string) apiv1.BackupFailureReason {
 		return apiv1.BackupFailureReasonStandbyUnreachable
 	}
 	return apiv1.BackupFailureReasonObjectStoreError
+}
+
+// classifyArchiveTimeoutError separates a WAL segment that did not reach the
+// repository from a standby that did not replay to the backup start LSN in
+// time. Only the first one is a WAL archiving failure.
+func classifyArchiveTimeoutError(stderr string) apiv1.BackupFailureReason {
+	if strings.Contains(stderr, "was not archived before") {
+		return apiv1.BackupFailureReasonWalArchiving
+	}
+	return apiv1.BackupFailureReasonPgBackRestError
 }
 
 func isVersionMismatch(stderr string) bool {

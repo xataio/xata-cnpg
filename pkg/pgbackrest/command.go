@@ -105,6 +105,13 @@ func ClassifyExitCode(err error) (apiv1.BackupFailureReason, bool) {
 		return "", false
 	}
 
+	// The handshake error is not tied to one exit code. On a replica, a failed
+	// handshake with the remote primary is only a warning, and pgbackrest then
+	// exits 56 because it found no primary.
+	if isVersionMismatch(cmdErr.Stderr) {
+		return apiv1.BackupFailureReasonVersionMismatch, true
+	}
+
 	switch cmdErr.ExitCode {
 	case lockAcquireExitCode:
 		return apiv1.BackupFailureReasonLockContention, true
@@ -127,14 +134,16 @@ func classifyProtocolError(stderr string) apiv1.BackupFailureReason {
 		strings.Contains(stderr, "Forbidden") ||
 		strings.Contains(stderr, "AccessDenied"):
 		return apiv1.BackupFailureReasonObjectStoreDenied
-	case strings.Contains(stderr, "greeting key 'version'"):
-		return apiv1.BackupFailureReasonVersionMismatch
 	case strings.Contains(stderr, fmt.Sprintf(":%d", TLSServerPort)) ||
 		strings.Contains(strings.ToLower(stderr), "tls"):
 		return apiv1.BackupFailureReasonStandbyUnreachable
 	default:
 		return apiv1.BackupFailureReasonObjectStoreError
 	}
+}
+
+func isVersionMismatch(stderr string) bool {
+	return strings.Contains(stderr, "greeting key 'version'")
 }
 
 // CommandError is returned when a pgbackrest command fails.

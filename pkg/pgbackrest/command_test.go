@@ -269,6 +269,20 @@ func TestClassifyExitCode(t *testing.T) {
 			ok:       true,
 		},
 		{
+			name: "version mismatch, exit 56, standby handshake fails during a mixed rollout",
+			err: &CommandError{
+				Command:  "backup",
+				ExitCode: 56,
+				Stderr: "WARN: unable to check pg2: [ProtocolError] expected value '2.59.1' for greeting key " +
+					"'version' but got '2.59.0'\n" +
+					"HINT: is the same version of pgBackRest installed on the local and remote host?\n" +
+					"ERROR: [056]: unable to find primary cluster - cannot proceed\n" +
+					"HINT: are all available clusters in recovery?\n",
+			},
+			expected: apiv1.BackupFailureReasonVersionMismatch,
+			ok:       true,
+		},
+		{
 			name: "standby unreachable, exit 39, TLS connect failure on port 8432",
 			err: &CommandError{
 				Command:  "backup",

@@ -71,11 +71,12 @@ var _ = Describe("PgBackRest repository CRD schema", func() {
 		Expect(gcs.Properties).To(HaveKey("keyRef"))
 
 		keyType := gcs.Properties["keyType"]
-		Expect(keyType.Enum).To(HaveLen(3))
+		Expect(keyType.Enum).To(HaveLen(4))
 		Expect(keyType.Default.Raw).To(BeEquivalentTo(`"auto"`))
 
-		// keyRef is what carries credentials for the non-auto key types, so
-		// the schema must reject auto+keyRef and service/token without keyRef.
+		// keyRef carries the credentials for the service and token key types,
+		// so the schema must reject it for auto and web-id, and require it for
+		// service and token.
 		Expect(gcs.XValidations).To(HaveLen(1))
 		Expect(gcs.XValidations[0].Rule).To(Equal(
 			"(has(self.keyType) && (self.keyType == 'service' || self.keyType == 'token')) == has(self.keyRef)"))

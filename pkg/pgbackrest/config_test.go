@@ -631,6 +631,18 @@ func TestGenerateBaseConfig_GCS(t *testing.T) {
 				"repo1-gcs-key-type": "auto",
 			},
 		},
+		"web-id key type": {
+			gcs: &apiv1.PgBackRestGCS{
+				Bucket:  "test-gcs-bucket",
+				KeyType: "web-id",
+			},
+			wantKeys: map[string]string{
+				"repo1-type":         "gcs",
+				"repo1-gcs-bucket":   "test-gcs-bucket",
+				"repo1-gcs-key-type": "web-id",
+			},
+			absentKeys: []string{"repo1-gcs-key"},
+		},
 		"endpoint override": {
 			gcs: &apiv1.PgBackRestGCS{
 				Bucket:   "test-gcs-bucket",

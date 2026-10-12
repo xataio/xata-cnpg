@@ -80,7 +80,8 @@ func GenerateConfig(
 
 // GenerateConfigFromRepository builds a minimal pgbackrest.conf from a repository
 // configuration. Used for restore where only the storage location is needed
-// (no options or retention).
+// (no options or retention). An empty repo path defaults to the stanza name,
+// as it does for backups.
 func GenerateConfigFromRepository(
 	ctx context.Context,
 	k8sClient client.Client,
@@ -95,9 +96,14 @@ func GenerateConfigFromRepository(
 		return "", err
 	}
 
+	restoreOpts := apiv1.PgBackRestOptions{}
 	if opts != nil {
-		configureOptions(opts, cfg)
+		restoreOpts = *opts
 	}
+	if restoreOpts.RepoPath == "" {
+		restoreOpts.RepoPath = stanzaName
+	}
+	configureOptions(&restoreOpts, cfg)
 
 	return renderConfig(cfg)
 }

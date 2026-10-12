@@ -802,6 +802,45 @@ func TestGenerateBaseConfig_AzureUnsupportedKeyTypes(t *testing.T) {
 	}
 }
 
+// TestGenerateConfigFromRepository_RepoPath checks that an empty repo path
+// defaults to the stanza name.
+func TestGenerateConfigFromRepository_RepoPath(t *testing.T) {
+	repo := &apiv1.PgBackRestRepository{
+		S3: &apiv1.PgBackRestS3{
+			Bucket:             "test-bucket",
+			Region:             "us-east-1",
+			InheritFromIAMRole: true,
+		},
+	}
+	tests := []struct {
+		name string
+		opts *apiv1.PgBackRestOptions
+		want string
+	}{
+		{name: "no options", want: "/source-stanza"},
+		{name: "empty repo path", opts: &apiv1.PgBackRestOptions{}, want: "/source-stanza"},
+		{name: "repo path", opts: &apiv1.PgBackRestOptions{RepoPath: "custom-path"}, want: "/custom-path"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content, err := GenerateConfigFromRepository(
+				context.Background(), nil, "default",
+				repo, tt.opts, "source-stanza", "/var/lib/postgresql/data/pgdata",
+			)
+			if err != nil {
+				t.Fatalf("GenerateConfigFromRepository failed: %v", err)
+			}
+			cfg, err := ini.Load([]byte(content))
+			if err != nil {
+				t.Fatalf("parse config: %v", err)
+			}
+			if v := cfg.Section("global").Key("repo1-path").String(); v != tt.want {
+				t.Errorf("expected repo1-path %s, got %s", tt.want, v)
+			}
+		})
+	}
+}
+
 func TestGenerateBaseConfig_RepositoryCipher(t *testing.T) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{

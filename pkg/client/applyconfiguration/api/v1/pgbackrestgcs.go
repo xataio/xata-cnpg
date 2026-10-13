@@ -16,14 +16,16 @@ type PgBackRestGCSApplyConfiguration struct {
 	// KeyType selects the authentication method. "auto" uses Workload
 	// Identity / Application Default Credentials (the GKE path). "service"
 	// reads a service account JSON key from KeyRef. "token" uses a bearer
-	// token from KeyRef.
+	// token from KeyRef. "web-id" uses Workload Identity Federation with the
+	// external account credential file that the PGBACKREST_REPO1_GCS_KEY
+	// environment variable of the instance pod names.
 	KeyType *string `json:"keyType,omitempty"`
 	// The GCS endpoint, overriding the automatic endpoint discovery.
 	// Rarely needed, mostly for testing against GCS emulators.
 	Endpoint *string `json:"endpoint,omitempty"`
 	// The reference to a Secret holding the service account JSON key when
 	// keyType is "service", or a bearer token when keyType is "token".
-	// Required for those key types, must be unset for "auto".
+	// Required for those key types, must be unset for "auto" and "web-id".
 	KeyRef *api.SecretKeySelector `json:"keyRef,omitempty"`
 }
 

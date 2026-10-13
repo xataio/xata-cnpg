@@ -232,6 +232,7 @@ func WriteConfigFile(content, pgDataPath string) (bool, error) {
 const (
 	keyTypeAuto   = "auto"
 	keyTypeShared = "shared"
+	keyTypeWebID  = "web-id"
 )
 
 // effectiveS3KeyType returns the explicitly selected pgBackRest provider. New
@@ -308,12 +309,12 @@ func configureGCS(gcs *apiv1.PgBackRestGCS, section *ini.Section) error {
 	}
 	section.Key("repo1-gcs-key-type").SetValue(keyType)
 
-	if keyType != keyTypeAuto {
+	if keyType != keyTypeAuto && keyType != keyTypeWebID {
 		// The "service" and "token" key types need repo1-gcs-key to point at
 		// a file on disk holding the service account JSON or bearer token.
 		// Plumbing the KeyRef secret to a file on the pod is not wired up
-		// yet, so only "auto" is supported for now.
-		return fmt.Errorf("gcs key type %q is not supported yet, only \"auto\" is", keyType)
+		// yet, so only "auto" and "web-id" are supported for now.
+		return fmt.Errorf("gcs key type %q is not supported yet, only \"auto\" and \"web-id\" are", keyType)
 	}
 
 	return nil

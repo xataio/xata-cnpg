@@ -341,16 +341,18 @@ type PgBackRestOptions struct {
 }
 
 // PgBackRestGCS defines the Google Cloud Storage configuration for pgbackrest.
-// +kubebuilder:validation:XValidation:rule="(has(self.keyType) && (self.keyType == 'service' || self.keyType == 'token')) == has(self.keyRef)",message="keyRef must be set when keyType is service or token, and must not be set when keyType is auto"
+// +kubebuilder:validation:XValidation:rule="(has(self.keyType) && (self.keyType == 'service' || self.keyType == 'token')) == has(self.keyRef)",message="keyRef must be set when keyType is service or token, and must not be set when keyType is auto or web-id"
 type PgBackRestGCS struct {
 	// The GCS bucket name
 	Bucket string `json:"bucket"`
 	// KeyType selects the authentication method. "auto" uses Workload
 	// Identity / Application Default Credentials (the GKE path). "service"
 	// reads a service account JSON key from KeyRef. "token" uses a bearer
-	// token from KeyRef.
+	// token from KeyRef. "web-id" uses Workload Identity Federation with the
+	// external account credential file that the PGBACKREST_REPO1_GCS_KEY
+	// environment variable of the instance pod names.
 	// +optional
-	// +kubebuilder:validation:Enum=auto;service;token
+	// +kubebuilder:validation:Enum=auto;service;token;web-id
 	// +kubebuilder:default:=auto
 	KeyType string `json:"keyType,omitempty"`
 	// The GCS endpoint, overriding the automatic endpoint discovery.
@@ -359,7 +361,7 @@ type PgBackRestGCS struct {
 	Endpoint string `json:"endpoint,omitempty"`
 	// The reference to a Secret holding the service account JSON key when
 	// keyType is "service", or a bearer token when keyType is "token".
-	// Required for those key types, must be unset for "auto".
+	// Required for those key types, must be unset for "auto" and "web-id".
 	// +optional
 	KeyRef *SecretKeySelector `json:"keyRef,omitempty"`
 }

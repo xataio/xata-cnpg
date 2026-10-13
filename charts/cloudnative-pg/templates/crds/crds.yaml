@@ -2182,7 +2182,7 @@ spec:
                                 description: |-
                                   The reference to a Secret holding the service account JSON key when
                                   keyType is "service", or a bearer token when keyType is "token".
-                                  Required for those key types, must be unset for "auto".
+                                  Required for those key types, must be unset for "auto" and "web-id".
                                 properties:
                                   key:
                                     description: The key to select
@@ -2200,11 +2200,14 @@ spec:
                                   KeyType selects the authentication method. "auto" uses Workload
                                   Identity / Application Default Credentials (the GKE path). "service"
                                   reads a service account JSON key from KeyRef. "token" uses a bearer
-                                  token from KeyRef.
+                                  token from KeyRef. "web-id" uses Workload Identity Federation with the
+                                  external account credential file that the PGBACKREST_REPO1_GCS_KEY
+                                  environment variable of the instance pod names.
                                 enum:
                                 - auto
                                 - service
                                 - token
+                                - web-id
                                 type: string
                             required:
                             - bucket
@@ -2212,6 +2215,7 @@ spec:
                             x-kubernetes-validations:
                             - message: keyRef must be set when keyType is service
                                 or token, and must not be set when keyType is auto
+                                or web-id
                               rule: (has(self.keyType) && (self.keyType == 'service'
                                 || self.keyType == 'token')) == has(self.keyRef)
                           s3:
@@ -4152,7 +4156,7 @@ spec:
                                   description: |-
                                     The reference to a Secret holding the service account JSON key when
                                     keyType is "service", or a bearer token when keyType is "token".
-                                    Required for those key types, must be unset for "auto".
+                                    Required for those key types, must be unset for "auto" and "web-id".
                                   properties:
                                     key:
                                       description: The key to select
@@ -4170,11 +4174,14 @@ spec:
                                     KeyType selects the authentication method. "auto" uses Workload
                                     Identity / Application Default Credentials (the GKE path). "service"
                                     reads a service account JSON key from KeyRef. "token" uses a bearer
-                                    token from KeyRef.
+                                    token from KeyRef. "web-id" uses Workload Identity Federation with the
+                                    external account credential file that the PGBACKREST_REPO1_GCS_KEY
+                                    environment variable of the instance pod names.
                                   enum:
                                   - auto
                                   - service
                                   - token
+                                  - web-id
                                   type: string
                               required:
                               - bucket
@@ -4182,6 +4189,7 @@ spec:
                               x-kubernetes-validations:
                               - message: keyRef must be set when keyType is service
                                   or token, and must not be set when keyType is auto
+                                  or web-id
                                 rule: (has(self.keyType) && (self.keyType == 'service'
                                   || self.keyType == 'token')) == has(self.keyRef)
                             s3:

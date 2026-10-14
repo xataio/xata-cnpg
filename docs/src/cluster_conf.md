@@ -143,7 +143,8 @@ The operator doesn't allow setting the following environment variables:
 
 - `POD_NAME`
 - `NAMESPACE`
-- Any environment variable whose name starts with `PG`.
+- Any environment variable whose name starts with `PG` (except those that start
+  with `PGBACKREST_`)
 
 Any change in the `env` or in the `envFrom` section triggers a rolling
 update of the PostgreSQL pods.

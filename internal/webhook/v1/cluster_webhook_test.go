@@ -20,6 +20,7 @@ SPDX-License-Identifier: Apache-2.0
 package v1
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -3818,16 +3819,48 @@ var _ = Describe("Environment variables validation", func() {
 	})
 
 	When("an environment variable is given", func() {
-		It("detects if it is valid", func() {
-			Expect(isReservedEnvironmentVariable("PGDATA")).To(BeTrue())
-		})
-
-		It("detects if it is not valid", func() {
-			Expect(isReservedEnvironmentVariable("LC_ALL")).To(BeFalse())
-		})
+		DescribeTable("detects reserved names", func(name string, reserved bool) {
+			Expect(isReservedEnvironmentVariable(name)).To(Equal(reserved))
+		},
+			Entry("PostgreSQL data directory", "PGDATA", true),
+			Entry("PostgreSQL connection options", "PGOPTIONS", true),
+			Entry("case-insensitive PostgreSQL prefix", "pgdata", true),
+			Entry("CNPG prefix", "CNPG_TEST", true),
+			Entry("pod name", "POD_NAME", true),
+			Entry("namespace", "NAMESPACE", true),
+			Entry("cluster name", "CLUSTER_NAME", true),
+			Entry("locale", "LC_ALL", false),
+			Entry("pgBackRest GCS credentials", "PGBACKREST_REPO1_GCS_KEY", false),
+			Entry("other pgBackRest options", "PGBACKREST_STANZA", false),
+			Entry("case-insensitive pgBackRest prefix", "pgbackrest_repo1_gcs_key", false),
+			Entry("pgBackRest without separator", "PGBACKREST", true),
+			Entry("pgBackRest prefix lookalike", "PGBACKRESTORE_KEY", true),
+		)
 	})
 
 	When("a ClusterSpec is given", func() {
+		It("accepts pgBackRest credentials on cluster creation and update", func() {
+			cluster := &apiv1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				Spec: apiv1.ClusterSpec{
+					ImageName:            "postgres:17",
+					Instances:            1,
+					StorageConfiguration: apiv1.StorageConfiguration{Size: "1Gi"},
+				},
+			}
+			cluster.Default()
+			old := cluster.DeepCopy()
+			cluster.Spec.Env = []corev1.EnvVar{{
+				Name:  "PGBACKREST_REPO1_GCS_KEY",
+				Value: "/projected/pgbackrest/gcs-credentials.json",
+			}}
+
+			_, err := v.ValidateCreate(context.Background(), cluster)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = v.ValidateUpdate(context.Background(), old, cluster)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
 		It("detects if the environment variable list is correct", func() {
 			cluster := &apiv1.Cluster{
 				Spec: apiv1.ClusterSpec{

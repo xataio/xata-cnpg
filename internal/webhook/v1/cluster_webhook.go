@@ -313,7 +313,7 @@ func isReservedEnvironmentVariable(name string) bool {
 	case strings.HasPrefix(name, "CNPG_"):
 		return true
 
-	case strings.HasPrefix(name, "PG"):
+	case strings.HasPrefix(name, "PG") && !strings.HasPrefix(name, "PGBACKREST_"):
 		return true
 
 	case name == "POD_NAME":

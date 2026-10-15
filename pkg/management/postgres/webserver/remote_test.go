@@ -58,6 +58,7 @@ func TestWaitingSlotStatus(t *testing.T) {
 			g.Expect(status.InstanceManagerVersion).To(Equal(versions.Version))
 			g.Expect(status.IsInstanceManagerUpgrading).To(Equal(upgrading))
 			g.Expect(status.MightBeUnavailable).To(BeTrue())
+			g.Expect(status.WaitingForPGData).To(BeTrue())
 			g.Expect(status.IsPrimary).To(BeFalse())
 			g.Expect(status.SystemID).To(BeEmpty())
 		})

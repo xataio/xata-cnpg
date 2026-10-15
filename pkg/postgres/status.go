@@ -45,6 +45,7 @@ type PostgresqlStatus struct {
 	IsWalReceiverActive       bool        `json:"isWalReceiverActive"`
 	IsPgRewindRunning         bool        `json:"isPgRewindRunning"`
 	MightBeUnavailable        bool        `json:"mightBeUnavailable"`
+	WaitingForPGData          bool        `json:"waitingForPGData,omitempty"`
 	IsArchivingWAL            bool        `json:"isArchivingWAL,omitempty"`
 	Node                      string      `json:"node"`
 	Pod                       *corev1.Pod `json:"pod"`

@@ -301,7 +301,23 @@ func isInstanceNeedingRollout(
 	status postgres.PostgresqlStatus,
 	cluster *apiv1.Cluster,
 ) rollout {
-	if !status.IsPodReady || status.MightBeUnavailable {
+	if !status.IsPodReady {
+		return rollout{}
+	}
+
+	// An idle noop instance reports PostgreSQL as unavailable, but its pod can
+	// be replaced to apply spec changes before PGDATA arrives.
+	if status.WaitingForPGData {
+		if status.Error != nil || status.IsInstanceManagerUpgrading ||
+			cluster.Spec.Bootstrap == nil || cluster.Spec.Bootstrap.Noop == nil ||
+			cluster.Status.CurrentPrimary != "" || cluster.Status.TargetPrimary != status.Pod.Name ||
+			cluster.IsInstanceFenced(status.Pod.Name) {
+			return rollout{}
+		}
+		return isPodNeedingRollout(ctx, status.Pod, cluster)
+	}
+
+	if status.MightBeUnavailable {
 		return rollout{}
 	}
 

@@ -284,6 +284,7 @@ func (ws *remoteWebserverEndpoints) pgStatus(w http.ResponseWriter, _ *http.Requ
 		// Keep PostgreSQL unavailable and do not attempt database connections.
 		status = &pgstatus.PostgresqlStatus{
 			MightBeUnavailable:         true,
+			WaitingForPGData:           true,
 			InstanceManagerVersion:     versions.Version,
 			InstanceArch:               ws.instance.GetArchitecture(),
 			IsInstanceManagerUpgrading: ws.instance.InstanceManagerIsUpgrading.Load(),

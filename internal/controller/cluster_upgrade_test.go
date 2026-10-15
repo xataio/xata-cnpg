@@ -22,6 +22,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -903,9 +904,11 @@ var _ = Describe("Primary detection during rollout", func() {
 		Expect(environment.client.Create(ctx, pod)).To(Succeed())
 		statusList.Items = []postgres.PostgresqlStatus{
 			{
-				Pod:            pod,
-				IsPodReady:     true,
-				ExecutableHash: "test_hash",
+				Pod:                pod,
+				IsPodReady:         true,
+				ExecutableHash:     "test_hash",
+				MightBeUnavailable: true,
+				WaitingForPGData:   true,
 			},
 		}
 
@@ -922,6 +925,8 @@ var _ = Describe("Primary detection during rollout", func() {
 		// A missing executable hash forces a rollout and proves that the second
 		// evaluation follows normal primary handling instead of the idle guard.
 		statusList.Items[0].ExecutableHash = ""
+		statusList.Items[0].MightBeUnavailable = false
+		statusList.Items[0].WaitingForPGData = false
 		done, err = reconciler.rolloutRequiredInstances(ctx, &cluster, &statusList)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(done).To(BeTrue())
@@ -1035,4 +1040,102 @@ var _ = Describe("checkPodSpec with plugins", Ordered, func() {
 		Expect(rollout.reason).To(Equal(
 			"original and target PodSpec differ in containers: container postgres differs in environment"))
 	})
+})
+
+var _ = Describe("Waiting noop pod rollout", func() {
+	var (
+		cluster apiv1.Cluster
+		status  postgres.PostgresqlStatus
+	)
+
+	BeforeEach(func(ctx SpecContext) {
+		configuration.Current = configuration.NewConfiguration()
+		cluster = apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "waiting", Namespace: "default"},
+			Spec: apiv1.ClusterSpec{
+				ImageName: "postgres:13.11",
+				Instances: 1,
+				Bootstrap: &apiv1.BootstrapConfiguration{Noop: &apiv1.BootstrapNoop{}},
+			},
+			Status: apiv1.ClusterStatus{
+				Image:         "postgres:13.11",
+				TargetPrimary: "waiting-1",
+				Instances:     1,
+			},
+		}
+		pod, err := specs.NewInstance(ctx, cluster, 1, true)
+		Expect(err).NotTo(HaveOccurred())
+		status = postgres.PostgresqlStatus{
+			Pod:                pod,
+			IsPodReady:         true,
+			ExecutableHash:     "test_hash",
+			MightBeUnavailable: true,
+			WaitingForPGData:   true,
+		}
+	})
+
+	AfterEach(func() {
+		configuration.Current = configuration.NewConfiguration()
+	})
+
+	DescribeTable("recreates an outdated waiting pod", func(ctx SpecContext, change func(*apiv1.Cluster)) {
+		change(&cluster)
+		environment := buildTestEnvironment()
+		reconciler := environment.clusterReconciler
+		reconciler.rolloutManager = rolloutManager.New(0, 0)
+		Expect(environment.client.Create(ctx, &cluster)).To(Succeed())
+		Expect(environment.client.Create(ctx, status.Pod)).To(Succeed())
+		pvc := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: status.Pod.Name, Namespace: cluster.Namespace},
+		}
+		Expect(environment.client.Create(ctx, pvc)).To(Succeed())
+		originalPVC := pvc.DeepCopy()
+
+		result, err := reconciler.handleRollingUpdate(ctx, &cluster, postgres.PostgresqlStatusList{
+			Items: []postgres.PostgresqlStatus{status},
+		})
+		Expect(err).To(MatchError(ErrNextLoop))
+		Expect(result.IsZero()).To(BeTrue())
+		err = environment.client.Get(ctx, k8client.ObjectKeyFromObject(status.Pod), &corev1.Pod{})
+		Expect(apierrs.IsNotFound(err)).To(BeTrue())
+		Expect(environment.client.Get(ctx, k8client.ObjectKeyFromObject(pvc), pvc)).To(Succeed())
+		Expect(pvc).To(Equal(originalPVC))
+
+		replacement, err := specs.NewInstance(ctx, cluster, 1, true)
+		Expect(err).NotTo(HaveOccurred())
+		replacement.Annotations[utils.ClusterRestartAnnotationName] = cluster.Annotations[utils.ClusterRestartAnnotationName]
+		status.Pod = replacement
+		Expect(isInstanceNeedingRollout(ctx, status, &cluster).required).To(BeFalse())
+	},
+		Entry("image", func(cluster *apiv1.Cluster) {
+			cluster.Spec.ImageName = "postgres:13.12"
+			cluster.Status.Image = "postgres:13.12"
+		}),
+		Entry("restart annotation", func(cluster *apiv1.Cluster) {
+			cluster.Annotations = map[string]string{utils.ClusterRestartAnnotationName: "2026-10-15T10:00:00Z"}
+		}),
+	)
+
+	It("does not restart PostgreSQL while waiting for PGDATA", func(ctx SpecContext) {
+		status.PendingRestart = true
+		Expect(isInstanceNeedingRollout(ctx, status, &cluster).required).To(BeFalse())
+	})
+
+	DescribeTable("preserves rollout protections", func(ctx SpecContext, change func()) {
+		cluster.Spec.ImageName = "postgres:13.12"
+		cluster.Status.Image = "postgres:13.12"
+		change()
+		Expect(isInstanceNeedingRollout(ctx, status, &cluster).required).To(BeFalse())
+	},
+		Entry("not ready", func() { status.IsPodReady = false }),
+		Entry("unavailable without waiting status", func() { status.WaitingForPGData = false }),
+		Entry("status error", func() { status.Error = fmt.Errorf("status unavailable") }),
+		Entry("manager upgrade", func() { status.IsInstanceManagerUpgrading = true }),
+		Entry("regular bootstrap", func() { cluster.Spec.Bootstrap = nil }),
+		Entry("current primary exists", func() { cluster.Status.CurrentPrimary = status.Pod.Name }),
+		Entry("not the target primary", func() { cluster.Status.TargetPrimary = "other-1" }),
+		Entry("fenced", func() {
+			cluster.Annotations = map[string]string{utils.FencedInstanceAnnotation: `["waiting-1"]`}
+		}),
+	)
 })

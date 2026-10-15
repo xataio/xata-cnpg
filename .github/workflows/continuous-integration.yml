@@ -686,17 +686,43 @@ jobs:
           make inject-tags IMAGE="${{ env.REGISTRY }}/${{ env.REPO }}/cloudnative-pg" TAG="${{ env.IMAGE_TAG }}"
           make push-charts VERSION="${{ env.IMAGE_TAG }}"
 
+  # XATA: Use the auto-deploy action when the merged PR has the auto-deploy label.
+  detect-deploy-action:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    outputs:
+      action: ${{ steps.deploy-action.outputs.action }}
+    steps:
+      - name: Detect deploy action
+        id: deploy-action
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          action=deploy
+          if gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq 'any(.[0].labels[]?; .name == "auto-deploy")' | grep -qx true; then
+            action=auto-deploy
+          fi
+
+          echo "Detected deploy action: $action"
+          echo "action=$action" >> "$GITHUB_OUTPUT"
+
   # XATA: Dispatch published charts to infra-new after buildx completes.
   deploy:
     if: >-
       !cancelled()
       && needs.buildx.result == 'success'
+      && needs.detect-deploy-action.result == 'success'
       && github.event_name == 'push'
       && github.ref_name == needs.buildx.outputs.deploy_branch
-    needs: buildx
+    needs:
+      - buildx
+      - detect-deploy-action
     uses: ./.github/workflows/sync-charts.yml
     with:
-      action: deploy
+      action: ${{ needs.detect-deploy-action.outputs.action }}
       source_pr: ""
       sync_key: ${{ github.repository }}@${{ needs.buildx.outputs.deploy_branch }}
       ref: ${{ github.sha }}

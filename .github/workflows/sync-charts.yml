@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       action:
-        description: "Sync action (preview, deploy, or cleanup)"
+        description: "Sync action (preview, deploy, auto-deploy, or cleanup)"
         required: true
         type: string
       source_pr:

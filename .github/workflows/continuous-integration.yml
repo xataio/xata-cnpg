@@ -178,6 +178,9 @@ jobs:
         uses: golangci/golangci-lint-action@e7fa5ac41e1cf5b7d48e45e42232ce7ada589601 # v9
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
+          # Skip validating .golangci.yml against the JSON schema: it is
+          # fetched from golangci-lint.run, which sometimes times out.
+          verify: false
 
       - name: Check go mod tidy has no pending changes
         run: |

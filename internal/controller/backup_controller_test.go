@@ -24,9 +24,12 @@ import (
 	"time"
 
 	volumesnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -728,5 +731,76 @@ var _ = Describe("waitForBackupPod", func() {
 		var stored apiv1.Backup
 		Expect(env.client.Get(ctx, client.ObjectKeyFromObject(backup), &stored)).To(Succeed())
 		Expect(stored.Status.Phase).To(BeEquivalentTo(apiv1.BackupPhaseFailed))
+	})
+})
+
+var _ = Describe("backup attempt metric dedupe", func() {
+	var env *testingEnvironment
+	BeforeEach(func() { env = buildTestEnvironment() })
+
+	It("counts a terminal backup once no matter how many times it is reconciled", func(ctx context.Context) {
+		ns := newFakeNamespace(env.client)
+
+		backup := &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{Name: "backup-dedupe-test", Namespace: ns},
+			Spec: apiv1.BackupSpec{
+				Cluster: apiv1.LocalObjectReference{Name: "cluster-example"},
+				Method:  apiv1.BackupMethodPgBackRest,
+			},
+			Status: apiv1.BackupStatus{
+				Phase:  apiv1.BackupPhaseCompleted,
+				Method: apiv1.BackupMethodPgBackRest,
+			},
+		}
+		Expect(env.client.Create(ctx, backup)).To(Succeed())
+
+		counter := backupAttemptsTotal.WithLabelValues(
+			string(apiv1.BackupPhaseCompleted), string(apiv1.BackupMethodPgBackRest), "")
+		before := testutil.ToFloat64(counter)
+
+		req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(backup)}
+
+		_, err := env.backupReconciler.Reconcile(ctx, req)
+		Expect(err).ToNot(HaveOccurred())
+		_, err = env.backupReconciler.Reconcile(ctx, req)
+		Expect(err).ToNot(HaveOccurred())
+		_, err = env.backupReconciler.Reconcile(ctx, req)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(testutil.ToFloat64(counter) - before).To(Equal(1.0))
+	})
+})
+
+var _ = Describe("backupAttemptDeduper", func() {
+	var (
+		clock   time.Time
+		deduper *backupAttemptDeduper
+	)
+	BeforeEach(func() {
+		clock = time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
+		deduper = &backupAttemptDeduper{now: func() time.Time { return clock }}
+	})
+
+	backupWithUID := func(uid string) *apiv1.Backup {
+		return &apiv1.Backup{ObjectMeta: metav1.ObjectMeta{UID: types.UID(uid)}}
+	}
+
+	It("does not count a Backup again when it outlives the TTL", func() {
+		backup := backupWithUID("long-lived")
+		Expect(deduper.observeTerminal(backup)).To(BeTrue())
+
+		// A resync reconciles the Backup about every ten hours.
+		for range 5 {
+			clock = clock.Add(10 * time.Hour)
+			Expect(deduper.observeTerminal(backup)).To(BeFalse())
+		}
+	})
+
+	It("forgets a Backup that is no longer reconciled", func() {
+		Expect(deduper.observeTerminal(backupWithUID("deleted"))).To(BeTrue())
+
+		clock = clock.Add(backupAttemptDedupeTTL + time.Minute)
+		Expect(deduper.observeTerminal(backupWithUID("other"))).To(BeTrue())
+		Expect(deduper.lastSeen).ToNot(HaveKey(types.UID("deleted")))
 	})
 })

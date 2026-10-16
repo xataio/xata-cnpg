@@ -30,19 +30,20 @@ import (
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 )
 
-// backupAttemptDedupeTTL bounds how long a Backup UID is remembered for
-// dedupe purposes. The cleaner CronJob removes terminal Backups within two
-// hours, and BackupOwnerReference often collects them with their Cluster
-// sooner than that, so a UID observed longer ago than this TTL belongs to an
-// object that is gone (or is about to be) and can safely be forgotten even
-// if, improbably, it is still being reconciled.
+// backupAttemptDedupeTTL is how long a Backup UID is remembered after the
+// reconciler last saw it. The entry is refreshed on every reconcile, and
+// controller-runtime resyncs every object about every ten hours (its
+// default SyncPeriod with up to 10% jitter, which the operator does not
+// override), so a Backup
+// that still exists is never forgotten and never counted twice. Only an
+// entry for a deleted Backup stops being refreshed and ages out.
 const backupAttemptDedupeTTL = 24 * time.Hour
 
 // backupAttemptsTotal counts terminal Backup reconciliations by outcome, so
 // an attempt success ratio can be computed over a window much longer than a
-// Backup object's own lifetime (it is garbage collected within hours). It is
-// registered on controller-runtime's global registry, so it is served on the
-// metrics endpoint the operator already exposes.
+// Backup object's own lifetime (it is usually garbage collected within
+// hours). It is registered on controller-runtime's global registry, so it is
+// served on the metrics endpoint the operator already exposes.
 //
 // failure_reason is empty for a completed backup; that is expected, not
 // missing data.
@@ -70,42 +71,48 @@ func init() {
 //
 // Known and accepted imprecision: an operator restart starts this map empty,
 // so any terminal Backup still present in the cluster is re-counted once
-// after a restart. This is rare relative to the volume of attempts a ratio
-// is computed over, and avoids the complexity of persisting dedupe state
-// somewhere outside the process.
+// after a restart. The present Backups mirror the recent mix of outcomes, so
+// this inflates the counts more than it moves the success ratio, and it
+// avoids persisting dedupe state somewhere outside the process.
 type backupAttemptDeduper struct {
-	mu      sync.Mutex
-	counted map[types.UID]time.Time
+	mu       sync.Mutex
+	lastSeen map[types.UID]time.Time
+
+	// now returns the current time. It is nil outside tests.
+	now func() time.Time
 }
 
 // observeTerminal records that backup reached a terminal phase and reports
-// whether this call is the first to do so for its UID. An entry ages out
-// backupAttemptDedupeTTL after it was first counted; that is deliberately
-// the observation time, not a field read off the object (e.g. its creation
-// timestamp), so the bound does not depend on any timestamp the object
-// happens to carry being populated.
+// whether this call is the first to do so for its UID. Every call refreshes
+// the UID's last-seen time, so the entry ages out backupAttemptDedupeTTL
+// after the last reconcile of the Backup, not after the first. Ageing out
+// from the first sighting would forget a terminal Backup that outlives the
+// TTL (some do, by months) and count it again after the next resync.
 func (d *backupAttemptDeduper) observeTerminal(backup *apiv1.Backup) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.counted == nil {
-		d.counted = make(map[types.UID]time.Time)
+	now := time.Now()
+	if d.now != nil {
+		now = d.now()
 	}
 
-	d.evictLocked()
-
-	if _, ok := d.counted[backup.UID]; ok {
-		return false
+	if d.lastSeen == nil {
+		d.lastSeen = make(map[types.UID]time.Time)
 	}
-	d.counted[backup.UID] = time.Now()
-	return true
+
+	d.evictLocked(now)
+
+	_, seen := d.lastSeen[backup.UID]
+	d.lastSeen[backup.UID] = now
+	return !seen
 }
 
-func (d *backupAttemptDeduper) evictLocked() {
-	cutoff := time.Now().Add(-backupAttemptDedupeTTL)
-	for uid, createdAt := range d.counted {
-		if createdAt.Before(cutoff) {
-			delete(d.counted, uid)
+func (d *backupAttemptDeduper) evictLocked(now time.Time) {
+	cutoff := now.Add(-backupAttemptDedupeTTL)
+	for uid, lastSeen := range d.lastSeen {
+		if lastSeen.Before(cutoff) {
+			delete(d.lastSeen, uid)
 		}
 	}
 }

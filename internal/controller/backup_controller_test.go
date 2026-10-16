@@ -27,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -767,5 +768,39 @@ var _ = Describe("backup attempt metric dedupe", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(testutil.ToFloat64(counter) - before).To(Equal(1.0))
+	})
+})
+
+var _ = Describe("backupAttemptDeduper", func() {
+	var (
+		clock   time.Time
+		deduper *backupAttemptDeduper
+	)
+	BeforeEach(func() {
+		clock = time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
+		deduper = &backupAttemptDeduper{now: func() time.Time { return clock }}
+	})
+
+	backupWithUID := func(uid string) *apiv1.Backup {
+		return &apiv1.Backup{ObjectMeta: metav1.ObjectMeta{UID: types.UID(uid)}}
+	}
+
+	It("does not count a Backup again when it outlives the TTL", func() {
+		backup := backupWithUID("long-lived")
+		Expect(deduper.observeTerminal(backup)).To(BeTrue())
+
+		// A resync reconciles the Backup about every ten hours.
+		for range 5 {
+			clock = clock.Add(10 * time.Hour)
+			Expect(deduper.observeTerminal(backup)).To(BeFalse())
+		}
+	})
+
+	It("forgets a Backup that is no longer reconciled", func() {
+		Expect(deduper.observeTerminal(backupWithUID("deleted"))).To(BeTrue())
+
+		clock = clock.Add(backupAttemptDedupeTTL + time.Minute)
+		Expect(deduper.observeTerminal(backupWithUID("other"))).To(BeTrue())
+		Expect(deduper.lastSeen).ToNot(HaveKey(types.UID("deleted")))
 	})
 })

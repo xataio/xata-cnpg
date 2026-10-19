@@ -24,11 +24,14 @@ import (
 	"time"
 
 	volumesnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	schemeBuilder "github.com/xataio/xata-cnpg/internal/scheme"
@@ -730,3 +733,64 @@ var _ = Describe("waitForBackupPod", func() {
 		Expect(stored.Status.Phase).To(BeEquivalentTo(apiv1.BackupPhaseFailed))
 	})
 })
+
+var _ = Describe("backupAttemptCounter", func() {
+	backupIn := func(uid string, phase apiv1.BackupPhase) *apiv1.Backup {
+		return &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{Name: "backup-attempt-test", UID: types.UID(uid)},
+			Status: apiv1.BackupStatus{
+				Phase:         phase,
+				Method:        apiv1.BackupMethodPgBackRest,
+				FailureReason: failureReasonFor(phase),
+			},
+		}
+	}
+
+	DescribeTable("counts only the transition into a terminal phase",
+		func(oldBackup, newBackup *apiv1.Backup, expected float64) {
+			counter := backupAttemptsTotal.WithLabelValues(
+				string(newBackup.Status.Phase),
+				string(newBackup.Status.Method),
+				string(newBackup.Status.FailureReason),
+			)
+			before := testutil.ToFloat64(counter)
+
+			backupAttemptCounter.Update(context.Background(),
+				event.UpdateEvent{ObjectOld: oldBackup, ObjectNew: newBackup}, nil)
+
+			Expect(testutil.ToFloat64(counter) - before).To(Equal(expected))
+		},
+		Entry("running to completed",
+			backupIn("a", apiv1.BackupPhaseRunning), backupIn("a", apiv1.BackupPhaseCompleted), 1.0),
+		Entry("running to failed",
+			backupIn("a", apiv1.BackupPhaseRunning), backupIn("a", apiv1.BackupPhaseFailed), 1.0),
+		Entry("running to cancelled",
+			backupIn("a", apiv1.BackupPhaseRunning), backupIn("a", apiv1.BackupPhaseCancelled), 1.0),
+		Entry("new status to failed, for a backup that fails before it starts",
+			backupIn("a", ""), backupIn("a", apiv1.BackupPhaseFailed), 1.0),
+		Entry("completed to completed, as on a resync",
+			backupIn("a", apiv1.BackupPhaseCompleted), backupIn("a", apiv1.BackupPhaseCompleted), 0.0),
+		Entry("pending to running",
+			backupIn("a", apiv1.BackupPhasePending), backupIn("a", apiv1.BackupPhaseRunning), 0.0),
+		Entry("a recreated Backup that is already completed",
+			backupIn("a", apiv1.BackupPhaseCompleted), backupIn("b", apiv1.BackupPhaseCompleted), 1.0),
+	)
+
+	It("does not count a Backup seen for the first time, as after a restart", func() {
+		backup := backupIn("a", apiv1.BackupPhaseCompleted)
+		counter := backupAttemptsTotal.WithLabelValues(
+			string(backup.Status.Phase), string(backup.Status.Method), "")
+		before := testutil.ToFloat64(counter)
+
+		backupAttemptCounter.Create(context.Background(), event.CreateEvent{Object: backup}, nil)
+
+		Expect(testutil.ToFloat64(counter) - before).To(BeZero())
+	})
+})
+
+func failureReasonFor(phase apiv1.BackupPhase) apiv1.BackupFailureReason {
+	if phase == apiv1.BackupPhaseFailed {
+		return apiv1.BackupFailureReasonObjectStoreError
+	}
+	return ""
+}

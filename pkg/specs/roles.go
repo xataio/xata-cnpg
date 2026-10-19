@@ -30,8 +30,11 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
-// CreateRole create a role with the permissions needed by the instance manager
-func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup) rbacv1.Role {
+// CreateRole create a role with the permissions needed by the instance manager.
+// activeBackups are the names of the Backups of the cluster that are not done.
+// The instance manager can read and write only those Backups, and read only the
+// Backup the cluster bootstraps from.
+func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups []string) rbacv1.Role {
 	rules := []rbacv1.PolicyRule{
 		{
 			APIGroups: []string{
@@ -90,33 +93,6 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup) rbacv1.Role {
 			},
 			ResourceNames: []string{
 				cluster.Name,
-			},
-		},
-		{
-			APIGroups: []string{
-				"postgresql.cnpg.io",
-			},
-			Resources: []string{
-				"backups",
-			},
-			Verbs: []string{
-				"list",
-				"get",
-				"patch",
-				"delete",
-			},
-		},
-		{
-			APIGroups: []string{
-				"postgresql.cnpg.io",
-			},
-			Resources: []string{
-				"backups/status",
-			},
-			Verbs: []string{
-				"get",
-				"patch",
-				"update",
 			},
 		},
 		{
@@ -258,7 +234,7 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup) rbacv1.Role {
 				utils.KubernetesAppManagedByLabelName: utils.ManagerName,
 			},
 		},
-		Rules: rules,
+		Rules: slices.Concat(rules, backupRules(backupOrigin, activeBackups)),
 	}
 }
 
@@ -512,4 +488,40 @@ func managedRolesSecrets(cluster apiv1.Cluster) []string {
 	}
 
 	return secretNames
+}
+
+// backupRules returns the rules that give the instance manager access to
+// Backups. A rule with no ResourceNames applies to every object, so a rule is
+// added only when it has names.
+func backupRules(backupOrigin *apiv1.Backup, activeBackups []string) []rbacv1.PolicyRule {
+	var rules []rbacv1.PolicyRule
+
+	if backupOrigin != nil {
+		rules = append(rules, rbacv1.PolicyRule{
+			APIGroups:     []string{"postgresql.cnpg.io"},
+			Resources:     []string{"backups"},
+			Verbs:         []string{"get"},
+			ResourceNames: []string{backupOrigin.Name},
+		})
+	}
+
+	names := stringset.From(activeBackups).ToSortedList()
+	if len(names) == 0 {
+		return rules
+	}
+
+	return append(rules,
+		rbacv1.PolicyRule{
+			APIGroups:     []string{"postgresql.cnpg.io"},
+			Resources:     []string{"backups"},
+			Verbs:         []string{"get", "patch"},
+			ResourceNames: names,
+		},
+		rbacv1.PolicyRule{
+			APIGroups:     []string{"postgresql.cnpg.io"},
+			Resources:     []string{"backups/status"},
+			Verbs:         []string{"get", "patch", "update"},
+			ResourceNames: names,
+		},
+	)
 }

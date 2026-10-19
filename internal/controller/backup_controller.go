@@ -144,7 +144,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	ctx = cluster.SetInContext(ctx)
 
-	if res, err := r.checkPrerequisites(ctx, backup, cluster); err != nil || res != nil {
+	if res, err := r.prepareBackup(ctx, backup, cluster); err != nil || res != nil {
 		if res != nil {
 			return *res, err
 		}
@@ -244,6 +244,10 @@ const backupPendingSinceAnnotation = "xata.io/backupPendingSince"
 // drains and pod reschedules complete well within this budget; exceeding it
 // means the pod is genuinely stuck.
 const backupPodWaitTimeout = 15 * time.Minute
+
+// instanceRoleSyncDelay is how long a backup waits after a change to the role
+// of the instance manager before it starts
+const instanceRoleSyncDelay = 5 * time.Second
 
 // errBackupPodUnavailable reports that the backup exec failed and the target
 // pod is not usable (missing, terminating, or not ready). The backup must
@@ -391,6 +395,32 @@ func (r *BackupReconciler) isCurrentBackupRunning(
 	}
 
 	return true, nil
+}
+
+// prepareBackup checks the prerequisites of the backup, and makes sure that
+// the role of the instance manager names the backup
+func (r *BackupReconciler) prepareBackup(
+	ctx context.Context,
+	backup apiv1.Backup,
+	cluster apiv1.Cluster,
+) (*ctrl.Result, error) {
+	if res, err := r.checkPrerequisites(ctx, backup, cluster); err != nil || res != nil {
+		return res, err
+	}
+
+	changed, err := createOrPatchRole(ctx, r.Client, r.Recorder, &cluster)
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		// Each API server applies a role change from its own cache, so the
+		// instance manager can get Forbidden on this backup for a short time.
+		// The exec of the backup retries for less than two seconds, then
+		// fails the backup, so wait before the exec.
+		return &ctrl.Result{RequeueAfter: instanceRoleSyncDelay}, nil
+	}
+
+	return nil, nil
 }
 
 // checkPrerequisites checks that the backup and cluster spec are FORMALLY valid and the kubernetes cluster supports

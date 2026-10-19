@@ -29,9 +29,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	schemeBuilder "github.com/xataio/xata-cnpg/internal/scheme"
@@ -734,73 +734,63 @@ var _ = Describe("waitForBackupPod", func() {
 	})
 })
 
-var _ = Describe("backup attempt metric dedupe", func() {
-	var env *testingEnvironment
-	BeforeEach(func() { env = buildTestEnvironment() })
-
-	It("counts a terminal backup once no matter how many times it is reconciled", func(ctx context.Context) {
-		ns := newFakeNamespace(env.client)
-
-		backup := &apiv1.Backup{
-			ObjectMeta: metav1.ObjectMeta{Name: "backup-dedupe-test", Namespace: ns},
-			Spec: apiv1.BackupSpec{
-				Cluster: apiv1.LocalObjectReference{Name: "cluster-example"},
-				Method:  apiv1.BackupMethodPgBackRest,
-			},
+var _ = Describe("backupAttemptCounter", func() {
+	backupIn := func(uid string, phase apiv1.BackupPhase) *apiv1.Backup {
+		return &apiv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{Name: "backup-attempt-test", UID: types.UID(uid)},
 			Status: apiv1.BackupStatus{
-				Phase:  apiv1.BackupPhaseCompleted,
-				Method: apiv1.BackupMethodPgBackRest,
+				Phase:         phase,
+				Method:        apiv1.BackupMethodPgBackRest,
+				FailureReason: failureReasonFor(phase),
 			},
 		}
-		Expect(env.client.Create(ctx, backup)).To(Succeed())
-
-		counter := backupAttemptsTotal.WithLabelValues(
-			string(apiv1.BackupPhaseCompleted), string(apiv1.BackupMethodPgBackRest), "")
-		before := testutil.ToFloat64(counter)
-
-		req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(backup)}
-
-		_, err := env.backupReconciler.Reconcile(ctx, req)
-		Expect(err).ToNot(HaveOccurred())
-		_, err = env.backupReconciler.Reconcile(ctx, req)
-		Expect(err).ToNot(HaveOccurred())
-		_, err = env.backupReconciler.Reconcile(ctx, req)
-		Expect(err).ToNot(HaveOccurred())
-
-		Expect(testutil.ToFloat64(counter) - before).To(Equal(1.0))
-	})
-})
-
-var _ = Describe("backupAttemptDeduper", func() {
-	var (
-		clock   time.Time
-		deduper *backupAttemptDeduper
-	)
-	BeforeEach(func() {
-		clock = time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
-		deduper = &backupAttemptDeduper{now: func() time.Time { return clock }}
-	})
-
-	backupWithUID := func(uid string) *apiv1.Backup {
-		return &apiv1.Backup{ObjectMeta: metav1.ObjectMeta{UID: types.UID(uid)}}
 	}
 
-	It("does not count a Backup again when it outlives the TTL", func() {
-		backup := backupWithUID("long-lived")
-		Expect(deduper.observeTerminal(backup)).To(BeTrue())
+	DescribeTable("counts only the transition into a terminal phase",
+		func(oldBackup, newBackup *apiv1.Backup, expected float64) {
+			counter := backupAttemptsTotal.WithLabelValues(
+				string(newBackup.Status.Phase),
+				string(newBackup.Status.Method),
+				string(newBackup.Status.FailureReason),
+			)
+			before := testutil.ToFloat64(counter)
 
-		// A resync reconciles the Backup about every ten hours.
-		for range 5 {
-			clock = clock.Add(10 * time.Hour)
-			Expect(deduper.observeTerminal(backup)).To(BeFalse())
-		}
-	})
+			backupAttemptCounter.Update(context.Background(),
+				event.UpdateEvent{ObjectOld: oldBackup, ObjectNew: newBackup}, nil)
 
-	It("forgets a Backup that is no longer reconciled", func() {
-		Expect(deduper.observeTerminal(backupWithUID("deleted"))).To(BeTrue())
+			Expect(testutil.ToFloat64(counter) - before).To(Equal(expected))
+		},
+		Entry("running to completed",
+			backupIn("a", apiv1.BackupPhaseRunning), backupIn("a", apiv1.BackupPhaseCompleted), 1.0),
+		Entry("running to failed",
+			backupIn("a", apiv1.BackupPhaseRunning), backupIn("a", apiv1.BackupPhaseFailed), 1.0),
+		Entry("running to cancelled",
+			backupIn("a", apiv1.BackupPhaseRunning), backupIn("a", apiv1.BackupPhaseCancelled), 1.0),
+		Entry("new status to failed, for a backup that fails before it starts",
+			backupIn("a", ""), backupIn("a", apiv1.BackupPhaseFailed), 1.0),
+		Entry("completed to completed, as on a resync",
+			backupIn("a", apiv1.BackupPhaseCompleted), backupIn("a", apiv1.BackupPhaseCompleted), 0.0),
+		Entry("pending to running",
+			backupIn("a", apiv1.BackupPhasePending), backupIn("a", apiv1.BackupPhaseRunning), 0.0),
+		Entry("a recreated Backup that is already completed",
+			backupIn("a", apiv1.BackupPhaseCompleted), backupIn("b", apiv1.BackupPhaseCompleted), 1.0),
+	)
 
-		clock = clock.Add(backupAttemptDedupeTTL + time.Minute)
-		Expect(deduper.observeTerminal(backupWithUID("other"))).To(BeTrue())
-		Expect(deduper.lastSeen).ToNot(HaveKey(types.UID("deleted")))
+	It("does not count a Backup seen for the first time, as after a restart", func() {
+		backup := backupIn("a", apiv1.BackupPhaseCompleted)
+		counter := backupAttemptsTotal.WithLabelValues(
+			string(backup.Status.Phase), string(backup.Status.Method), "")
+		before := testutil.ToFloat64(counter)
+
+		backupAttemptCounter.Create(context.Background(), event.CreateEvent{Object: backup}, nil)
+
+		Expect(testutil.ToFloat64(counter) - before).To(BeZero())
 	})
 })
+
+func failureReasonFor(phase apiv1.BackupPhase) apiv1.BackupFailureReason {
+	if phase == apiv1.BackupPhaseFailed {
+		return apiv1.BackupFailureReasonObjectStoreError
+	}
+	return ""
+}

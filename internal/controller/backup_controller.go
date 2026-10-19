@@ -87,7 +87,6 @@ type BackupReconciler struct {
 
 	instanceStatusClient remote.InstanceClient
 	vsr                  *volumesnapshot.Reconciler
-	backupAttempts       backupAttemptDeduper
 }
 
 // NewBackupReconciler properly initializes the BackupReconciler
@@ -132,7 +131,6 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	switch backup.Status.Phase {
 	case apiv1.BackupPhaseFailed, apiv1.BackupPhaseCompleted, apiv1.BackupPhaseCancelled:
-		r.recordBackupAttempt(&backup)
 		return ctrl.Result{}, nil
 	}
 
@@ -981,6 +979,7 @@ func (r *BackupReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manage
 	controllerBuilder := ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Backup{}).
 		Named("backup").
+		Watches(&apiv1.Backup{}, backupAttemptCounter).
 		Watches(&apiv1.Cluster{},
 			handler.EnqueueRequestsFromMapFunc(r.mapClustersToBackup()),
 			builder.WithPredicates(clustersWithBackupPredicate),

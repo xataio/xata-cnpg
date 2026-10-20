@@ -750,7 +750,11 @@ func createOrPatchRole(
 	// configMap we have
 	patchedRole := role.DeepCopy()
 	patchedRole.Rules = generatedRole.Rules
-	if err := cli.Patch(ctx, patchedRole, client.MergeFrom(&role)); err != nil {
+	if err := cli.Patch(
+		ctx,
+		patchedRole,
+		client.MergeFromWithOptions(&role, client.MergeFromWithOptimisticLock{}),
+	); err != nil {
 		return false, fmt.Errorf("while patching role: %w", err)
 	}
 

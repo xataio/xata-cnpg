@@ -33,6 +33,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -519,11 +520,23 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, cluster *apiv1.Cluste
 		cluster,
 		resources.instances.Items,
 	)
-	if hibernationResult != nil {
-		return *hibernationResult, err
-	}
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+	if hibernationResult != nil {
+		// Plugin loading has succeeded, but hibernated clusters do not reach
+		// the normal health checks. Restore their phase here so a temporary
+		// plugin error does not require waking the cluster to recover.
+		condition := meta.FindStatusCondition(cluster.Status.Conditions, hibernation.HibernationConditionType)
+		if condition != nil &&
+			condition.Status == metav1.ConditionTrue &&
+			condition.Reason == hibernation.HibernationConditionReasonHibernated &&
+			cluster.Status.Phase == apiv1.PhaseFailurePlugin {
+			if err := r.RegisterPhase(ctx, cluster, apiv1.PhaseHealthy, ""); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return *hibernationResult, nil
 	}
 
 	// We have already updated the status in updateResourceStatus call,

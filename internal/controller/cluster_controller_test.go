@@ -20,19 +20,27 @@ SPDX-License-Identifier: Apache-2.0
 package controller
 
 import (
+	"os"
+	"runtime"
 	"time"
 
 	cnpgTypes "github.com/cloudnative-pg/machinery/pkg/types"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/internal/configuration"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/remote"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
+	"github.com/xataio/xata-cnpg/pkg/reconciler/hibernation"
 	"github.com/xataio/xata-cnpg/pkg/reconciler/persistentvolumeclaim"
 	"github.com/xataio/xata-cnpg/pkg/specs"
+	"github.com/xataio/xata-cnpg/pkg/utils"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -365,5 +373,54 @@ var _ = Describe("isNodeUnschedulableOrBeingDrained", func() {
 		Entry("node is unschedulable", nodeUnschedulable, true),
 		Entry("node is tainted", nodeTainted, true),
 		Entry("node has an unknown taint", nodeWithUnknownTaint, false),
+	)
+})
+
+var _ = Describe("Hibernated cluster recovery", func() {
+	DescribeTable("reconciles the phase without waking the cluster",
+		func(ctx SpecContext, phase, expectedPhase string) {
+			env := buildTestEnvironment()
+			GinkgoT().Chdir(GinkgoT().TempDir())
+			Expect(os.Mkdir("operator", 0o700)).To(Succeed())
+			Expect(os.WriteFile("operator/manager_"+runtime.GOARCH, []byte("test operator"), 0o600)).To(Succeed())
+			Expect(utils.DetectAvailableArchitectures()).To(Succeed())
+			env.clusterReconciler.InstanceClient = remote.NewClient().Instance()
+			namespace := newFakeNamespace(env.client)
+			cluster := newFakeCNPGCluster(env.client, namespace, func(cluster *apiv1.Cluster) {
+				cluster.Annotations[utils.HibernationAnnotationName] = hibernation.HibernationOn
+				cluster.Status.Phase = phase
+				cluster.Status.PhaseReason = "previous failure"
+				cluster.Status.Conditions = []metav1.Condition{{
+					Type:   hibernation.HibernationConditionType,
+					Status: metav1.ConditionTrue,
+					Reason: hibernation.HibernationConditionReasonHibernated,
+				}}
+			})
+			generateFakeCASecret(env.client, cluster.GetServerCASecretName(), namespace, "testdomain.com")
+			generateFakeCASecret(env.client, cluster.GetClientCASecretName(), namespace, "testdomain.com")
+			key := client.ObjectKeyFromObject(cluster)
+			result, err := env.clusterReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.IsZero()).To(BeTrue())
+			Expect(env.client.Get(ctx, key, cluster)).To(Succeed())
+			Expect(cluster.Status.Phase).To(Equal(expectedPhase))
+			if phase == apiv1.PhaseFailurePlugin {
+				Expect(cluster.Status.PhaseReason).To(BeEmpty())
+				Expect(meta.IsStatusConditionTrue(cluster.Status.Conditions, string(apiv1.ConditionClusterReady))).To(BeTrue())
+			} else {
+				Expect(cluster.Status.PhaseReason).To(Equal("previous failure"))
+			}
+			condition := meta.FindStatusCondition(cluster.Status.Conditions, hibernation.HibernationConditionType)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(condition.Reason).To(Equal(hibernation.HibernationConditionReasonHibernated))
+			var pods corev1.PodList
+			Expect(env.client.List(ctx, &pods, client.InNamespace(namespace))).To(Succeed())
+			Expect(pods.Items).To(BeEmpty())
+		},
+		Entry("clears a recovered plugin failure", apiv1.PhaseFailurePlugin, apiv1.PhaseHealthy),
+		Entry("preserves another failure", apiv1.PhaseUnrecoverable, apiv1.PhaseUnrecoverable),
+		Entry("preserves an unknown plugin failure", apiv1.PhaseUnknownPlugin, apiv1.PhaseUnknownPlugin),
+		Entry("preserves a healthy phase", apiv1.PhaseHealthy, apiv1.PhaseHealthy),
 	)
 })

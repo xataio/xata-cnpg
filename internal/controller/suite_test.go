@@ -74,10 +74,21 @@ func buildTestEnvironment() *testingEnvironment {
 	Expect(err).ToNot(HaveOccurred())
 
 	scheme := schemeBuilder.BuildWithAllKnownScheme()
+	clusterOwnerIndex := func(obj client.Object) []string {
+		if ownerName, ok := IsOwnedByCluster(obj); ok {
+			return []string{ownerName}
+		}
+		return nil
+	}
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&apiv1.Cluster{}, &apiv1.Backup{}, &apiv1.Pooler{}, &corev1.Service{},
 			&corev1.ConfigMap{}, &corev1.Secret{}).
 		WithIndex(&batchv1.Job{}, jobOwnerKey, jobOwnerIndexFunc).
+		WithIndex(&corev1.Pod{}, podOwnerKey, clusterOwnerIndex).
+		WithIndex(&corev1.PersistentVolumeClaim{}, pvcOwnerKey, clusterOwnerIndex).
+		WithIndex(&apiv1.Pooler{}, poolerClusterKey, func(obj client.Object) []string {
+			return []string{obj.(*apiv1.Pooler).Spec.Cluster.Name}
+		}).
 		Build()
 	Expect(err).ToNot(HaveOccurred())
 

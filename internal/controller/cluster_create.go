@@ -39,6 +39,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/tools/record"
 	k8slices "k8s.io/utils/strings/slices"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -80,7 +81,7 @@ func (r *ClusterReconciler) createPostgresClusterObjects(ctx context.Context, cl
 		return err
 	}
 
-	err = r.createOrPatchRole(ctx, cluster)
+	_, err = createOrPatchRole(ctx, r.Client, r.Recorder, cluster)
 	if err != nil {
 		return err
 	}
@@ -708,40 +709,79 @@ func (r *ClusterReconciler) copyPullSecretFromOperator(ctx context.Context, clus
 }
 
 // createOrPatchRole ensures that the required role for the instance manager exists and
-// contains the right rules
-func (r *ClusterReconciler) createOrPatchRole(ctx context.Context, cluster *apiv1.Cluster) error {
-	originBackup, err := r.getOriginBackup(ctx, cluster)
+// contains the right rules. The role names the backups of the cluster that are
+// not done, so the backup controller calls it before it starts a backup. It
+// reports whether it created or changed the role.
+func createOrPatchRole(
+	ctx context.Context,
+	cli client.Client,
+	recorder record.EventRecorder,
+	cluster *apiv1.Cluster,
+) (bool, error) {
+	originBackup, err := getOriginBackup(ctx, cli, recorder, cluster)
 	if err != nil {
-		return err
+		return false, err
+	}
+
+	activeBackups, err := getActiveBackupNames(ctx, cli, cluster)
+	if err != nil {
+		return false, err
 	}
 
 	var role rbacv1.Role
-	if err := r.Get(ctx, client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}, &role); err != nil {
+	if err := cli.Get(ctx, client.ObjectKey{Name: cluster.Name, Namespace: cluster.Namespace}, &role); err != nil {
 		if !apierrs.IsNotFound(err) {
-			return fmt.Errorf("while getting role: %w", err)
+			return false, fmt.Errorf("while getting role: %w", err)
 		}
 
-		r.Recorder.Event(cluster, "Normal", "CreatingRole", "Creating Cluster Role")
-		return r.createRole(ctx, cluster, originBackup)
+		recorder.Event(cluster, "Normal", "CreatingRole", "Creating Cluster Role")
+		return true, createRole(ctx, cli, cluster, originBackup, activeBackups)
 	}
 
-	generatedRole := specs.CreateRole(*cluster, originBackup)
+	generatedRole := specs.CreateRole(*cluster, originBackup, activeBackups)
 	if equality.Semantic.DeepEqual(generatedRole.Rules, role.Rules) {
 		// Everything fine, the two rules have the same content
-		return nil
+		return false, nil
 	}
 
-	r.Recorder.Event(cluster, "Normal", "UpdatingRole", "Updating Cluster Role")
+	recorder.Event(cluster, "Normal", "UpdatingRole", "Updating Cluster Role")
 
 	// The configuration changed, and we need the patch the
 	// configMap we have
 	patchedRole := role.DeepCopy()
 	patchedRole.Rules = generatedRole.Rules
-	if err := r.Patch(ctx, patchedRole, client.MergeFrom(&role)); err != nil {
-		return fmt.Errorf("while patching role: %w", err)
+	if err := cli.Patch(
+		ctx,
+		patchedRole,
+		client.MergeFromWithOptions(&role, client.MergeFromWithOptimisticLock{}),
+	); err != nil {
+		return false, fmt.Errorf("while patching role: %w", err)
 	}
 
-	return nil
+	return true, nil
+}
+
+// getActiveBackupNames returns the names of the backups of the cluster that are
+// not done
+func getActiveBackupNames(ctx context.Context, cli client.Client, cluster *apiv1.Cluster) ([]string, error) {
+	var backups apiv1.BackupList
+	if err := cli.List(
+		ctx,
+		&backups,
+		client.InNamespace(cluster.Namespace),
+		client.MatchingFields{clusterNameField: cluster.Name},
+	); err != nil {
+		return nil, fmt.Errorf("while listing the backups of the cluster: %w", err)
+	}
+
+	var names []string
+	for _, backup := range backups.Items {
+		if !backup.Status.IsDone() {
+			names = append(names, backup.Name)
+		}
+	}
+
+	return names, nil
 }
 
 // createOrPatchDefaultMetricsConfigmap ensures that the required configmap containing
@@ -1017,11 +1057,17 @@ func createOrPatchPodMonitor(
 }
 
 // createRole creates the role
-func (r *ClusterReconciler) createRole(ctx context.Context, cluster *apiv1.Cluster, backupOrigin *apiv1.Backup) error {
-	role := specs.CreateRole(*cluster, backupOrigin)
+func createRole(
+	ctx context.Context,
+	cli client.Client,
+	cluster *apiv1.Cluster,
+	backupOrigin *apiv1.Backup,
+	activeBackups []string,
+) error {
+	role := specs.CreateRole(*cluster, backupOrigin, activeBackups)
 	cluster.SetInheritedDataAndOwnership(&role.ObjectMeta)
 
-	err := r.Create(ctx, &role)
+	err := cli.Create(ctx, &role)
 	if err != nil && !apierrs.IsAlreadyExists(err) {
 		log.FromContext(ctx).Error(err, "Unable to create the Role", "object", role)
 		return err
@@ -1105,7 +1151,7 @@ func (r *ClusterReconciler) createPrimaryInstance(
 	if cluster.Spec.Bootstrap != nil &&
 		cluster.Spec.Bootstrap.Recovery != nil {
 		var err error
-		backup, err = r.getOriginBackup(ctx, cluster)
+		backup, err = getOriginBackup(ctx, r.Client, r.Recorder, cluster)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -1219,7 +1265,12 @@ func (r *ClusterReconciler) createPrimaryInstance(
 }
 
 // getOriginBackup gets the backup that is used to bootstrap a new PostgreSQL cluster
-func (r *ClusterReconciler) getOriginBackup(ctx context.Context, cluster *apiv1.Cluster) (*apiv1.Backup, error) {
+func getOriginBackup(
+	ctx context.Context,
+	cli client.Client,
+	recorder record.EventRecorder,
+	cluster *apiv1.Cluster,
+) (*apiv1.Backup, error) {
 	if cluster.Spec.Bootstrap == nil ||
 		cluster.Spec.Bootstrap.Recovery == nil ||
 		cluster.Spec.Bootstrap.Recovery.Backup == nil {
@@ -1231,10 +1282,10 @@ func (r *ClusterReconciler) getOriginBackup(ctx context.Context, cluster *apiv1.
 		Namespace: cluster.Namespace,
 		Name:      cluster.Spec.Bootstrap.Recovery.Backup.Name,
 	}
-	err := r.Get(ctx, backupObjectKey, &backup)
+	err := cli.Get(ctx, backupObjectKey, &backup)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			r.Recorder.Eventf(cluster, "Warning", "ErrorNoBackup",
+			recorder.Eventf(cluster, "Warning", "ErrorNoBackup",
 				"Backup object \"%v/%v\" is missing",
 				backupObjectKey.Namespace, backupObjectKey.Name)
 

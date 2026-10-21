@@ -20,6 +20,8 @@ SPDX-License-Identifier: Apache-2.0
 package specs
 
 import (
+	"slices"
+
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -165,14 +167,49 @@ var _ = Describe("Roles", func() {
 	}
 
 	It("are created with the cluster name for pure k8s", func() {
-		serviceAccount := CreateRole(cluster, nil)
+		serviceAccount := CreateRole(cluster, nil, nil)
 		Expect(serviceAccount.Name).To(Equal(cluster.Name))
 		Expect(serviceAccount.Namespace).To(Equal(cluster.Namespace))
-		Expect(serviceAccount.Rules).To(HaveLen(15))
+		Expect(serviceAccount.Rules).To(HaveLen(13))
+	})
+
+	It("grants no access to backups when the cluster has none", func() {
+		role := CreateRole(cluster, nil, nil)
+		Expect(backupRulesOf(role)).To(BeEmpty())
+	})
+
+	It("grants access only to the active backups of the cluster", func() {
+		role := CreateRole(cluster, nil, []string{"backup-b", "backup-a", "backup-b"})
+		Expect(backupRulesOf(role)).To(ConsistOf(
+			rbacv1.PolicyRule{
+				APIGroups:     []string{"postgresql.cnpg.io"},
+				Resources:     []string{"backups"},
+				Verbs:         []string{"get", "patch"},
+				ResourceNames: []string{"backup-a", "backup-b"},
+			},
+			rbacv1.PolicyRule{
+				APIGroups:     []string{"postgresql.cnpg.io"},
+				Resources:     []string{"backups/status"},
+				Verbs:         []string{"get", "patch", "update"},
+				ResourceNames: []string{"backup-a", "backup-b"},
+			},
+		))
+	})
+
+	It("grants only get on the origin backup", func() {
+		role := CreateRole(cluster, &apiv1.Backup{ObjectMeta: metav1.ObjectMeta{Name: "origin"}}, nil)
+		Expect(backupRulesOf(role)).To(ConsistOf(
+			rbacv1.PolicyRule{
+				APIGroups:     []string{"postgresql.cnpg.io"},
+				Resources:     []string{"backups"},
+				Verbs:         []string{"get"},
+				ResourceNames: []string{"origin"},
+			},
+		))
 	})
 
 	It("should contain every secret of the origin backup and backup configuration of every external cluster", func() {
-		serviceAccount := CreateRole(cluster, &backupOrigin)
+		serviceAccount := CreateRole(cluster, &backupOrigin, nil)
 		Expect(serviceAccount.Name).To(Equal(cluster.Name))
 		Expect(serviceAccount.Namespace).To(Equal(cluster.Namespace))
 		Expect(serviceAccount.Rules[0].ResourceNames).To(ConsistOf("thisTest", "testConfigMapKeySelector"))
@@ -346,7 +383,7 @@ var _ = Describe("Managed Roles", func() {
 	It("gets the list of secrets needed by the managed roles", func() {
 		Expect(managedRolesSecrets(cluster)).
 			To(ConsistOf("my_secret1", "my_secret3"))
-		serviceAccount := CreateRole(cluster, nil)
+		serviceAccount := CreateRole(cluster, nil, nil)
 		Expect(serviceAccount.Name).To(Equal(cluster.Name))
 		Expect(serviceAccount.Namespace).To(Equal(cluster.Namespace))
 		var secretsPolicy rbacv1.PolicyRule
@@ -479,3 +516,14 @@ var _ = Describe("pgbackrest secrets", func() {
 		Expect(secrets).To(ContainElement("pgbr-key"))
 	})
 })
+
+// backupRulesOf returns the rules of the role that cover Backups
+func backupRulesOf(role rbacv1.Role) []rbacv1.PolicyRule {
+	var rules []rbacv1.PolicyRule
+	for _, rule := range role.Rules {
+		if slices.Contains(rule.Resources, "backups") || slices.Contains(rule.Resources, "backups/status") {
+			rules = append(rules, rule)
+		}
+	}
+	return rules
+}

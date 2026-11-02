@@ -31,6 +31,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const reaperTestMode = "CNPG_PGBACKREST_REAPER_TEST"
@@ -43,11 +45,10 @@ func TestOrphansReaper(t *testing.T) {
 
 	// A separate subreaper process exercises Linux adoption without changing
 	// which process receives orphaned children from the rest of the test suite.
-	const prSetChildSubreaper = 36
-	if _, _, errno := syscall.Syscall6(syscall.SYS_PRCTL, prSetChildSubreaper, 1, 0, 0, 0, 0); errno != 0 {
-		t.Fatal(errno)
+	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
+		t.Fatal(err)
 	}
-	_, session, err := readProcessStat("/proc/self/stat")
+	session, err := unix.Getsid(0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,35 +223,5 @@ func TestOrphansReaperHelper(t *testing.T) {
 		os.Exit(23)
 	case "worker-block":
 		time.Sleep(time.Hour)
-	}
-}
-
-func TestReadProcessStat(t *testing.T) {
-	for _, tt := range []struct {
-		name        string
-		stat        string
-		wantName    string
-		wantSession int
-		wantError   bool
-	}{
-		{name: "worker", stat: "42 (pgbackrest) Z 1 40 40 0", wantName: "pgbackrest", wantSession: 40},
-		{name: "parentheses in name", stat: "42 (a (worker)) S 1 40 40 0", wantName: "a (worker)", wantSession: 40},
-		{name: "missing name", stat: "42 pgbackrest Z 1 40 40", wantError: true},
-		{name: "missing session", stat: "42 (pgbackrest) Z 1 40", wantError: true},
-		{name: "invalid session", stat: "42 (pgbackrest) Z 1 40 invalid", wantError: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "stat")
-			if err := os.WriteFile(path, []byte(tt.stat), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			name, session, err := readProcessStat(path)
-			if (err != nil) != tt.wantError {
-				t.Fatalf("error = %v, want error = %v", err, tt.wantError)
-			}
-			if !tt.wantError && (name != tt.wantName || session != tt.wantSession) {
-				t.Fatalf("got (%q, %d), want (%q, %d)", name, session, tt.wantName, tt.wantSession)
-			}
-		})
 	}
 }

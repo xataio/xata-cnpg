@@ -22,15 +22,16 @@ package pgbackrest
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
+	ps "github.com/mitchellh/go-ps"
+	"golang.org/x/sys/unix"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // OrphansReaper collects detached pgBackRest workers adopted by the instance manager.
@@ -41,25 +42,19 @@ func (*OrphansReaper) Start(ctx context.Context) error {
 	if os.Getpid() != 1 {
 		return nil
 	}
-	_, session, err := readProcessStat("/proc/self/stat")
+	session, err := unix.Getsid(0)
 	if err != nil {
 		return err
 	}
 
 	// Polling bounds cleanup work when archiving produces frequent child exits.
 	// The first sweep also collects workers inherited across a manager upgrade.
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	for {
+	wait.UntilWithContext(ctx, func(ctx context.Context) {
 		if err := reapOrphans(session); err != nil {
 			log.FromContext(ctx).Error(err, "while reaping pgbackrest workers, will retry")
 		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-		}
-	}
+	}, 10*time.Second)
+	return nil
 }
 
 func reapOrphans(managerSession int) error {
@@ -91,41 +86,32 @@ func reapOrphans(managerSession int) error {
 }
 
 func reapOrphan(pid, managerSession int) error {
-	name, session, err := readProcessStat(fmt.Sprintf("/proc/%d/stat", pid))
+	process, err := ps.FindProcess(pid)
 	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil || process == nil {
+		return err
+	}
+	if process.Executable() != pgbackrestBinary {
+		return nil
+	}
+	session, err := unix.Getsid(pid)
+	if errors.Is(err, unix.ESRCH) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	// Async pgBackRest workers detach into a new session. Commands and the TLS
-	// server owned by the manager must inherit its session so their Go waiters
-	// retain ownership of their exit status, including across manager upgrades.
-	if name != pgbackrestBinary || session == managerSession {
+	// Async workers detach into a new session. Manager-owned commands and the
+	// TLS server must inherit its session so their Go waiters keep exit status
+	// ownership, including across manager upgrades.
+	if session == managerSession {
 		return nil
 	}
-	var status syscall.WaitStatus
-	_, err = syscall.Wait4(pid, &status, syscall.WNOHANG, nil)
-	if errors.Is(err, syscall.ECHILD) || errors.Is(err, syscall.ESRCH) {
+	_, err = unix.Wait4(pid, nil, unix.WNOHANG, nil)
+	if errors.Is(err, unix.ECHILD) || errors.Is(err, unix.ESRCH) {
 		return nil
 	}
 	return err
-}
-
-func readProcessStat(path string) (name string, session int, err error) {
-	data, err := os.ReadFile(path) //nolint:gosec // Callers use procfs paths for the manager and its children.
-	if err != nil {
-		return "", 0, err
-	}
-	stat := string(data)
-	start, end := strings.IndexByte(stat, '('), strings.LastIndexByte(stat, ')')
-	if start < 0 || end <= start {
-		return "", 0, fmt.Errorf("invalid process stat in %s", path)
-	}
-	fields := strings.Fields(stat[end+1:])
-	if len(fields) < 4 {
-		return "", 0, fmt.Errorf("missing process session in %s", path)
-	}
-	session, err = strconv.Atoi(fields[3])
-	return stat[start+1 : end], session, err
 }

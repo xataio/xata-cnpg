@@ -60,6 +60,7 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/metrics"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/metricserver"
+	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	pg "github.com/xataio/xata-cnpg/pkg/postgres"
 	instancestorage "github.com/xataio/xata-cnpg/pkg/reconciler/instance/storage"
 	"github.com/xataio/xata-cnpg/pkg/versions"
@@ -355,6 +356,11 @@ func runSubCommand( //nolint:gocognit,gocyclo
 
 	if err = mgr.Add(lifecycle.NewPostgresOrphansReaper(instance)); err != nil {
 		contextLogger.Error(err, "unable to create zombie reaper")
+		return err
+	}
+
+	if err = mgr.Add(&pgbackrest.OrphansReaper{}); err != nil {
+		contextLogger.Error(err, "unable to create pgbackrest orphan reaper")
 		return err
 	}
 

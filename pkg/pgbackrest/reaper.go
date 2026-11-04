@@ -94,7 +94,7 @@ func reapChildren(paths []string, managerSession int) error {
 
 func reapOrphan(pid, managerSession int) error {
 	name, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid)) //nolint:gosec // PID comes from procfs children.
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) || errors.Is(err, unix.ESRCH) {
 		return nil
 	}
 	if err != nil {

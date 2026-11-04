@@ -220,8 +220,8 @@ func waitForReaperTestZombie(t *testing.T, pid int) {
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)) //nolint:gosec
 		if err == nil && strings.Contains(string(data), ") Z ") {
-			// Wait until only main thread of Go test binary remains to collect.
-			if tasks, _ := os.ReadDir(fmt.Sprintf("/proc/%d/task", pid)); len(tasks) <= 1 {
+			// A zombie leader is not waitable until its other threads exit.
+			if tasks, err := os.ReadDir(fmt.Sprintf("/proc/%d/task", pid)); err == nil && len(tasks) == 1 {
 				return
 			}
 		}

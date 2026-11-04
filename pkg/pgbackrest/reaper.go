@@ -42,6 +42,14 @@ func (*OrphansReaper) Start(ctx context.Context) error {
 	if os.Getpid() != 1 {
 		return nil
 	}
+	// Kernels without CONFIG_PROC_CHILDREN cannot support the targeted sweep.
+	if _, err := os.Stat("/proc/thread-self/children"); err != nil {
+		log.FromContext(ctx).Warning(
+			"cannot list child processes, detached pgbackrest workers will not be reaped",
+			"error", err,
+		)
+		return nil
+	}
 	session, err := unix.Getsid(0)
 	if err != nil {
 		return err

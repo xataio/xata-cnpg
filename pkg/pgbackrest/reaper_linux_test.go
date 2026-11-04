@@ -94,7 +94,7 @@ func TestOrphansReaper(t *testing.T) {
 	})
 
 	t.Run("other executable", func(t *testing.T) {
-		other := filepath.Join(t.TempDir(), "other-worker")
+		other := filepath.Join(t.TempDir(), "other)worker")
 		if err := os.Symlink(executable, other); err != nil {
 			t.Fatal(err)
 		}

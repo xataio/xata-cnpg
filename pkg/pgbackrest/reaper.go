@@ -22,6 +22,7 @@ package pgbackrest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -29,7 +30,6 @@ import (
 	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
-	ps "github.com/mitchellh/go-ps"
 	"golang.org/x/sys/unix"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
@@ -86,14 +86,14 @@ func reapOrphans(managerSession int) error {
 }
 
 func reapOrphan(pid, managerSession int) error {
-	process, err := ps.FindProcess(pid)
+	name, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid)) //nolint:gosec // PID comes from procfs children.
 	if os.IsNotExist(err) {
 		return nil
 	}
-	if err != nil || process == nil {
+	if err != nil {
 		return err
 	}
-	if process.Executable() != pgbackrestBinary {
+	if strings.TrimSuffix(string(name), "\n") != pgbackrestBinary {
 		return nil
 	}
 	session, err := unix.Getsid(pid)

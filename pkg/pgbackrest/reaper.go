@@ -64,25 +64,32 @@ func reapOrphans(managerSession int) error {
 	if err != nil {
 		return err
 	}
+	return reapChildren(paths, managerSession)
+}
+
+func reapChildren(paths []string, managerSession int) error {
+	var errs []error
 	for _, path := range paths {
 		children, err := os.ReadFile(path) //nolint:gosec // Paths come from the manager's procfs task directory.
 		if os.IsNotExist(err) {
 			continue
 		}
 		if err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 		for _, child := range strings.Fields(string(children)) {
 			pid, err := strconv.Atoi(child)
 			if err != nil {
-				return err
+				errs = append(errs, fmt.Errorf("parse child PID in %s: %w", path, err))
+				continue
 			}
 			if err := reapOrphan(pid, managerSession); err != nil {
-				return err
+				errs = append(errs, fmt.Errorf("reap child %d: %w", pid, err))
 			}
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func reapOrphan(pid, managerSession int) error {

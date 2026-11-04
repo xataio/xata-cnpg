@@ -72,6 +72,10 @@ func TestOrphansReaper(t *testing.T) {
 		}
 	})
 
+	t.Run("continues after errors", func(t *testing.T) {
+		testReaperSweepErrors(t, worker, session)
+	})
+
 	t.Run("managed command", func(t *testing.T) {
 		cmd := reaperTestCommand(worker, "worker")
 		if err := cmd.Start(); err != nil {
@@ -118,6 +122,24 @@ func TestOrphansReaper(t *testing.T) {
 			t.Fatalf("running worker did not survive cleanup: %v", err)
 		}
 	})
+}
+
+func testReaperSweepErrors(t *testing.T, worker string, session int) {
+	t.Helper()
+	pid := startReaperTestOrphan(t, worker, "parent")
+	waitForReaperTestZombie(t, pid)
+	directory := t.TempDir()
+	children := filepath.Join(directory, "children")
+	write(t, children, []byte(fmt.Sprintf("invalid-pid %d", pid)))
+	err := reapChildren([]string{directory, filepath.Join(directory, "missing"), children}, session)
+	var readErr *os.PathError
+	var parseErr *strconv.NumError
+	if !errors.As(err, &readErr) || !errors.As(err, &parseErr) {
+		t.Fatalf("sweep did not report both failures: %v", err)
+	}
+	if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); !os.IsNotExist(err) {
+		t.Fatalf("orphan %d remains after failed inspections: %v", pid, err)
+	}
 }
 
 func TestOrphansReaperStart(t *testing.T) {

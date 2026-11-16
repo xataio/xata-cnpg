@@ -4374,6 +4374,73 @@ spec:
                       - key
                       type: object
                       x-kubernetes-map-type: atomic
+                    walG:
+                      description: |-
+                        A wal-g archive this external cluster writes to. Read-only for
+                        CloudNativePG: usable as a recovery source and as the origin of a
+                        replica cluster that replays the archived WAL.
+                      properties:
+                        backupName:
+                          description: |-
+                            The name of the base backup to restore, as listed by `wal-g backup-list`.
+                            Defaults to LATEST.
+                          type: string
+                        s3:
+                          description: The S3 location of the archive
+                          properties:
+                            accessKeyId:
+                              description: |-
+                                The reference to the access key id. When both static credential
+                                references are absent, wal-g uses the ambient AWS credential chain
+                                (instance profile, IRSA, pod identity).
+                              properties:
+                                key:
+                                  description: The key to select
+                                  type: string
+                                name:
+                                  description: Name of the referent.
+                                  type: string
+                              required:
+                              - key
+                              - name
+                              type: object
+                            endpoint:
+                              description: |-
+                                The S3 endpoint, overriding the automatic endpoint discovery. Required
+                                for non-AWS S3-compatible storage (e.g. MinIO). Passed as AWS_ENDPOINT.
+                              type: string
+                            forcePathStyle:
+                              description: Use path-style bucket addressing (AWS_S3_FORCE_PATH_STYLE)
+                              type: boolean
+                            prefix:
+                              description: |-
+                                The archive prefix, e.g. `s3://bucket` or `s3://bucket/path`. Passed to
+                                wal-g as WALG_S3_PREFIX.
+                              pattern: ^s3://.+
+                              type: string
+                            region:
+                              description: The S3 region, passed as AWS_REGION
+                              type: string
+                            secretAccessKey:
+                              description: The reference to the secret access key
+                              properties:
+                                key:
+                                  description: The key to select
+                                  type: string
+                                name:
+                                  description: Name of the referent.
+                                  type: string
+                              required:
+                              - key
+                              - name
+                              type: object
+                          required:
+                          - prefix
+                          - region
+                          type: object
+                      required:
+                      - s3
+                      type: object
                   required:
                   - name
                   type: object

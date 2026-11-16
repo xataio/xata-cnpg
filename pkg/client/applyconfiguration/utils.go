@@ -256,6 +256,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.UsageSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("VolumeSnapshotConfiguration"):
 		return &apiv1.VolumeSnapshotConfigurationApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("WalGExternalCluster"):
+		return &apiv1.WalGExternalClusterApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("WalGS3"):
+		return &apiv1.WalGS3ApplyConfiguration{}
 
 	}
 	return nil

@@ -62,6 +62,7 @@ import (
 	postgresSpec "github.com/xataio/xata-cnpg/pkg/postgres"
 	"github.com/xataio/xata-cnpg/pkg/system"
 	"github.com/xataio/xata-cnpg/pkg/utils"
+	"github.com/xataio/xata-cnpg/pkg/walg"
 )
 
 var (
@@ -302,6 +303,13 @@ func (info InitInfo) Restore(ctx context.Context, cli client.Client) error {
 			return err
 		}
 		config = conf
+	} else if recoverySource := cluster.GetRecoverySourceWalG(); recoverySource != nil {
+		contextLogger.Info("Restore through wal-g detected", "source", recoverySource.Name)
+		conf, err := info.restoreViaWalG(ctx, cli, cluster, recoverySource)
+		if err != nil {
+			return err
+		}
+		config = conf
 	} else if pluginConfiguration := cluster.GetRecoverySourcePlugin(); pluginConfiguration != nil {
 		contextLogger.Info("Restore through plugin detected, proceeding...")
 		res, err := restoreViaPlugin(ctx, cluster, pluginConfiguration)
@@ -423,6 +431,46 @@ func (info InitInfo) restoreViaPgBackRest(
 	)
 
 	return config, nil
+}
+
+// restoreViaWalG fetches the base backup of a wal-g archive into PGDATA and
+// hands WAL replay to `wal-restore`, which dispatches to wal-g for this
+// cluster. The restore job resolves the archive credentials itself; the
+// instance manager re-resolves them on every reconcile and persists them for
+// `wal-restore` (see walg.WriteEnvFile).
+func (info InitInfo) restoreViaWalG(
+	ctx context.Context,
+	cli client.Client,
+	cluster *apiv1.Cluster,
+	source *apiv1.WalGRecoverySource,
+) (string, error) {
+	if !walg.IsAvailable() {
+		return "", walg.ErrNotAvailable
+	}
+
+	archiveEnv, err := walg.ArchiveEnv(ctx, cli, cluster.Namespace, source.WalG)
+	if err != nil {
+		return "", fmt.Errorf("resolving wal-g archive environment: %w", err)
+	}
+
+	if err := walg.BackupFetch(ctx, walg.ProcessEnv(archiveEnv), info.PgData, source.WalG.BackupName); err != nil {
+		return "", fmt.Errorf("wal-g backup-fetch: %w", err)
+	}
+
+	// A replica cluster must stay in recovery: its override.conf carries the
+	// restore_command and recovery_target_timeline, so nothing is needed here.
+	// A plain recovery promotes once the archive is exhausted.
+	if cluster.IsReplica() {
+		return "", nil
+	}
+
+	restoreCommand := fmt.Sprintf(
+		"/controller/manager wal-restore --log-destination %s/%s.json %%f %%p",
+		postgresSpec.LogPath, postgresSpec.LogFileName)
+	return fmt.Sprintf(
+		"recovery_target_action = promote\nrestore_command = '%s'\n",
+		restoreCommand,
+	), nil
 }
 
 func (info InitInfo) ensureArchiveContainsLastCheckpointRedoWAL(

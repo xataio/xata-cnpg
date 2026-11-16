@@ -713,14 +713,16 @@ func (v *ClusterCustomValidator) validateBootstrapRecoverySource(r *apiv1.Cluste
 	// to be used to recover a data directory
 	if externalCluster.BarmanObjectStore == nil &&
 		externalCluster.PluginConfiguration == nil &&
-		externalCluster.PgBackRest == nil {
+		externalCluster.PgBackRest == nil &&
+		externalCluster.WalG == nil {
 		result = append(
 			result,
 			field.Invalid(
 				field.NewPath("spec", "bootstrap", "recovery", "source"),
 				r.Spec.Bootstrap.Recovery.Source,
 				fmt.Sprintf("External cluster %v cannot be used for recovery: "+
-					"barman, pgBackRest, and CNPG-i plugin configurations are all missing", r.Spec.Bootstrap.Recovery.Source)))
+					"barman, pgBackRest, wal-g, and CNPG-i plugin configurations are all missing",
+					r.Spec.Bootstrap.Recovery.Source)))
 	}
 
 	return result
@@ -1871,12 +1873,33 @@ func (v *ClusterCustomValidator) validateExternalCluster(
 	if externalCluster.ConnectionParameters == nil &&
 		externalCluster.BarmanObjectStore == nil &&
 		externalCluster.PluginConfiguration == nil &&
-		externalCluster.PgBackRest == nil {
+		externalCluster.PgBackRest == nil &&
+		externalCluster.WalG == nil {
 		result = append(result,
 			field.Invalid(
 				path,
 				externalCluster,
-				"one of connectionParameters, plugin, barmanObjectStore, or pgBackRest is required"))
+				"one of connectionParameters, plugin, barmanObjectStore, pgBackRest, or walG is required"))
+	}
+
+	// A wal-g archive is a read-only recovery source with its own layout; it
+	// cannot be combined with another object store on the same entry.
+	if externalCluster.WalG != nil &&
+		(externalCluster.BarmanObjectStore != nil || externalCluster.PgBackRest != nil) {
+		result = append(result,
+			field.Invalid(
+				path.Child("walG"),
+				externalCluster.WalG,
+				"walG cannot be combined with barmanObjectStore or pgBackRest on the same external cluster"))
+	}
+
+	if externalCluster.WalG != nil && externalCluster.WalG.S3.HasStaticCredentials() !=
+		(externalCluster.WalG.S3.AccessKeyID != nil || externalCluster.WalG.S3.SecretAccessKey != nil) {
+		result = append(result,
+			field.Invalid(
+				path.Child("walG", "s3"),
+				externalCluster.WalG.S3,
+				"accessKeyId and secretAccessKey must be set together"))
 	}
 
 	return result

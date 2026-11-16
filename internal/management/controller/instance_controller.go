@@ -64,6 +64,7 @@ import (
 	externalcluster "github.com/xataio/xata-cnpg/pkg/reconciler/replicaclusterswitch"
 	clusterstatus "github.com/xataio/xata-cnpg/pkg/resources/status"
 	"github.com/xataio/xata-cnpg/pkg/system"
+	"github.com/xataio/xata-cnpg/pkg/walg"
 )
 
 const (
@@ -168,6 +169,11 @@ func (r *InstanceReconciler) Reconcile(
 
 	// Reconcile pgbackrest configuration if configured
 	if err := r.reconcilePgBackRestConfig(ctx, cluster); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	// Persist the wal-g archive environment for wal-restore if configured
+	if err := r.reconcileWalGEnv(ctx, cluster); err != nil {
 		return reconcile.Result{}, err
 	}
 
@@ -1104,6 +1110,41 @@ func (r *InstanceReconciler) ensureSuperuserTimeoutProtection(ctx context.Contex
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER ROLE postgres SET %s = 0", param)); err != nil {
 			return fmt.Errorf("setting %s on postgres role: %w", param, err)
 		}
+	}
+
+	return nil
+}
+
+// reconcileWalGEnv resolves the wal-g archive environment (including any
+// static credentials) and persists it on the scratch volume so that
+// `wal-restore`, which has no Kubernetes client, can replay from the archive.
+// Applies to replica clusters sourced from a wal-g archive and to clusters
+// still recovering from one.
+func (r *InstanceReconciler) reconcileWalGEnv(ctx context.Context, cluster *apiv1.Cluster) error {
+	source := cluster.GetReplicaSourceWalG()
+	if source == nil {
+		source = cluster.GetRecoverySourceWalG()
+	}
+	if source == nil {
+		return nil
+	}
+
+	if !walg.IsAvailable() {
+		return clusterstatus.PatchConditionsWithOptimisticLock(ctx, r.client, cluster, metav1.Condition{
+			Type:    string(apiv1.ConditionContinuousArchiving),
+			Status:  metav1.ConditionFalse,
+			Reason:  "WalGBinaryNotFound",
+			Message: "a wal-g archive is configured but the binary is not available in the container image",
+		})
+	}
+
+	archiveEnv, err := walg.ArchiveEnv(ctx, r.GetClient(), cluster.Namespace, source.WalG)
+	if err != nil {
+		return fmt.Errorf("resolving wal-g archive environment: %w", err)
+	}
+
+	if _, err := walg.WriteEnvFile(archiveEnv); err != nil {
+		return fmt.Errorf("writing wal-g archive environment: %w", err)
 	}
 
 	return nil

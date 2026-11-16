@@ -249,7 +249,9 @@ func CreatePostgresVolumeMounts(cluster apiv1.Cluster) []corev1.VolumeMount {
 		},
 	}
 
-	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
+	// pgbackrest and wal-g both spool through /tmp
+	if (cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured()) ||
+		cluster.GetRecoverySourceWalG() != nil || cluster.GetReplicaSourceWalG() != nil {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      "scratch-data",
 			MountPath: "/tmp",

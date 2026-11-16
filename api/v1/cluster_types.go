@@ -2332,6 +2332,12 @@ type ExternalCluster struct {
 	// +optional
 	PgBackRest *PgBackRestExternalCluster `json:"pgBackRest,omitempty"`
 
+	// A wal-g archive this external cluster writes to. Read-only for
+	// CloudNativePG: usable as a recovery source and as the origin of a
+	// replica cluster that replays the archived WAL.
+	// +optional
+	WalG *WalGExternalCluster `json:"walG,omitempty"`
+
 	// The configuration of the plugin that is taking care
 	// of WAL archiving and backups for this external cluster
 	PluginConfiguration *PluginConfiguration `json:"plugin,omitempty"`

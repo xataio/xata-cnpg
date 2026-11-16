@@ -41,6 +41,7 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/local"
 	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
+	"github.com/xataio/xata-cnpg/pkg/walg"
 )
 
 var (
@@ -84,7 +85,7 @@ func NewCmd() *cobra.Command {
 			switch {
 			case errors.Is(err, barmanRestorer.ErrWALNotFound):
 				// Nothing to log here. The failure has already been logged.
-			case errors.Is(err, pgbackrest.ErrWALNotFound):
+			case errors.Is(err, pgbackrest.ErrWALNotFound), errors.Is(err, walg.ErrWALNotFound):
 				// Normal end-of-archive condition, already logged at debug
 				// level. PostgreSQL uses the failure to stop recovery or
 				// fall back to streaming replication.
@@ -152,6 +153,12 @@ func run(ctx context.Context, pgData string, podName string, args []string) erro
 	// during promotion.
 	if shouldRestoreViaPgBackRest(cluster, podName) {
 		return restoreWALViaPgBackRest(ctx, cluster, walName, destinationPath)
+	}
+
+	// Replay from a wal-g archive: the designated primary of a replica cluster
+	// sourced from one, or a cluster still recovering from one.
+	if walGSource(cluster, podName) != nil {
+		return restoreWALViaWalG(ctx, walName, destinationPath)
 	}
 
 	recoverClusterName, recoverEnv, barmanConfiguration, err := GetRecoverConfiguration(cluster, podName)
@@ -394,6 +401,48 @@ func mergeEnv(env []string, incomingEnv []string) {
 }
 
 // GetRecoverConfiguration get the appropriate recover Configuration for a given cluster
+// walGSource returns the wal-g archive this pod should replay from, or nil.
+// Only the designated primary of a replica cluster replays from the external
+// archive; its standbys stream from it. During bootstrap recovery every
+// instance replays from the recovery source.
+func walGSource(cluster *apiv1.Cluster, podName string) *apiv1.WalGRecoverySource {
+	if cluster.IsReplica() {
+		if cluster.Status.CurrentPrimary != podName {
+			return nil
+		}
+		return cluster.GetReplicaSourceWalG()
+	}
+	return cluster.GetRecoverySourceWalG()
+}
+
+// restoreWALViaWalG fetches a single WAL segment (or timeline history file)
+// from the wal-g archive, using the environment the instance manager persisted
+// at its last reconcile. wal-g has no spool of its own; segments are fetched
+// one at a time as PostgreSQL asks for them.
+func restoreWALViaWalG(ctx context.Context, walName, destinationPath string) error {
+	contextLog := log.FromContext(ctx)
+	startTime := time.Now()
+
+	archiveEnv, err := walg.LoadEnvFile()
+	if err != nil {
+		return fmt.Errorf("wal-g archive environment not available yet: %w", err)
+	}
+
+	if err := walg.WalFetch(ctx, walg.ProcessEnv(archiveEnv), walName, destinationPath); err != nil {
+		if errors.Is(err, walg.ErrWALNotFound) {
+			contextLog.Debug("WAL file not found in the wal-g archive", "walName", walName)
+		}
+		return err
+	}
+
+	contextLog.Info("Restored WAL file from wal-g archive",
+		"walName", walName,
+		"startTime", startTime,
+		"endTime", time.Now(),
+		"elapsedWalTime", time.Since(startTime))
+	return nil
+}
+
 func GetRecoverConfiguration(
 	cluster *apiv1.Cluster,
 	podName string,

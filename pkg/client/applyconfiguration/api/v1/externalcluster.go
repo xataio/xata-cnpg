@@ -38,6 +38,10 @@ type ExternalClusterApplyConfiguration struct {
 	BarmanObjectStore *api.BarmanObjectStoreConfiguration `json:"barmanObjectStore,omitempty"`
 	// The pgbackrest configuration for this external cluster (repository and options)
 	PgBackRest *PgBackRestExternalClusterApplyConfiguration `json:"pgBackRest,omitempty"`
+	// A wal-g archive this external cluster writes to. Read-only for
+	// CloudNativePG: usable as a recovery source and as the origin of a
+	// replica cluster that replays the archived WAL.
+	WalG *WalGExternalClusterApplyConfiguration `json:"walG,omitempty"`
 	// The configuration of the plugin that is taking care
 	// of WAL archiving and backups for this external cluster
 	PluginConfiguration *PluginConfigurationApplyConfiguration `json:"plugin,omitempty"`
@@ -116,6 +120,14 @@ func (b *ExternalClusterApplyConfiguration) WithBarmanObjectStore(value api.Barm
 // If called multiple times, the PgBackRest field is set to the value of the last call.
 func (b *ExternalClusterApplyConfiguration) WithPgBackRest(value *PgBackRestExternalClusterApplyConfiguration) *ExternalClusterApplyConfiguration {
 	b.PgBackRest = value
+	return b
+}
+
+// WithWalG sets the WalG field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the WalG field is set to the value of the last call.
+func (b *ExternalClusterApplyConfiguration) WithWalG(value *WalGExternalClusterApplyConfiguration) *ExternalClusterApplyConfiguration {
+	b.WalG = value
 	return b
 }
 

@@ -403,7 +403,12 @@ func (info InitInfo) restoreViaPgBackRest(
 		}
 	}
 
-	if err := pgbackrest.Restore(ctx, recoverySource.StanzaName, info.PgData, backupLabel); err != nil {
+	roleARN, err := pgbackrest.RepositoryRoleARN(recoverySource.Repository)
+	if err != nil {
+		return "", err
+	}
+
+	if err := pgbackrest.Restore(ctx, recoverySource.StanzaName, info.PgData, backupLabel, roleARN); err != nil {
 		return "", fmt.Errorf("pgbackrest restore: %w", err)
 	}
 
@@ -413,10 +418,7 @@ func (info InitInfo) restoreViaPgBackRest(
 	// removes restore_command from postgresql.auto.conf, and
 	// writeRecoveryConfiguration empties override.conf). We must return
 	// them here so they end up in custom.conf.
-	restoreCommand := fmt.Sprintf(
-		"pgbackrest --config=%s --stanza=%s archive-get %%f \"%%p\"",
-		pgbackrest.ConfigFilePath, recoverySource.StanzaName,
-	)
+	restoreCommand := pgbackrest.ArchiveGetCommand(recoverySource.StanzaName, roleARN)
 	config := fmt.Sprintf(
 		"recovery_target_action = promote\nrestore_command = '%s'\n",
 		restoreCommand,

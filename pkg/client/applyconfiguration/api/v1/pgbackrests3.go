@@ -32,6 +32,10 @@ type PgBackRestS3ApplyConfiguration struct {
 	// backward compatibility. Auto retrieves temporary credentials from the
 	// instance metadata service; it does not select web-id or pod-id.
 	KeyType *string `json:"keyType,omitempty"`
+	// RoleARN overrides AWS_ROLE_ARN for the pgbackrest commands that read
+	// this repository. Requires keyType web-id. Only honoured on the
+	// repository of an external cluster used for recovery.
+	RoleARN *string `json:"roleARN,omitempty"`
 }
 
 // PgBackRestS3ApplyConfiguration constructs a declarative configuration of the PgBackRestS3 type for use with
@@ -93,5 +97,13 @@ func (b *PgBackRestS3ApplyConfiguration) WithInheritFromIAMRole(value bool) *PgB
 // If called multiple times, the KeyType field is set to the value of the last call.
 func (b *PgBackRestS3ApplyConfiguration) WithKeyType(value string) *PgBackRestS3ApplyConfiguration {
 	b.KeyType = &value
+	return b
+}
+
+// WithRoleARN sets the RoleARN field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RoleARN field is set to the value of the last call.
+func (b *PgBackRestS3ApplyConfiguration) WithRoleARN(value string) *PgBackRestS3ApplyConfiguration {
+	b.RoleARN = &value
 	return b
 }

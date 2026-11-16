@@ -26,7 +26,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
@@ -187,9 +189,53 @@ func (e *CommandError) Error() string {
 	return fmt.Sprintf("pgbackrest %s failed (exit code %d): %s", e.Command, e.ExitCode, e.Stderr)
 }
 
+// roleARNPattern matches the RoleARN CRD pattern. The value goes into the
+// restore_command shell string, so it is checked again here.
+var roleARNPattern = regexp.MustCompile(`^arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$`)
+
+// RepositoryRoleARN returns the role ARN set on an S3 repository, or "" when
+// there is none.
+func RepositoryRoleARN(repo *apiv1.PgBackRestRepository) (string, error) {
+	if repo == nil || repo.S3 == nil || repo.S3.RoleARN == "" {
+		return "", nil
+	}
+	if !roleARNPattern.MatchString(repo.S3.RoleARN) {
+		return "", fmt.Errorf("invalid S3 role ARN %q", repo.S3.RoleARN)
+	}
+	return repo.S3.RoleARN, nil
+}
+
+// roleARNEnv returns the environment entries that make pgbackrest assume
+// roleARN, or nil when it is empty.
+func roleARNEnv(roleARN string) []string {
+	if roleARN == "" {
+		return nil
+	}
+	return []string{"AWS_ROLE_ARN=" + roleARN}
+}
+
+// ArchiveGetCommand returns the restore_command that fetches WAL from the
+// stanza. A non-empty roleARN must come from RepositoryRoleARN.
+func ArchiveGetCommand(stanzaName, roleARN string) string {
+	command := fmt.Sprintf(
+		"pgbackrest --config=%s --stanza=%s archive-get %%f \"%%p\"",
+		ConfigFilePath, stanzaName,
+	)
+	if env := roleARNEnv(roleARN); env != nil {
+		command = strings.Join(env, " ") + " " + command
+	}
+	return command
+}
+
 // runPgBackRest executes a pgbackrest command with the given arguments.
 // It captures stderr and maps exit codes to appropriate error types.
 func runPgBackRest(ctx context.Context, args ...string) error {
+	return runPgBackRestWithEnv(ctx, nil, args...)
+}
+
+// runPgBackRestWithEnv is runPgBackRest with extra environment entries that
+// override the inherited ones.
+func runPgBackRestWithEnv(ctx context.Context, env []string, args ...string) error {
 	contextLog := log.FromContext(ctx)
 
 	// Prepend the config file flag
@@ -198,6 +244,9 @@ func runPgBackRest(ctx context.Context, args ...string) error {
 	contextLog.Debug("Running pgbackrest command", "args", fullArgs)
 
 	cmd := exec.CommandContext(ctx, pgbackrestBinary, fullArgs...) // #nosec G204
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
@@ -265,17 +314,21 @@ func Backup(ctx context.Context, stanzaName string, backupType string, annotatio
 }
 
 // Restore restores a PostgreSQL data directory from the pgbackrest repository.
-func Restore(ctx context.Context, stanzaName string, pgDataPath string, backupLabel string) error {
+// A non-empty roleARN overrides AWS_ROLE_ARN.
+func Restore(ctx context.Context, stanzaName, pgDataPath, backupLabel, roleARN string) error {
 	contextLog := log.FromContext(ctx)
-	contextLog.Info("Starting pgbackrest restore",
-		"stanza", stanzaName, "pgDataPath", pgDataPath, "backupLabel", backupLabel)
+	logArgs := []any{"stanza", stanzaName, "pgDataPath", pgDataPath, "backupLabel", backupLabel}
+	if roleARN != "" {
+		logArgs = append(logArgs, "roleARN", roleARN)
+	}
+	contextLog.Info("Starting pgbackrest restore", logArgs...)
 
 	args := []string{"--stanza=" + stanzaName, "restore", "--pg1-path=" + pgDataPath}
 	if backupLabel != "" {
 		args = append(args, "--set="+backupLabel)
 	}
 
-	return runPgBackRest(ctx, args...)
+	return runPgBackRestWithEnv(ctx, roleARNEnv(roleARN), args...)
 }
 
 // ArchiveGet retrieves a WAL file from the pgbackrest repository.

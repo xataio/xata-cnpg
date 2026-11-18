@@ -19,10 +19,6 @@ SPDX-License-Identifier: Apache-2.0
 
 package logpipe
 
-import (
-	"github.com/cloudnative-pg/machinery/pkg/log"
-)
-
 const (
 	logRecordKey = "record"
 )
@@ -38,5 +34,5 @@ type LogRecordWriter struct{}
 
 // Write writes the PostgreSQL log record to the instance manager logger
 func (writer *LogRecordWriter) Write(record NamedRecord) {
-	log.WithName(record.GetName()).Info(logRecordKey, logRecordKey, record)
+	writeLogLine(record.GetName(), logRecordKey, logField{logRecordKey, record})
 }

@@ -20,9 +20,17 @@ SPDX-License-Identifier: Apache-2.0
 package pgbackrest
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"sigs.k8s.io/yaml"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 )
@@ -385,5 +393,149 @@ func TestClassifyExitCode(t *testing.T) {
 				t.Errorf("expected %q, got %q", tt.expected, got)
 			}
 		})
+	}
+}
+
+const testRoleARN = "arn:aws:iam::123456789012:role/cluster-cnpg-backups-restore"
+
+func TestRepositoryRoleARN(t *testing.T) {
+	tests := []struct {
+		name    string
+		repo    *apiv1.PgBackRestRepository
+		want    string
+		wantErr bool
+	}{
+		{name: "nil repository"},
+		{name: "gcs", repo: &apiv1.PgBackRestRepository{GCS: &apiv1.PgBackRestGCS{Bucket: "b"}}},
+		{name: "s3 without role", repo: &apiv1.PgBackRestRepository{S3: &apiv1.PgBackRestS3{Bucket: "b"}}},
+		{
+			name: "s3 with role",
+			repo: &apiv1.PgBackRestRepository{S3: &apiv1.PgBackRestS3{RoleARN: testRoleARN}},
+			want: testRoleARN,
+		},
+		{
+			name: "role with a path",
+			repo: &apiv1.PgBackRestRepository{S3: &apiv1.PgBackRestS3{
+				RoleARN: "arn:aws-us-gov:iam::123456789012:role/a/b/name+=,.@_-",
+			}},
+			want: "arn:aws-us-gov:iam::123456789012:role/a/b/name+=,.@_-",
+		},
+		{
+			name:    "shell metacharacters",
+			repo:    &apiv1.PgBackRestRepository{S3: &apiv1.PgBackRestS3{RoleARN: testRoleARN + "'; touch /tmp/x"}},
+			wantErr: true,
+		},
+		{
+			name:    "not a role",
+			repo:    &apiv1.PgBackRestRepository{S3: &apiv1.PgBackRestS3{RoleARN: "arn:aws:iam::123456789012:user/x"}},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := RepositoryRoleARN(tt.repo)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestArchiveGetCommand(t *testing.T) {
+	want := "pgbackrest --config=" + ConfigFilePath + " --stanza=src archive-get %f \"%p\""
+	if got := ArchiveGetCommand("src", ""); got != want {
+		t.Errorf("without role: got %q, want %q", got, want)
+	}
+	if got := ArchiveGetCommand("src", testRoleARN); got != "AWS_ROLE_ARN="+testRoleARN+" "+want {
+		t.Errorf("with role: got %q", got)
+	}
+}
+
+// fakePgBackRest puts a pgbackrest on PATH that records AWS_ROLE_ARN and its
+// arguments, and sets the inherited AWS_ROLE_ARN to podRole.
+func fakePgBackRest(t *testing.T) (outFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	outFile = filepath.Join(dir, "out")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$AWS_ROLE_ARN\" \"$@\" > " + outFile + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "pgbackrest"), []byte(script), 0o700); err != nil { //nolint:gosec
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("AWS_ROLE_ARN", "pod-role")
+	return outFile
+}
+
+func readLines(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path) //nolint:gosec
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+}
+
+func TestRestore_RoleARN(t *testing.T) {
+	for _, tt := range []struct{ roleARN, want string }{
+		{roleARN: "", want: "pod-role"},
+		{roleARN: testRoleARN, want: testRoleARN},
+	} {
+		out := fakePgBackRest(t)
+		if err := Restore(context.Background(), "src", "/pgdata", "", tt.roleARN); err != nil {
+			t.Fatal(err)
+		}
+		lines := readLines(t, out)
+		if lines[0] != tt.want {
+			t.Errorf("roleARN %q: pgbackrest saw AWS_ROLE_ARN %q, want %q", tt.roleARN, lines[0], tt.want)
+		}
+		if !strings.Contains(strings.Join(lines[1:], " "), "--stanza=src restore") {
+			t.Errorf("unexpected args %q", lines[1:])
+		}
+	}
+}
+
+// TestArchiveGetCommand_Shell runs the restore_command through sh, the way
+// Postgres does, after substituting %f and %p.
+func TestArchiveGetCommand_Shell(t *testing.T) {
+	for _, tt := range []struct{ roleARN, want string }{
+		{roleARN: "", want: "pod-role"},
+		{roleARN: testRoleARN, want: testRoleARN},
+	} {
+		out := fakePgBackRest(t)
+		command := ArchiveGetCommand("src", tt.roleARN)
+		command = strings.NewReplacer("%f", "000000010000000000000001", "%p", "pg_wal/RECOVERYXLOG").Replace(command)
+		if output, err := exec.Command("/bin/sh", "-c", command).CombinedOutput(); err != nil { //nolint:gosec
+			t.Fatalf("%v: %s", err, output)
+		}
+		lines := readLines(t, out)
+		want := []string{
+			tt.want, "--config=" + ConfigFilePath, "--stanza=src", "archive-get",
+			"000000010000000000000001", "pg_wal/RECOVERYXLOG",
+		}
+		if strings.Join(lines, "|") != strings.Join(want, "|") {
+			t.Errorf("roleARN %q: got %q, want %q", tt.roleARN, lines, want)
+		}
+	}
+}
+
+// TestRoleARNPatternMatchesCRD keeps roleARNPattern equal to the RoleARN
+// kubebuilder pattern, which cannot reference a Go constant.
+func TestRoleARNPatternMatchesCRD(t *testing.T) {
+	data, err := os.ReadFile("../../config/crd/bases/postgresql.cnpg.io_clusters.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var crd apiextensionsv1.CustomResourceDefinition
+	if err := yaml.Unmarshal(data, &crd); err != nil {
+		t.Fatal(err)
+	}
+	s3 := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"].
+		Properties["externalClusters"].Items.Schema.Properties["pgBackRest"].
+		Properties["repository"].Properties["s3"]
+	if got := s3.Properties["roleARN"].Pattern; got != roleARNPattern.String() {
+		t.Errorf("CRD pattern %q differs from roleARNPattern %q", got, roleARNPattern.String())
 	}
 }

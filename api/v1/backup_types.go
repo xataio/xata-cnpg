@@ -165,6 +165,7 @@ const (
 )
 
 // PgBackRestConfiguration defines the backup configuration using pgbackrest.
+// +kubebuilder:validation:XValidation:rule="!has(self.repository.s3) || !has(self.repository.s3.roleARN)",message="roleARN is only supported on external cluster repositories"
 type PgBackRestConfiguration struct {
 	Repository *PgBackRestRepository `json:"repository"`
 	Options    *PgBackRestOptions    `json:"options,omitempty"`
@@ -209,6 +210,7 @@ type PgBackRestCipher struct {
 
 // PgBackRestS3 defines the S3-compatible storage configuration for pgbackrest.
 // +kubebuilder:validation:XValidation:rule="has(self.accessKeyId) == has(self.secretAccessKey)",message="accessKeyId and secretAccessKey must be specified together"
+// +kubebuilder:validation:XValidation:rule="!has(self.roleARN) || (has(self.keyType) && self.keyType == 'web-id')",message="roleARN requires keyType web-id"
 type PgBackRestS3 struct {
 	// The S3 bucket name
 	Bucket string `json:"bucket"`
@@ -237,6 +239,12 @@ type PgBackRestS3 struct {
 	// +optional
 	// +kubebuilder:validation:Enum=shared;auto;web-id;pod-id
 	KeyType string `json:"keyType,omitempty"`
+	// RoleARN overrides AWS_ROLE_ARN for the pgbackrest commands that read
+	// this repository. Requires keyType web-id. Only honoured on the
+	// repository of an external cluster used for recovery.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$`
+	RoleARN string `json:"roleARN,omitempty"`
 }
 
 // PgBackRestRetention defines the backup retention policy for pgbackrest.

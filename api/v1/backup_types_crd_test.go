@@ -120,9 +120,32 @@ var _ = Describe("PgBackRest repository CRD schema", func() {
 		))
 		Expect(keyType.Default).To(BeNil())
 
-		Expect(s3.XValidations).To(HaveLen(1))
+		Expect(s3.Properties["roleARN"].Pattern).To(Equal(
+			`^arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$`))
+
+		Expect(s3.XValidations).To(HaveLen(2))
 		Expect(s3.XValidations[0].Rule).To(Equal(
 			"has(self.accessKeyId) == has(self.secretAccessKey)"))
+		Expect(s3.XValidations[1].Rule).To(Equal(
+			"!has(self.roleARN) || (has(self.keyType) && self.keyType == 'web-id')"))
+	})
+
+	It("rejects roleARN on the cluster's own repository", func() {
+		data, err := os.ReadFile("../../config/crd/bases/postgresql.cnpg.io_clusters.yaml")
+		Expect(err).ToNot(HaveOccurred())
+
+		var crd apiextensionsv1.CustomResourceDefinition
+		Expect(yaml.Unmarshal(data, &crd)).To(Succeed())
+
+		spec := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+		pgBackRest := spec.Properties["backup"].Properties["pgBackRest"]
+		Expect(pgBackRest.XValidations).To(HaveLen(1))
+		Expect(pgBackRest.XValidations[0].Rule).To(Equal(
+			"!has(self.repository.s3) || !has(self.repository.s3.roleARN)"))
+
+		external := spec.Properties["externalClusters"].Items.Schema.Properties["pgBackRest"]
+		Expect(external.XValidations).To(BeEmpty())
+		Expect(external.Properties["repository"].Properties["s3"].Properties).To(HaveKey("roleARN"))
 	})
 })
 

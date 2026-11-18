@@ -110,13 +110,22 @@ var _ = Describe("databaseSnapshotter methods test", func() {
 		})
 
 		It("should execute the query properly", func(ctx SpecContext) {
+			// Each user-supplied query is bracketed by
+			// SET search_path TO "$user", public / RESET search_path so
+			// the connection-level pg_catalog pin does not affect user DDL.
+			mock.ExpectExec(`SET search_path TO "$user", public`).
+				WillReturnResult(sqlmock.NewResult(0, 0))
 			mock.ExpectExec(createQuery).WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectExec(`RESET search_path`).
+				WillReturnResult(sqlmock.NewResult(0, 0))
 			err := ds.executePostImportQueries(ctx, fp, "test")
 			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("should return any error encountered", func(ctx SpecContext) {
 			expectedErr := fmt.Errorf("will fail")
+			mock.ExpectExec(`SET search_path TO "$user", public`).
+				WillReturnResult(sqlmock.NewResult(0, 0))
 			mock.ExpectExec(createQuery).WillReturnError(expectedErr)
 			err := ds.executePostImportQueries(ctx, fp, "test")
 			Expect(err).To(Equal(expectedErr))

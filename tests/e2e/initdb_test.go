@@ -219,6 +219,70 @@ var _ = Describe("InitDB settings", Label(tests.LabelSmoke, tests.LabelBasic), f
 		})
 	})
 
+	// Operator-issued `CREATE EXTENSION` must land in `public` even when a
+	// tenant has pre-created a schema matching the operator's role name.
+	Context("extension creation schema is not redirected by tenant-owned $user schema", func() {
+		const (
+			clusterName    = "p-extension-schema"
+			clusterFixture = fixturesInitdbDir + "/cluster-postinit-extension-schema.yaml.template"
+		)
+
+		var namespace string
+
+		It("installs pg_stat_statements into public, not into the tenant-created postgres schema", func() {
+			const namespacePrefix = "initdb-extension-schema"
+			var err error
+			namespace, err = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
+			Expect(err).ToNot(HaveOccurred())
+
+			AssertCreateCluster(namespace, clusterName, clusterFixture, env)
+
+			primary, err := clusterutils.GetPrimary(env.Ctx, env.Client, namespace, clusterName)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("confirming the tenant-owned postgres schema exists", func() {
+				stdout, _, err := exec.QueryInInstancePod(
+					env.Ctx, env.Client, env.Interface, env.RestClientConfig,
+					exec.PodLocator{
+						Namespace: namespace,
+						PodName:   primary.Name,
+					}, "app",
+					"SELECT pg_catalog.pg_get_userbyid(nspowner) FROM pg_catalog.pg_namespace "+
+						"WHERE nspname = 'postgres'")
+				Expect(err).ToNot(HaveOccurred())
+				Expect(strings.TrimSpace(stdout)).To(Equal("app"))
+			})
+
+			By("waiting for reconcileExtensions to install pg_stat_statements", func() {
+				Eventually(func() (string, error) {
+					stdout, _, err := exec.QueryInInstancePod(
+						env.Ctx, env.Client, env.Interface, env.RestClientConfig,
+						exec.PodLocator{
+							Namespace: namespace,
+							PodName:   primary.Name,
+						}, "app",
+						"SELECT pg_catalog.count(*)::text FROM pg_catalog.pg_extension "+
+							"WHERE extname = 'pg_stat_statements'")
+					return strings.TrimSpace(stdout), err
+				}, "60s", "5s").Should(Equal("1"))
+			})
+
+			By("verifying pg_stat_statements landed in public, not in the postgres schema", func() {
+				stdout, _, err := exec.QueryInInstancePod(
+					env.Ctx, env.Client, env.Interface, env.RestClientConfig,
+					exec.PodLocator{
+						Namespace: namespace,
+						PodName:   primary.Name,
+					}, "app",
+					"SELECT n.nspname FROM pg_catalog.pg_extension e "+
+						"JOIN pg_catalog.pg_namespace n ON e.extnamespace = n.oid "+
+						"WHERE e.extname = 'pg_stat_statements'")
+				Expect(err).ToNot(HaveOccurred())
+				Expect(strings.TrimSpace(stdout)).To(Equal("public"))
+			})
+		})
+	})
+
 	Context("custom default locale", func() {
 		const (
 			clusterName        = "p-locale"

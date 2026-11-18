@@ -75,13 +75,11 @@ func NewJSONLineLogPipe(fileName string) *LineLogPipe {
 
 // NewRawLineLogPipe returns a logPipe for raw output
 func NewRawLineLogPipe(fileName, name string) *LineLogPipe {
-	logger := log.WithName(name).WithValues("source", fileName)
-
 	return &LineLogPipe{
 		fileName: fileName,
 		handler: func(line []byte) {
 			if len(line) != 0 {
-				logger.Info(string(line))
+				writeLogLine(name, string(line), logField{"source", fileName})
 			}
 		},
 		initialized: concurrency.NewExecuted(),

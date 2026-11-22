@@ -178,6 +178,12 @@ type Instance struct {
 	// pgVersion is the PostgreSQL version
 	pgVersion *semver.Version
 
+	// supportsOutputPlugins caches if postgres has output_plugin_libraries
+	supportsOutputPlugins *bool
+
+	// outputPluginsCheck is the state of the check of the running server
+	outputPluginsCheck outputPluginsCheck
+
 	// instanceCommandChan is a channel for requesting actions on the instance
 	instanceCommandChan chan InstanceCommand
 

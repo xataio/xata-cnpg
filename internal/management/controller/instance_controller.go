@@ -261,6 +261,10 @@ func (r *InstanceReconciler) Reconcile(
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 
+	// A running server can miss the reload that loads the output plugin default
+	outputPluginsReload := r.instance.OutputPluginsNeedReload(ctx)
+	reloadNeeded = reloadNeeded || outputPluginsReload
+
 	restartedInplace, err := r.restartPrimaryInplaceIfRequested(ctx, cluster)
 	if err != nil {
 		return reconcile.Result{}, err
@@ -283,6 +287,9 @@ func (r *InstanceReconciler) Reconcile(
 		}
 		if err = r.instance.Reload(ctx); err != nil {
 			return reconcile.Result{}, fmt.Errorf("while reloading the instance: %w", err)
+		}
+		if outputPluginsReload {
+			r.instance.OutputPluginsReloadSent()
 		}
 		if err = r.processConfigReloadAndManageRestart(ctx, cluster); err != nil {
 			return reconcile.Result{}, fmt.Errorf("cannot apply new PostgreSQL configuration: %w", err)

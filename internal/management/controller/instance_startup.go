@@ -142,6 +142,11 @@ func (r *InstanceReconciler) verifyPgDataCoherenceForPrimary(ctx context.Context
 			return fmt.Errorf("while executing pg_rewind: %w", err)
 		}
 
+		// pg_rewind copies custom.conf from the new primary, which can run another minor
+		if err := r.instance.RestoreDefaultOutputPlugins(ctx); err != nil {
+			return fmt.Errorf("while restoring the output plugin default after pg_rewind: %w", err)
+		}
+
 		// Now I can demote myself
 		return r.instance.Demote(ctx, cluster)
 	}

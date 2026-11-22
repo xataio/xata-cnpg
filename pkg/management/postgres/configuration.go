@@ -84,6 +84,7 @@ func (instance *Instance) RefreshConfigurationFilesFromCluster(
 	if err != nil {
 		return false, fmt.Errorf("creating postgresql configuration: %w", err)
 	}
+	postgresConfiguration = instance.addDefaultOutputPlugins(ctx, postgresConfiguration)
 	postgresConfigurationChanged, err := InstallPgDataFileContent(
 		ctx,
 		instance.PgData,

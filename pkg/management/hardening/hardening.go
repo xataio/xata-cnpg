@@ -51,6 +51,9 @@ const (
 	// It needs Linux 5.19.
 	Landlock Feature = "landlock"
 
+	// LandlockExec limits execve to the image and the instance manager.
+	LandlockExec Feature = "landlock-exec"
+
 	// SeccompLog runs [Seccomp] in audit mode. The kernel logs matching
 	// system calls and allows them.
 	SeccompLog Feature = "seccomp-log"
@@ -64,6 +67,7 @@ var features = [...]Feature{
 	NoDumpable,
 	MDWE,
 	Landlock,
+	LandlockExec,
 	SeccompLog,
 	Seccomp,
 }

@@ -74,6 +74,8 @@ func apply(f Feature) error {
 		return applyMDWE()
 	case Landlock:
 		return applyLandlock()
+	case LandlockExec:
+		return applyLandlockExec()
 	case SeccompLog:
 		return applySeccomp(true)
 	case Seccomp:

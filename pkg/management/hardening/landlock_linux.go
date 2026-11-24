@@ -45,6 +45,8 @@ const (
 			llsys.AccessFSMakeReg|llsys.AccessFSMakeSock|llsys.AccessFSMakeFifo|
 			llsys.AccessFSMakeSym|llsys.AccessFSRefer)
 
+	accessExecute = landlock.AccessFSSet(llsys.AccessFSExecute)
+
 	// handledFS is every filesystem right up to Landlock ABI 5, without
 	// execute. No rule grants the creation of device nodes or an ioctl on a
 	// device, so the process tree has neither.
@@ -193,5 +195,21 @@ func applyLandlock() error {
 		landlock.PathAccess(accessRead, slices.Concat(readOnlyDirs, tokens)...).IgnoreIfMissing(),
 		landlock.PathAccess(accessRead|accessWrite, writableDirs...).IgnoreIfMissing(),
 		landlock.PathAccess(accessRead|accessWriteFile, writableFileDirs...),
+	)
+}
+
+// applyLandlockExec limits program execution to the image and the instance
+// manager. Executable memory mappings are outside this policy's scope.
+func applyLandlockExec() error {
+	if err := requireLandlockABI(1); err != nil {
+		return err
+	}
+	if err := requireManagerDir(); err != nil {
+		return err
+	}
+
+	return landlock.Config{HandledAccessFS: accessExecute}.RestrictPaths(
+		landlock.PathAccess(accessExecute, "/usr", "/bin", "/sbin", "/lib", "/lib64", "/opt").IgnoreIfMissing(),
+		landlock.PathAccess(accessExecute, managerDir),
 	)
 }

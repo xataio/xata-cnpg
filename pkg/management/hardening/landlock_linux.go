@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/landlock-lsm/go-landlock/landlock"
@@ -212,4 +213,45 @@ func applyLandlockExec() error {
 		landlock.PathAccess(accessExecute, "/usr", "/bin", "/sbin", "/lib", "/lib64", "/opt").IgnoreIfMissing(),
 		landlock.PathAccess(accessExecute, managerDir),
 	)
+}
+
+// tcpConnectPorts reads the port list of [TCPConnectEnvVar].
+func tcpConnectPorts(list string) ([]uint16, error) {
+	var ports []uint16
+	for field := range strings.SplitSeq(list, ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		port, err := strconv.ParseUint(field, 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("invalid port in %s: %w", TCPConnectEnvVar, err)
+		}
+		ports = append(ports, uint16(port))
+	}
+	return ports, nil
+}
+
+// applyLandlockNet limits the TCP ports. The process tree can bind only the
+// PostgreSQL port. It does not cover UDP, and seccomp must deny Multipath
+// TCP sockets, which Landlock does not see.
+func applyLandlockNet() error {
+	if err := requireLandlockABI(4); err != nil {
+		return err
+	}
+	ports, err := tcpConnectPorts(os.Getenv(TCPConnectEnvVar))
+	if err != nil {
+		return err
+	}
+
+	handled := landlock.AccessNetSet(llsys.AccessNetBindTCP)
+	rules := []landlock.Rule{landlock.BindTCP(postgres.ServerPort)}
+	if len(ports) > 0 {
+		handled |= landlock.AccessNetSet(llsys.AccessNetConnectTCP)
+		for _, port := range ports {
+			rules = append(rules, landlock.ConnectTCP(port))
+		}
+	}
+
+	return landlock.Config{HandledAccessNet: handled}.RestrictNet(rules...)
 }

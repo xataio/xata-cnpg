@@ -79,3 +79,18 @@ func TestTokenDirs(t *testing.T) {
 		t.Error("tokenDirs() accepted the directory of the ServiceAccount token")
 	}
 }
+
+func TestTCPConnectPorts(t *testing.T) {
+	ports, err := tcpConnectPorts(" 5432, 443,,8010,")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []uint16{5432, 443, 8010}; !slices.Equal(ports, want) {
+		t.Errorf("got %v, want %v", ports, want)
+	}
+	for _, list := range []string{"http", "70000", "-1"} {
+		if _, err := tcpConnectPorts(list); err == nil {
+			t.Errorf("tcpConnectPorts(%q) returned no error", list)
+		}
+	}
+}

@@ -33,6 +33,11 @@ import (
 // the features to enable.
 const EnvVar = "CNPG_INSTANCE_HARDENING"
 
+// TCPConnectEnvVar is the environment variable that holds the
+// comma-separated TCP ports that the PostgreSQL process tree can connect
+// to. When it is empty, [LandlockNet] restricts only bind.
+const TCPConnectEnvVar = "CNPG_INSTANCE_HARDENING_TCP_CONNECT"
+
 // A Feature is one restriction.
 type Feature string
 
@@ -54,6 +59,10 @@ const (
 	// LandlockExec limits execve to the image and the instance manager.
 	LandlockExec Feature = "landlock-exec"
 
+	// LandlockNet limits the TCP ports of the PostgreSQL process tree. It
+	// needs Linux 6.7.
+	LandlockNet Feature = "landlock-net"
+
 	// SeccompLog runs [Seccomp] in audit mode. The kernel logs matching
 	// system calls and allows them.
 	SeccompLog Feature = "seccomp-log"
@@ -68,6 +77,7 @@ var features = [...]Feature{
 	MDWE,
 	Landlock,
 	LandlockExec,
+	LandlockNet,
 	SeccompLog,
 	Seccomp,
 }

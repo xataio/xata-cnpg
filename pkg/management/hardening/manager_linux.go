@@ -35,6 +35,13 @@ func ProtectManager(features Features) error {
 			return fmt.Errorf("prctl(PR_SET_DUMPABLE): %w", err)
 		}
 	}
+	// The move happens here and not in harden-exec, so that it cannot run
+	// at the same time as an online upgrade, which replaces the binary.
+	if features.usesLandlock() {
+		if err := moveToOwnDir(managerPath, managerDir); err != nil {
+			return fmt.Errorf("moving the instance manager binary: %w", err)
+		}
+	}
 	return nil
 }
 

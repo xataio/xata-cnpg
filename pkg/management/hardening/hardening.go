@@ -46,6 +46,11 @@ const (
 	// tree. It needs Linux 6.3. It disables the LLVM JIT.
 	MDWE Feature = "mdwe"
 
+	// Landlock limits filesystem access for the PostgreSQL process tree,
+	// including access to the default Kubernetes ServiceAccount mount.
+	// It needs Linux 5.19.
+	Landlock Feature = "landlock"
+
 	// SeccompLog runs [Seccomp] in audit mode. The kernel logs matching
 	// system calls and allows them.
 	SeccompLog Feature = "seccomp-log"
@@ -58,6 +63,7 @@ const (
 var features = [...]Feature{
 	NoDumpable,
 	MDWE,
+	Landlock,
 	SeccompLog,
 	Seccomp,
 }
@@ -128,6 +134,14 @@ func (fs Features) subtree() Features {
 		}
 	}
 	return result
+}
+
+// usesLandlock reports whether a Landlock feature is enabled. The manager
+// uses this check to prepare the binary directory before starting PostgreSQL.
+func (fs Features) usesLandlock() bool {
+	return slices.ContainsFunc(fs, func(f Feature) bool {
+		return strings.HasPrefix(string(f), string(Landlock))
+	})
 }
 
 // PostgresOptions returns the postgres command-line options that the

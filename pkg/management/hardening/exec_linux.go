@@ -72,6 +72,8 @@ func apply(f Feature) error {
 	switch f {
 	case MDWE:
 		return applyMDWE()
+	case Landlock:
+		return applyLandlock()
 	case SeccompLog:
 		return applySeccomp(true)
 	case Seccomp:

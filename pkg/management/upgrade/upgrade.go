@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
@@ -43,6 +44,17 @@ const UploadFolder = "/controller"
 
 // InstanceManagerPath is the location of the instance manager executable
 const InstanceManagerPath = "/controller/manager"
+
+// resolveLink returns the file that path names. The hardening code can turn
+// InstanceManagerPath into a symbolic link to a file in a directory of its
+// own. An online upgrade must replace that file, and keep the link.
+func resolveLink(path string) string {
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
+	}
+	return target
+}
 
 // ErrorInvalidInstanceManagerBinary is raised when upgrading to an instance manager
 // which has not the correct hash
@@ -98,7 +110,7 @@ func FromReader(
 
 	// Replace the new instance manager with the new one
 	//nolint:gosec // path from our own temp file
-	if err := os.Rename(updatedInstanceManager.Name(), InstanceManagerPath); err != nil {
+	if err := os.Rename(updatedInstanceManager.Name(), resolveLink(InstanceManagerPath)); err != nil {
 		return fmt.Errorf("while replacing instance manager binary: %w", err)
 	}
 

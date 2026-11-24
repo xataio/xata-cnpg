@@ -29,6 +29,7 @@ import (
 // NewCmd creates the "instance harden-exec" subcommand
 func NewCmd() *cobra.Command {
 	var featureList string
+	var coredumpFilter string
 
 	cmd := &cobra.Command{
 		Use:    "harden-exec --features <list> -- <path> <argv0> [args]",
@@ -40,10 +41,12 @@ func NewCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return hardening.Exec(features, args[0], args[1:])
+			return hardening.Exec(features, coredumpFilter, args[0], args[1:])
 		},
 	}
 	cmd.Flags().StringVar(&featureList, "features", "", "Comma-separated list of the features to apply")
+	cmd.Flags().StringVar(&coredumpFilter, "coredump-filter", "",
+		"Value to write to /proc/self/coredump_filter")
 
 	return cmd
 }

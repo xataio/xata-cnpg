@@ -98,6 +98,11 @@ func NewCmd() *cobra.Command {
 			if hardeningFeatures, err = hardening.FromEnv(); err != nil {
 				return err
 			}
+			// Apply the manager restrictions before waiting for the Cluster.
+			// PostgreSQL is already running during an online upgrade.
+			if err := hardening.ProtectManager(hardeningFeatures); err != nil {
+				return err
+			}
 
 			return management.WaitForGetCluster(cmd.Context(), client.ObjectKey{
 				Name:      clusterName,

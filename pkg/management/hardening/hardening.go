@@ -37,15 +37,21 @@ const EnvVar = "CNPG_INSTANCE_HARDENING"
 type Feature string
 
 // The features, in the order in which they are applied.
-const ()
+const (
+	// NoDumpable clears the instance manager's dumpable flag to restrict
+	// ptrace and procfs access by other processes with the same UID.
+	NoDumpable Feature = "no-dumpable"
+)
 
 // features lists every feature in the order in which it is applied.
-var features = [...]Feature{}
+var features = [...]Feature{
+	NoDumpable,
+}
 
 // subtree reports whether harden-exec applies the feature to the PostgreSQL
 // process tree. The other features restrict the instance manager itself.
 func (f Feature) subtree() bool {
-	return true
+	return f != NoDumpable
 }
 
 // Features is a set of restrictions, in the order in which they are applied.
@@ -118,12 +124,22 @@ const selfExe = "/proc/self/exe"
 //
 // Go cannot run code between fork and exec, so the restrictions need a
 // second exec of the instance manager.
-func WrapCommand(cmd *exec.Cmd, fs Features) {
+//
+// With [NoDumpable] the instance manager cannot write its own
+// /proc/self/coredump_filter, from which its children inherit the filter.
+// harden-exec then writes coredumpFilter for the program instead.
+func WrapCommand(cmd *exec.Cmd, fs Features, coredumpFilter string) {
+	if !fs.Has(NoDumpable) {
+		coredumpFilter = ""
+	}
 	sub := fs.subtree()
-	if len(sub) == 0 {
+	if len(sub) == 0 && coredumpFilter == "" {
 		return
 	}
 	args := []string{selfExe, "instance", "harden-exec", "--features", sub.String()}
+	if coredumpFilter != "" {
+		args = append(args, "--coredump-filter", coredumpFilter)
+	}
 	// The program path, then its complete argument list with argv[0].
 	args = append(args, "--", cmd.Path)
 	args = append(args, cmd.Args...)

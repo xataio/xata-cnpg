@@ -52,6 +52,7 @@ import (
 	"github.com/xataio/xata-cnpg/internal/management/controller/slots/reconciler"
 	"github.com/xataio/xata-cnpg/internal/management/utils"
 	"github.com/xataio/xata-cnpg/pkg/configfile"
+	"github.com/xataio/xata-cnpg/pkg/management/hardening"
 	postgresManagement "github.com/xataio/xata-cnpg/pkg/management/postgres"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/constants"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/metrics"
@@ -523,8 +524,12 @@ func (r *InstanceReconciler) initialize(ctx context.Context, cluster *apiv1.Clus
 		return err
 	}
 
-	if err := system.SetCoredumpFilter(cluster.GetCoredumpFilter()); err != nil {
-		return err
+	// A manager that is not dumpable cannot write its own /proc/self files.
+	// PostgreSQL then gets the filter from the harden-exec subcommand.
+	if hardening.ManagerDumpable() {
+		if err := system.SetCoredumpFilter(cluster.GetCoredumpFilter()); err != nil {
+			return err
+		}
 	}
 
 	if err := r.ReconcileTablespaces(ctx, cluster); err != nil {

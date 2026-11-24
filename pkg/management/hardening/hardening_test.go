@@ -52,7 +52,7 @@ func TestParse(t *testing.T) {
 
 func TestWrapCommandWithoutFeatures(t *testing.T) {
 	cmd := exec.Command("/usr/bin/postgres", "-D", "/pgdata")
-	WrapCommand(cmd, nil)
+	WrapCommand(cmd, nil, "0x31")
 	if cmd.Path != "/usr/bin/postgres" || !slices.Equal(cmd.Args, []string{"/usr/bin/postgres", "-D", "/pgdata"}) {
 		t.Errorf("command changed: %q %q", cmd.Path, cmd.Args)
 	}

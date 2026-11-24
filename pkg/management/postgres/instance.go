@@ -761,7 +761,12 @@ func (instance *Instance) Run() (*execlog.StreamingCmd, error) {
 	postgresCmd := exec.Command(GetPostgresExecutableName(), options...) // #nosec
 	postgresCmd.Env = instance.buildPostgresEnv()
 	compatibility.AddInstanceRunCommands(postgresCmd)
-	hardening.WrapCommand(postgresCmd, instance.HardeningFeatures)
+	// A manager that is not dumpable cannot set the filter for its children
+	coredumpFilter := ""
+	if instance.Cluster != nil {
+		coredumpFilter = instance.Cluster.GetCoredumpFilter()
+	}
+	hardening.WrapCommand(postgresCmd, instance.HardeningFeatures, coredumpFilter)
 
 	streamingCmd, err := execlog.RunStreamingNoWait(postgresCmd, GetPostgresExecutableName())
 	if err != nil {

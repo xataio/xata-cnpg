@@ -24,6 +24,6 @@ package hardening
 import "errors"
 
 // Exec is available only on Linux, where the instance manager runs.
-func Exec(Features, string, []string) error {
+func Exec(Features, string, string, []string) error {
 	return errors.New("hardening is available only on Linux")
 }

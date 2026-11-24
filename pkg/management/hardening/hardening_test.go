@@ -38,6 +38,8 @@ func TestParse(t *testing.T) {
 		{in: " mdwe ,mdwe,", want: Features{MDWE}},
 		{in: "mdwe,no-such-feature", wantErr: true},
 		{in: "mdwe,no-dumpable", want: Features{NoDumpable, MDWE}},
+		{in: "seccomp,mdwe", want: Features{MDWE, Seccomp}},
+		{in: "seccomp,seccomp-log", wantErr: true},
 	}
 	for _, tt := range tests {
 		got, err := Parse(tt.in)

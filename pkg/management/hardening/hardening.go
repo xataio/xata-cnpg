@@ -45,12 +45,21 @@ const (
 	// MDWE denies writable-and-executable memory in the PostgreSQL process
 	// tree. It needs Linux 6.3. It disables the LLVM JIT.
 	MDWE Feature = "mdwe"
+
+	// SeccompLog runs [Seccomp] in audit mode. The kernel logs matching
+	// system calls and allows them.
+	SeccompLog Feature = "seccomp-log"
+
+	// Seccomp adds a system call deny-list on top of the runtime's profile.
+	Seccomp Feature = "seccomp"
 )
 
 // features lists every feature in the order in which it is applied.
 var features = [...]Feature{
 	NoDumpable,
 	MDWE,
+	SeccompLog,
+	Seccomp,
 }
 
 // subtree reports whether harden-exec applies the feature to the PostgreSQL
@@ -77,6 +86,9 @@ func Parse(s string) (Features, error) {
 		if !set.Has(Feature(name)) {
 			set = append(set, Feature(name))
 		}
+	}
+	if set.Has(Seccomp) && set.Has(SeccompLog) {
+		return nil, fmt.Errorf("hardening features %q and %q exclude each other", Seccomp, SeccompLog)
 	}
 
 	var result Features

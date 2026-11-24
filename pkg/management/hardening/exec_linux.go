@@ -72,6 +72,10 @@ func apply(f Feature) error {
 	switch f {
 	case MDWE:
 		return applyMDWE()
+	case SeccompLog:
+		return applySeccomp(true)
+	case Seccomp:
+		return applySeccomp(false)
 	default:
 		return errors.New("the feature does not apply to a process tree")
 	}

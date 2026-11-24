@@ -751,6 +751,7 @@ func (instance *Instance) Run() (*execlog.StreamingCmd, error) {
 	options := []string{
 		"-D", instance.PgData,
 	}
+	options = append(options, instance.HardeningFeatures.PostgresOptions()...)
 
 	// We need to make sure that the permissions are the right ones
 	// in some systems they may be messed up even if we fix them before

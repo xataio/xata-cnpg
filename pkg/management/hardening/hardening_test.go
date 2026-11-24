@@ -34,6 +34,10 @@ func TestParse(t *testing.T) {
 		{in: "", want: nil},
 		{in: " , ", want: nil},
 		{in: "no-such-feature", wantErr: true},
+		{in: "mdwe", want: Features{MDWE}},
+		{in: " mdwe ,mdwe,", want: Features{MDWE}},
+		{in: "mdwe,no-such-feature", wantErr: true},
+		{in: "mdwe,no-dumpable", want: Features{NoDumpable, MDWE}},
 	}
 	for _, tt := range tests {
 		got, err := Parse(tt.in)
@@ -55,5 +59,77 @@ func TestWrapCommandWithoutFeatures(t *testing.T) {
 	WrapCommand(cmd, nil, "0x31")
 	if cmd.Path != "/usr/bin/postgres" || !slices.Equal(cmd.Args, []string{"/usr/bin/postgres", "-D", "/pgdata"}) {
 		t.Errorf("command changed: %q %q", cmd.Path, cmd.Args)
+	}
+}
+
+func TestWrapCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		features Features
+		filter   string
+		want     []string // nil: the command does not change
+	}{
+		{
+			name:     "process tree feature",
+			features: Features{MDWE},
+			filter:   "0x31",
+			want: []string{
+				selfExe, "instance", "harden-exec", "--features", "mdwe",
+				"--", "/usr/lib/postgresql/17/bin/postgres", "postgres", "-D", "/pgdata",
+			},
+		},
+		{
+			name:     "manager feature with a filter",
+			features: Features{NoDumpable},
+			filter:   "0x31",
+			want: []string{
+				selfExe, "instance", "harden-exec", "--features", "", "--coredump-filter", "0x31",
+				"--", "/usr/lib/postgresql/17/bin/postgres", "postgres", "-D", "/pgdata",
+			},
+		},
+		{
+			name:     "manager feature without a filter",
+			features: Features{NoDumpable},
+		},
+		{
+			name:     "both",
+			features: Features{NoDumpable, MDWE},
+			filter:   "0x31",
+			want: []string{
+				selfExe, "instance", "harden-exec", "--features", "mdwe", "--coredump-filter", "0x31",
+				"--", "/usr/lib/postgresql/17/bin/postgres", "postgres", "-D", "/pgdata",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// As exec.Command leaves it after a PATH lookup: argv[0] is
+			// the name that the caller gave.
+			cmd := &exec.Cmd{
+				Path: "/usr/lib/postgresql/17/bin/postgres",
+				Args: []string{"postgres", "-D", "/pgdata"},
+			}
+			WrapCommand(cmd, tt.features, tt.filter)
+
+			if tt.want == nil {
+				if cmd.Path != "/usr/lib/postgresql/17/bin/postgres" {
+					t.Errorf("command changed: %q %q", cmd.Path, cmd.Args)
+				}
+				return
+			}
+			if cmd.Path != selfExe || !slices.Equal(cmd.Args, tt.want) {
+				t.Errorf("got %q %q, want %q", cmd.Path, cmd.Args, tt.want)
+			}
+		})
+	}
+}
+
+func TestPostgresOptions(t *testing.T) {
+	if got := (Features{NoDumpable}).PostgresOptions(); got != nil {
+		t.Errorf("got %q, want none", got)
+	}
+	want := []string{"-c", "jit_provider=disabled_by_mdwe"}
+	if got := (Features{MDWE}).PostgresOptions(); !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

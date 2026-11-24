@@ -41,11 +41,16 @@ const (
 	// NoDumpable clears the instance manager's dumpable flag to restrict
 	// ptrace and procfs access by other processes with the same UID.
 	NoDumpable Feature = "no-dumpable"
+
+	// MDWE denies writable-and-executable memory in the PostgreSQL process
+	// tree. It needs Linux 6.3. It disables the LLVM JIT.
+	MDWE Feature = "mdwe"
 )
 
 // features lists every feature in the order in which it is applied.
 var features = [...]Feature{
 	NoDumpable,
+	MDWE,
 }
 
 // subtree reports whether harden-exec applies the feature to the PostgreSQL
@@ -111,6 +116,19 @@ func (fs Features) subtree() Features {
 		}
 	}
 	return result
+}
+
+// PostgresOptions returns the postgres command-line options that the
+// features need.
+//
+// With [MDWE] the LLVM JIT cannot make its code executable, and jit is on by
+// default, so a query above jit_above_cost would fail. An unknown
+// jit_provider makes the JIT unavailable, and no session can change it.
+func (fs Features) PostgresOptions() []string {
+	if fs.Has(MDWE) {
+		return []string{"-c", "jit_provider=disabled_by_mdwe"}
+	}
+	return nil
 }
 
 // selfExe is the running instance manager. The link stays valid after an

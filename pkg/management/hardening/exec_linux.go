@@ -70,6 +70,8 @@ func Exec(features Features, coredumpFilter, path string, argv []string) error {
 // apply applies one feature of the PostgreSQL process tree.
 func apply(f Feature) error {
 	switch f {
+	case MDWE:
+		return applyMDWE()
 	default:
 		return errors.New("the feature does not apply to a process tree")
 	}

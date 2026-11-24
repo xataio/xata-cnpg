@@ -49,6 +49,7 @@ import (
 	"k8s.io/client-go/util/retry"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/pkg/management/hardening"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/logpipe"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/pool"
 	postgresutils "github.com/xataio/xata-cnpg/pkg/management/postgres/utils"
@@ -145,6 +146,10 @@ type Instance struct {
 
 	// The environment variables that will be used to start the instance
 	Env []string
+
+	// HardeningFeatures are the kernel restrictions of the postgres process
+	// and of its descendants
+	HardeningFeatures hardening.Features
 
 	// Command line options to pass to the postgres process, see the
 	// '-c' option of pg_ctl for an useful example
@@ -756,6 +761,7 @@ func (instance *Instance) Run() (*execlog.StreamingCmd, error) {
 	postgresCmd := exec.Command(GetPostgresExecutableName(), options...) // #nosec
 	postgresCmd.Env = instance.buildPostgresEnv()
 	compatibility.AddInstanceRunCommands(postgresCmd)
+	hardening.WrapCommand(postgresCmd, instance.HardeningFeatures)
 
 	streamingCmd, err := execlog.RunStreamingNoWait(postgresCmd, GetPostgresExecutableName())
 	if err != nil {

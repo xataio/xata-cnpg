@@ -26,6 +26,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/hardenexec"
 	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/initdb"
 	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/join"
 	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/pgbasebackup"
@@ -50,6 +51,7 @@ func NewCmd() *cobra.Command {
 		},
 	}
 
+	cmd.AddCommand(hardenexec.NewCmd())
 	cmd.AddCommand(initdb.NewCmd())
 	cmd.AddCommand(join.NewCmd())
 	cmd.AddCommand(run.NewCmd())

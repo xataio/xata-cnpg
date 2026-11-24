@@ -55,6 +55,7 @@ import (
 	"github.com/xataio/xata-cnpg/internal/management/linkerd"
 	"github.com/xataio/xata-cnpg/pkg/concurrency"
 	"github.com/xataio/xata-cnpg/pkg/management"
+	"github.com/xataio/xata-cnpg/pkg/management/hardening"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/logpipe"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/metrics"
@@ -88,10 +89,16 @@ func NewCmd() *cobra.Command {
 	var pprofHTTPServer bool
 	var statusPortTLS bool
 	var metricsPortTLS bool
+	var hardeningFeatures hardening.Features
 
 	cmd := &cobra.Command{
 		Use: "run [flags]",
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			var err error
+			if hardeningFeatures, err = hardening.FromEnv(); err != nil {
+				return err
+			}
+
 			return management.WaitForGetCluster(cmd.Context(), client.ObjectKey{
 				Name:      clusterName,
 				Namespace: namespace,
@@ -104,6 +111,9 @@ func NewCmd() *cobra.Command {
 			)
 
 			checkCurrentOSRelease(ctx)
+			if len(hardeningFeatures) > 0 {
+				log.FromContext(ctx).Info("Hardening features enabled", "features", hardeningFeatures.String())
+			}
 
 			instance := postgres.NewInstance().
 				WithPodName(podName).
@@ -111,6 +121,7 @@ func NewCmd() *cobra.Command {
 				WithNamespace(namespace)
 
 			instance.PgData = pgData
+			instance.HardeningFeatures = hardeningFeatures
 			instance.StatusPortTLS = statusPortTLS
 			instance.MetricsPortTLS = metricsPortTLS
 

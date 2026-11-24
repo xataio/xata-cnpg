@@ -78,6 +78,8 @@ func apply(f Feature) error {
 		return applyLandlockExec()
 	case LandlockNet:
 		return applyLandlockNet()
+	case LandlockScope:
+		return applyLandlockScope()
 	case SeccompLog:
 		return applySeccomp(true)
 	case Seccomp:

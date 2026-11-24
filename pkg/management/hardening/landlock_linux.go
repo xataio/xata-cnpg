@@ -255,3 +255,13 @@ func applyLandlockNet() error {
 
 	return landlock.Config{HandledAccessNet: handled}.RestrictNet(rules...)
 }
+
+// applyLandlockScope stops signals and abstract UNIX socket connections
+// from the process tree to processes outside it, such as the instance
+// manager.
+func applyLandlockScope() error {
+	if err := requireLandlockABI(6); err != nil {
+		return err
+	}
+	return landlock.V6.RestrictScoped()
+}

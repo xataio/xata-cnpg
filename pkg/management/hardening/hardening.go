@@ -63,6 +63,10 @@ const (
 	// needs Linux 6.7.
 	LandlockNet Feature = "landlock-net"
 
+	// LandlockScope stops signals and abstract UNIX socket connections from
+	// the PostgreSQL process tree to other processes. It needs Linux 6.12.
+	LandlockScope Feature = "landlock-scope"
+
 	// SeccompLog runs [Seccomp] in audit mode. The kernel logs matching
 	// system calls and allows them.
 	SeccompLog Feature = "seccomp-log"
@@ -78,6 +82,7 @@ var features = [...]Feature{
 	Landlock,
 	LandlockExec,
 	LandlockNet,
+	LandlockScope,
 	SeccompLog,
 	Seccomp,
 }

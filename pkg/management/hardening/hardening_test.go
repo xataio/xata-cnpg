@@ -40,6 +40,10 @@ func TestParse(t *testing.T) {
 		{in: "mdwe,no-dumpable", want: Features{NoDumpable, MDWE}},
 		{in: "seccomp,mdwe", want: Features{MDWE, Seccomp}},
 		{in: "seccomp,seccomp-log", wantErr: true},
+		{
+			in:   "seccomp,landlock-scope,landlock-net,landlock-exec,landlock,mdwe,no-dumpable",
+			want: Features{NoDumpable, MDWE, Landlock, LandlockExec, LandlockNet, LandlockScope, Seccomp},
+		},
 	}
 	for _, tt := range tests {
 		got, err := Parse(tt.in)

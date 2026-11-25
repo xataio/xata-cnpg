@@ -98,6 +98,16 @@ func (i *PostgresLifecycle) Start(ctx context.Context) error {
 
 	i.instance.SetWaitingForPGData(false)
 
+	// A data directory mounted from an external source may have been taken from
+	// a physical replica, in which case it still carries the standby state and
+	// the connection settings of the primary it was copied from. Adapt it here,
+	// while nothing has started PostgreSQL yet.
+	if i.instance.IsNoopBootstrap() {
+		if err := postgres.AdoptForeignStandby(ctx, i.instance.PgData); err != nil {
+			return err
+		}
+	}
+
 	// Pre-checks that need PGDATA
 	contextLogger.Info("Checking for free disk space for WALs before starting PostgreSQL")
 	hasDiskSpace, err := i.instance.CheckHasDiskSpaceForWAL(ctx)

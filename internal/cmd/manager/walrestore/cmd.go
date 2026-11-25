@@ -38,6 +38,7 @@ import (
 	pluginClient "github.com/xataio/xata-cnpg/internal/cnpi/plugin/client"
 	"github.com/xataio/xata-cnpg/internal/cnpi/plugin/repository"
 	"github.com/xataio/xata-cnpg/internal/management/cache"
+	managementpostgres "github.com/xataio/xata-cnpg/pkg/management/postgres"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/local"
 	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
@@ -49,6 +50,12 @@ var (
 
 	// ErrNoBackupConfigured is returned when no backup is configured
 	ErrNoBackupConfigured = errors.New("backup not configured")
+
+	// ErrAdoptedStandbyRecovery is returned while a data directory adopted from
+	// a foreign standby is still replaying the WAL it arrived with. The
+	// cluster's own archive cannot have any of it: the foreign primary never
+	// archived there.
+	ErrAdoptedStandbyRecovery = errors.New("adopted standby is replaying its own WAL")
 
 	// ErrExternalClusterNotFound is returned when the specification refers to
 	// an external cluster which is not defined. This should be prevented
@@ -79,6 +86,12 @@ func NewCmd() *cobra.Command {
 			err := run(ctx, pgData, podName, args)
 			if err == nil {
 				return nil
+			}
+
+			// Not a failure worth retrying: PostgreSQL moves straight on to
+			// the segment already in pg_wal, so skip the retry delay below.
+			if errors.Is(err, ErrAdoptedStandbyRecovery) {
+				return err
 			}
 
 			switch {
@@ -117,6 +130,15 @@ func run(ctx context.Context, pgData string, podName string, args []string) erro
 	startTime := time.Now()
 	walName := args[0]
 	destinationPath := args[1]
+
+	// PostgreSQL asks the archive for every segment before reading pg_wal,
+	// which during an adopted standby's first replay costs an object storage
+	// round trip per segment for nothing.
+	if managementpostgres.IsAdoptedStandbyInRecovery(pgData) {
+		contextLog.Debug("adopted standby still in recovery, skipping the archive",
+			"walName", walName)
+		return ErrAdoptedStandbyRecovery
+	}
 
 	var cluster *apiv1.Cluster
 	var err error

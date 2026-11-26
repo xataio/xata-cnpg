@@ -1,3 +1,4 @@
+ABI
 AES
 API's
 APIs
@@ -250,9 +251,11 @@ LDAPScheme
 LF
 LFX
 LLC
+LLVM
 LPV
 LSN
 LTS
+Landlock
 LastBackupFailed
 LastBackupSucceeded
 LastFailedArchiveTime
@@ -281,6 +284,7 @@ MinIO
 Minikube
 MonitoringConfiguration
 MultiNamespace
+Multipath
 NFS
 NGINX
 NOBYPASSRLS
@@ -599,6 +603,7 @@ allocator
 allowConnections
 allowPrivilegeEscalation
 allowVolumeExpansion
+allowlist
 alm
 amd
 angus
@@ -1336,6 +1341,7 @@ schemas
 sdk
 searchAttribute
 searchFilter
+seccomp
 seccompProfile
 secretAccessKey
 secretKeyRef

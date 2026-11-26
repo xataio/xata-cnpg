@@ -27,6 +27,7 @@ nav:
   - bootstrap.md
   - database_import.md
   - security.md
+  - instance_hardening.md
   - instance_manager.md
   - scheduling.md
   - resource_management.md

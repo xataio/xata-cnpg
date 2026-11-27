@@ -186,11 +186,12 @@ jobs:
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
 
+      # Reuse the binary installed by the previous step: installing it again
+      # overwrites a file that can still be busy ("Text file busy")
       - name: Run golangci-lint (tests module)
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
-        with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
-          working-directory: tests
+        working-directory: tests
+        run: |
+          "${HOME}/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-amd64/golangci-lint" run
 
       - name: Check go mod tidy has no pending changes
         run: |

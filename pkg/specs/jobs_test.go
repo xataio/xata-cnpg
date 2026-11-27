@@ -265,6 +265,11 @@ var _ = Describe("Job created via InitDB", func() {
 
 		Expect(job.Spec.Template.Spec.EnableServiceLinks).NotTo(BeNil())
 		Expect(*job.Spec.Template.Spec.EnableServiceLinks).To(BeFalse())
+
+		// The bootstrap now runs as an init container of the instance Pod
+		podSpec := createClusterPodSpec("test-1", cluster, EnvConfig{}, 0)
+		Expect(podSpec.EnableServiceLinks).NotTo(BeNil())
+		Expect(*podSpec.EnableServiceLinks).To(BeFalse())
 	})
 })
 

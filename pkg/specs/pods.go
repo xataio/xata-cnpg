@@ -199,6 +199,10 @@ func createClusterPodSpec(
 ) corev1.PodSpec {
 	return corev1.PodSpec{
 		Hostname: podName,
+		// The instance bootstrap runs as an init container of this Pod: with
+		// many Services in the namespace, the injected service environment
+		// variables can exceed the exec argument limit (upstream PR #8943)
+		EnableServiceLinks: ptr.To(false),
 		InitContainers: []corev1.Container{
 			createBootstrapContainer(cluster, getExtensions(&cluster)),
 		},

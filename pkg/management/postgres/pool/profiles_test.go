@@ -33,14 +33,20 @@ var _ = Describe("Connection profile defaults", func() {
 		return cfg
 	}
 
-	DescribeTable("pin search_path in the startup packet",
+	DescribeTable("pin search_path with pg_catalog first in the startup packet",
 		func(profile ConnectionProfile) {
 			cfg := parseConfig()
 			profile.Enrich(cfg)
 
-			Expect(cfg.RuntimeParams).To(HaveKeyWithValue("search_path", `"$user", public`))
+			// Every operator-issued connection must carry a fixed
+			// search_path so that no tenant-controlled ALTER DATABASE /
+			// ALTER ROLE setting can influence operator queries.
+			// pg_catalog must be first so built-in overloads defeat
+			// shadows planted in public; pg_temp must be last so the
+			// session temp schema is not searched ahead of pg_catalog.
+			Expect(cfg.RuntimeParams).To(HaveKeyWithValue("search_path", "pg_catalog, public, pg_temp"))
 
-			// Verify the pre-existing defaults are still present.
+			// The pre-existing defaults are still present.
 			Expect(cfg.RuntimeParams).To(HaveKeyWithValue("client_encoding", "UTF8"))
 			Expect(cfg.RuntimeParams).To(HaveKeyWithValue("datestyle", "ISO"))
 		},
@@ -49,9 +55,9 @@ var _ = Describe("Connection profile defaults", func() {
 	)
 
 	It("does not pin search_path on the pgbouncer profile", func() {
-		// PgBouncer's admin console rejects unknown startup parameters with
-		// SQLSTATE 08P01, and the admin connection never reaches PostgreSQL,
-		// so there is no CWE-426 vector to defend against here.
+		// PgBouncer rejects startup parameters that are neither tracked
+		// by default nor listed in ignore_startup_parameters; the admin
+		// console does not run catalog SQL, so pinning is unnecessary.
 		cfg := parseConfig()
 		ConnectionProfilePgbouncer.Enrich(cfg)
 

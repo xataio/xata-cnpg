@@ -22,7 +22,8 @@ type RecoveryTargetApplyConfiguration struct {
 	TargetName *string `json:"targetName,omitempty"`
 	// The target LSN (Log Sequence Number)
 	TargetLSN *string `json:"targetLSN,omitempty"`
-	// The target time as a timestamp in the RFC3339 standard
+	// The target time as a timestamp in RFC3339 format or PostgreSQL timestamp format.
+	// Timestamps without an explicit timezone are interpreted as UTC.
 	TargetTime *string `json:"targetTime,omitempty"`
 	// End recovery as soon as a consistent state is reached
 	TargetImmediate *bool `json:"targetImmediate,omitempty"`

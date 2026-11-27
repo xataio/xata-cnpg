@@ -2,6 +2,10 @@
 
 package v1
 
+import (
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+)
+
 // PoolerStatusApplyConfiguration represents a declarative configuration of the PoolerStatus type for use
 // with apply.
 //
@@ -15,6 +19,19 @@ type PoolerStatusApplyConfiguration struct {
 	PausedForSwitchover *bool `json:"pausedForSwitchover,omitempty"`
 	// PausedForSwitchoverTimestamp is when this pooler was paused (RFC3339Micro)
 	PausedForSwitchoverTimestamp *string `json:"pausedForSwitchoverTimestamp,omitempty"`
+	// Phase summarizes the overall lifecycle state of the Pooler.
+	Phase *apiv1.PoolerPhase `json:"phase,omitempty"`
+	// PhaseReason is a human-readable explanation of the current Phase.
+	PhaseReason *string `json:"phaseReason,omitempty"`
+	// Image is the resolved pgbouncer container image that the operator is
+	// using for this Pooler, including any override coming from spec.template.
+	// While Phase is Active or Paused this field reflects what the Deployment
+	// actually runs; while Phase is Inactive or Failed it may carry the last
+	// successfully resolved value (or be empty if the Pooler has never reconciled
+	// successfully).
+	Image *string `json:"image,omitempty"`
+	// Error is the latest admission validation error
+	Error *string `json:"error,omitempty"`
 }
 
 // PoolerStatusApplyConfiguration constructs a declarative configuration of the PoolerStatus type for use with
@@ -52,5 +69,37 @@ func (b *PoolerStatusApplyConfiguration) WithPausedForSwitchover(value bool) *Po
 // If called multiple times, the PausedForSwitchoverTimestamp field is set to the value of the last call.
 func (b *PoolerStatusApplyConfiguration) WithPausedForSwitchoverTimestamp(value string) *PoolerStatusApplyConfiguration {
 	b.PausedForSwitchoverTimestamp = &value
+	return b
+}
+
+// WithPhase sets the Phase field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Phase field is set to the value of the last call.
+func (b *PoolerStatusApplyConfiguration) WithPhase(value apiv1.PoolerPhase) *PoolerStatusApplyConfiguration {
+	b.Phase = &value
+	return b
+}
+
+// WithPhaseReason sets the PhaseReason field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PhaseReason field is set to the value of the last call.
+func (b *PoolerStatusApplyConfiguration) WithPhaseReason(value string) *PoolerStatusApplyConfiguration {
+	b.PhaseReason = &value
+	return b
+}
+
+// WithImage sets the Image field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Image field is set to the value of the last call.
+func (b *PoolerStatusApplyConfiguration) WithImage(value string) *PoolerStatusApplyConfiguration {
+	b.Image = &value
+	return b
+}
+
+// WithError sets the Error field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Error field is set to the value of the last call.
+func (b *PoolerStatusApplyConfiguration) WithError(value string) *PoolerStatusApplyConfiguration {
+	b.Error = &value
 	return b
 }

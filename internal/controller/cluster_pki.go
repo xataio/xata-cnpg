@@ -23,6 +23,7 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	corev1 "k8s.io/api/core/v1"
@@ -50,12 +51,19 @@ func (r *ClusterReconciler) setupPostgresPKI(ctx context.Context, cluster *apiv1
 		return fmt.Errorf("generating server TLS certificate: %w", err)
 	}
 
-	clientCaSecret, err := r.ensureClientCASecret(ctx, cluster)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("missing specified client CA secret %s: %w", cluster.GetClientCASecretName(), err)
+	// When the server and client CA share the same secret name (which is the case
+	// in the default configuration), reuse the already-fetched secret to avoid a
+	// cache-vs-API-server race where ensureCASecret's Get (from stale informer
+	// cache) returns NotFound, leading to a Create that fails with AlreadyExists.
+	clientCaSecret := serverCaSecret
+	if cluster.GetClientCASecretName() != cluster.GetServerCASecretName() {
+		clientCaSecret, err = r.ensureClientCASecret(ctx, cluster)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return fmt.Errorf("missing specified client CA secret %s: %w", cluster.GetClientCASecretName(), err)
+			}
+			return fmt.Errorf("generating client CA certificate: %w", err)
 		}
-		return fmt.Errorf("generating client CA certificate: %w", err)
 	}
 
 	err = r.ensureReplicationClientLeafCertificate(ctx, cluster, clientCaSecret)
@@ -332,7 +340,16 @@ func (r *ClusterReconciler) ensureLeafCertificate(
 	case err == nil:
 		return r.renewAndUpdateCertificate(ctx, caSecret, &secret, altDNSNames)
 	case apierrors.IsNotFound(err):
-		serverSecret, err := generateCertificateFromCA(caSecret, commonName, usage, altDNSNames, secretName)
+		serverSecret, err := generateCertificateFromCA(
+			generateCertificateFromCAParamsOpts{
+				caSecret:    caSecret,
+				commonName:  commonName,
+				usage:       usage,
+				altDNSNames: altDNSNames,
+				secretName:  secretName,
+				duration:    certs.CertificateDuration(),
+			},
+		)
 		if err != nil {
 			return err
 		}
@@ -350,25 +367,32 @@ func (r *ClusterReconciler) ensureLeafCertificate(
 	}
 }
 
-// generateCertificateFromCA create a certificate secret using the provided CA secret
-func generateCertificateFromCA(
-	caSecret *corev1.Secret,
-	commonName string,
-	usage certs.CertType,
-	altDNSNames []string,
-	secretName client.ObjectKey,
-) (*corev1.Secret, error) {
-	caPair, err := certs.ParseCASecret(caSecret)
+// generateCertificateFromCAParamsOpts holds the parameters needed to sign a
+// leaf certificate from a CA and package it into a Secret.
+type generateCertificateFromCAParamsOpts struct {
+	caSecret    *corev1.Secret
+	commonName  string
+	usage       certs.CertType
+	altDNSNames []string
+	secretName  client.ObjectKey
+	duration    time.Duration
+}
+
+// generateCertificateFromCA create a certificate secret using the provided CA
+// secret, with a leaf certificate living for the given duration.
+func generateCertificateFromCA(params generateCertificateFromCAParamsOpts) (*corev1.Secret, error) {
+	caPair, err := certs.ParseCASecret(params.caSecret)
 	if err != nil {
 		return nil, err
 	}
 
-	serverPair, err := caPair.CreateAndSignPair(commonName, usage, altDNSNames)
+	serverPair, err := caPair.CreateAndSignPairWithDuration(
+		params.commonName, params.usage, params.altDNSNames, params.duration)
 	if err != nil {
 		return nil, err
 	}
 
-	serverSecret := serverPair.GenerateCertificateSecret(secretName.Namespace, secretName.Name)
+	serverSecret := serverPair.GenerateCertificateSecret(params.secretName.Namespace, params.secretName.Name)
 	return serverSecret, nil
 }
 

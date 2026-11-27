@@ -18,6 +18,11 @@ type ClusterStatusApplyConfiguration struct {
 	Instances *int `json:"instances,omitempty"`
 	// The total number of ready instances in the cluster. It is equal to the number of ready instance pods.
 	ReadyInstances *int `json:"readyInstances,omitempty"`
+	// Selector is the serialized form of the label selector that identifies
+	// the pods managed by this cluster. Populated by the operator and exposed
+	// through the scale sub-resource so an autoscaler (such as HPA or VPA)
+	// can discover the managed instance pods.
+	Selector *string `json:"selector,omitempty"`
 	// InstancesStatus indicates in which status the instances are
 	InstancesStatus map[apiv1.PodStatus][]string `json:"instancesStatus,omitempty"`
 	// The reported state of the instances during the last reconciliation loop
@@ -26,11 +31,16 @@ type ClusterStatusApplyConfiguration struct {
 	ManagedRolesStatus *ManagedRolesApplyConfiguration `json:"managedRolesStatus,omitempty"`
 	// TablespacesStatus reports the state of the declarative tablespaces in the cluster
 	TablespacesStatus []TablespaceStateApplyConfiguration `json:"tablespacesStatus,omitempty"`
+	// PodSelectorRefs contains the resolved pod IPs for each named selector
+	// defined in spec.podSelectorRefs.
+	PodSelectorRefs []PodSelectorRefStatusApplyConfiguration `json:"podSelectorRefs,omitempty"`
 	// The timeline of the Postgres cluster
 	TimelineID *int `json:"timelineID,omitempty"`
 	// Instances topology.
 	Topology *TopologyApplyConfiguration `json:"topology,omitempty"`
 	// ID of the latest generated node (used to avoid node name clashing)
+	//
+	// Deprecated: this field is not set anymore
 	LatestGeneratedNode *int `json:"latestGeneratedNode,omitempty"`
 	// Current primary instance
 	CurrentPrimary *string `json:"currentPrimary,omitempty"`
@@ -108,12 +118,24 @@ type ClusterStatusApplyConfiguration struct {
 	// The timestamp when the primary was detected to be unhealthy
 	// This field is reported when `.spec.failoverDelay` is populated or during online upgrades
 	CurrentPrimaryFailingSinceTimestamp *string `json:"currentPrimaryFailingSinceTimestamp,omitempty"`
+	// DivergedInstances reports the non-primary instances that replayed WAL
+	// past the point where the current primary's timeline forked away from
+	// theirs, so they can never follow it again. Each instance detects this
+	// from its own pg_wal. The operator fences it and drops its replication
+	// slot on the primary. The entry is removed when the instance stops
+	// reporting a divergence or, once parked, when its PGDATA PVC is replaced
+	// or removed.
+	DivergedInstances map[apiv1.PodName]DivergedInstanceStatusApplyConfiguration `json:"divergedInstances,omitempty"`
 	// The timestamp when the last request for a new primary has occurred
 	TargetPrimaryTimestamp *string `json:"targetPrimaryTimestamp,omitempty"`
 	// The integration needed by poolers referencing the cluster
 	PoolerIntegrations *PoolerIntegrationsApplyConfiguration `json:"poolerIntegrations,omitempty"`
 	// The hash of the binary of the operator
 	OperatorHash *string `json:"cloudNativePGOperatorHash,omitempty"`
+	// OperatorCertificateFingerprint is the SHA256 fingerprint of the operator's
+	// in-memory client certificate public key. The instance manager pins this
+	// fingerprint to authenticate requests from the operator.
+	OperatorCertificateFingerprint *string `json:"operatorCertificateFingerprint,omitempty"`
 	// AvailableArchitectures reports the available architectures of a cluster
 	AvailableArchitectures []AvailableArchitectureApplyConfiguration `json:"availableArchitectures,omitempty"`
 	// Conditions for cluster object
@@ -126,6 +148,10 @@ type ClusterStatusApplyConfiguration struct {
 	Image *string `json:"image,omitempty"`
 	// PGDataImageInfo contains the details of the latest image that has run on the current data directory.
 	PGDataImageInfo *ImageInfoApplyConfiguration `json:"pgDataImageInfo,omitempty"`
+	// TargetPGDataImageInfo contains the details of the target image for an
+	// in-progress major upgrade. It is set before the upgrade Job is created,
+	// and cleared on successful completion or when the upgrade is rolled back.
+	TargetPGDataImageInfo *ImageInfoApplyConfiguration `json:"targetPgDataImageInfo,omitempty"`
 	// PluginStatus is the status of the loaded plugins
 	PluginStatus []PluginStatusApplyConfiguration `json:"pluginStatus,omitempty"`
 	// SwitchReplicaClusterStatus is the status of the switch to replica cluster
@@ -158,6 +184,14 @@ func (b *ClusterStatusApplyConfiguration) WithInstances(value int) *ClusterStatu
 // If called multiple times, the ReadyInstances field is set to the value of the last call.
 func (b *ClusterStatusApplyConfiguration) WithReadyInstances(value int) *ClusterStatusApplyConfiguration {
 	b.ReadyInstances = &value
+	return b
+}
+
+// WithSelector sets the Selector field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Selector field is set to the value of the last call.
+func (b *ClusterStatusApplyConfiguration) WithSelector(value string) *ClusterStatusApplyConfiguration {
+	b.Selector = &value
 	return b
 }
 
@@ -206,6 +240,19 @@ func (b *ClusterStatusApplyConfiguration) WithTablespacesStatus(values ...*Table
 			panic("nil value passed to WithTablespacesStatus")
 		}
 		b.TablespacesStatus = append(b.TablespacesStatus, *values[i])
+	}
+	return b
+}
+
+// WithPodSelectorRefs adds the given value to the PodSelectorRefs field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the PodSelectorRefs field.
+func (b *ClusterStatusApplyConfiguration) WithPodSelectorRefs(values ...*PodSelectorRefStatusApplyConfiguration) *ClusterStatusApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithPodSelectorRefs")
+		}
+		b.PodSelectorRefs = append(b.PodSelectorRefs, *values[i])
 	}
 	return b
 }
@@ -464,6 +511,20 @@ func (b *ClusterStatusApplyConfiguration) WithCurrentPrimaryFailingSinceTimestam
 	return b
 }
 
+// WithDivergedInstances puts the entries into the DivergedInstances field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, the entries provided by each call will be put on the DivergedInstances field,
+// overwriting an existing map entries in DivergedInstances field with the same key.
+func (b *ClusterStatusApplyConfiguration) WithDivergedInstances(entries map[apiv1.PodName]DivergedInstanceStatusApplyConfiguration) *ClusterStatusApplyConfiguration {
+	if b.DivergedInstances == nil && len(entries) > 0 {
+		b.DivergedInstances = make(map[apiv1.PodName]DivergedInstanceStatusApplyConfiguration, len(entries))
+	}
+	for k, v := range entries {
+		b.DivergedInstances[k] = v
+	}
+	return b
+}
+
 // WithTargetPrimaryTimestamp sets the TargetPrimaryTimestamp field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the TargetPrimaryTimestamp field is set to the value of the last call.
@@ -485,6 +546,14 @@ func (b *ClusterStatusApplyConfiguration) WithPoolerIntegrations(value *PoolerIn
 // If called multiple times, the OperatorHash field is set to the value of the last call.
 func (b *ClusterStatusApplyConfiguration) WithOperatorHash(value string) *ClusterStatusApplyConfiguration {
 	b.OperatorHash = &value
+	return b
+}
+
+// WithOperatorCertificateFingerprint sets the OperatorCertificateFingerprint field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the OperatorCertificateFingerprint field is set to the value of the last call.
+func (b *ClusterStatusApplyConfiguration) WithOperatorCertificateFingerprint(value string) *ClusterStatusApplyConfiguration {
+	b.OperatorCertificateFingerprint = &value
 	return b
 }
 
@@ -545,6 +614,14 @@ func (b *ClusterStatusApplyConfiguration) WithImage(value string) *ClusterStatus
 // If called multiple times, the PGDataImageInfo field is set to the value of the last call.
 func (b *ClusterStatusApplyConfiguration) WithPGDataImageInfo(value *ImageInfoApplyConfiguration) *ClusterStatusApplyConfiguration {
 	b.PGDataImageInfo = value
+	return b
+}
+
+// WithTargetPGDataImageInfo sets the TargetPGDataImageInfo field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the TargetPGDataImageInfo field is set to the value of the last call.
+func (b *ClusterStatusApplyConfiguration) WithTargetPGDataImageInfo(value *ImageInfoApplyConfiguration) *ClusterStatusApplyConfiguration {
+	b.TargetPGDataImageInfo = value
 	return b
 }
 

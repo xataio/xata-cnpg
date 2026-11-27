@@ -39,6 +39,7 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/utils"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
 	"github.com/xataio/xata-cnpg/tests/utils/exec"
+	"github.com/xataio/xata-cnpg/tests/utils/objects"
 )
 
 // PrintReplicationSlots prints replications slots with their restart_lsn
@@ -227,7 +228,7 @@ func ToggleHAReplicationSlots(
 	}
 
 	clusterToggle.Spec.ReplicationSlots.HighAvailability.Enabled = ptr.To(enable)
-	err = crudClient.Patch(ctx, clusterToggle, client.MergeFrom(cluster))
+	err = objects.Patch(ctx, crudClient, clusterToggle, client.MergeFrom(cluster))
 	if err != nil {
 		return err
 	}
@@ -255,7 +256,7 @@ func ToggleSynchronizeReplicationSlots(
 	}
 
 	clusterToggle.Spec.ReplicationSlots.SynchronizeReplicas.Enabled = ptr.To(enable)
-	err = crudClient.Patch(ctx, clusterToggle, client.MergeFrom(cluster))
+	err = objects.Patch(ctx, crudClient, clusterToggle, client.MergeFrom(cluster))
 	if err != nil {
 		return err
 	}

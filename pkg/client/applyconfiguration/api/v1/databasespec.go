@@ -90,6 +90,10 @@ type DatabaseSpecApplyConfiguration struct {
 	FDWs []FDWSpecApplyConfiguration `json:"fdws,omitempty"`
 	// The list of foreign servers to be managed in the database
 	Servers []ServerSpecApplyConfiguration `json:"servers,omitempty"`
+	// Permissions defines the privileges to grant or revoke on the database
+	// itself, keyed by privilege. Each entry carries a role name and a type of
+	// `grant` (default) or `revoke`, mirroring the existing usage model.
+	Permissions *DatabasePermissionsSpecApplyConfiguration `json:"permissions,omitempty"`
 }
 
 // DatabaseSpecApplyConfiguration constructs a declarative configuration of the DatabaseSpec type for use with
@@ -299,5 +303,13 @@ func (b *DatabaseSpecApplyConfiguration) WithServers(values ...*ServerSpecApplyC
 		}
 		b.Servers = append(b.Servers, *values[i])
 	}
+	return b
+}
+
+// WithPermissions sets the Permissions field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Permissions field is set to the value of the last call.
+func (b *DatabaseSpecApplyConfiguration) WithPermissions(value *DatabasePermissionsSpecApplyConfiguration) *DatabaseSpecApplyConfiguration {
+	b.Permissions = value
 	return b
 }

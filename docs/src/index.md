@@ -41,10 +41,11 @@ CloudNativePG was originally built by [EDB](https://www.enterprisedb.com), then
 released open source under Apache License 2.0.
 The [source code repository is in GitHub](https://github.com/cloudnative-pg/cloudnative-pg).
 
-!!! Note
+:::note
     Based on the [Operator Capability Levels model](operator_capability_levels.md),
     users can expect a "Level V - Auto Pilot" subset of capabilities from the
     CloudNativePG Operator.
+:::
 
 ## Supported Kubernetes distributions
 
@@ -63,9 +64,9 @@ container images for both the operator and PostgreSQL (the operand).
 
 The CloudNativePG operator container images are available on the
 [`cloudnative-pg` project's GitHub Container Registry](https://github.com/cloudnative-pg/cloudnative-pg/pkgs/container/cloudnative-pg)
-in three different flavors:
+in two different flavors:
 
-- Debian 12 distroless
+- Debian 13 distroless
 - Red Hat UBI 9 micro (suffix `-ubi9`)
 
 Red Hat UBI images are primarily intended for OLM consumption.
@@ -91,13 +92,14 @@ Three image flavors are available, each extending the previous one:
 - [`standard`](https://github.com/cloudnative-pg/postgres-containers#standard-images)
 - [`system`](https://github.com/cloudnative-pg/postgres-containers#system-images) *(deprecated)*
 
-!!! Important
+:::info[Important]
     The `system` images are deprecated and will be removed once in-core
     Barman Cloud support is phased out. They remain usable for now, but you may
     want to plan a future migration to `minimal` or `standard` images with the
     Barman Cloud plugin, or another supported backup solution.
+:::
 
-By default, this version of CloudNativePG deploys `ghcr.io/cloudnative-pg/postgresql:18.1-system-trixie`.
+By default, this version of CloudNativePG deploys `ghcr.io/cloudnative-pg/postgresql:19.0-system-trixie`.
 
 All images are signed and shipped with SBOM and provenance attestations.
 Weekly automated builds ensure that critical vulnerabilities (CVEs) are promptly fixed.
@@ -109,20 +111,23 @@ For details and support, see the [`postgres-containers` project](https://github.
 - Direct integration with the Kubernetes API server for High Availability,
   eliminating the need for external tools.
 - Self-healing capabilities, including:
-    - Automated failover, promoting the replica with the most up-to-date data,
-      with the option to use quorum-based failover and synchronous replication
-      for increased data durability and safety.
+    - Automated failover, promoting the replica with the most up-to-date data
+      (coordinated by a per-cluster lease that prevents premature promotion),
+      with the option to use quorum-based failover and synchronous
+      replication for increased data durability and safety.
     - Automatic recreation of failed replicas.
 - Planned switchover of the primary instance by promoting a selected replica.
 - Declarative management of key PostgreSQL configurations, including:
     - PostgreSQL settings.
     - Roles, users, and groups.
-    - Databases, extensions, schemas, foreign data wrappers (FDW), and foreign
-      servers.
+    - Databases, extensions, schemas, foreign data wrappers (FDW), foreign
+      servers, and the privileges granted on the database itself.
     - Tablespaces (including temporary tablespaces).
 - Flexible instance definition, supporting any number of instances (minimum 1
   primary server).
-- Scale-up/down capabilities to dynamically adjust cluster size.
+- Scale-up/down capabilities to dynamically adjust cluster size, with a scale
+  subresource compatible with the Kubernetes Horizontal and Vertical Pod
+  Autoscalers.
 - Read-Write and Read-Only Services, ensuring applications connect correctly:
     - *Read-Write Service*: Routes connections to the primary server.
     - *Read-Only Service*: Distributes connections among replicas for read workloads.
@@ -150,7 +155,10 @@ For details and support, see the [`postgres-containers` project](https://github.
     - Continuous backup and full/PITR recovery via volume snapshots (if
       supported by the storage class).
     - Native integration with Barman Cloud for object store backups via
-      `.spec.backup.barmanObjectStore` (*deprecated since v1.26*).
+      `.spec.backup.barmanObjectStore` (*deprecated since v1.26; 1.31 is the
+      last minor release with native support, which is removed starting from
+      1.32.0; see
+      [Migrating from Built-in CloudNativePG Backup](https://cloudnative-pg.io/plugin-barman-cloud/docs/migration/)*).
 - Offline in-place major upgrades of PostgreSQL
 - Offline and online import of PostgreSQL databases, including major upgrades:
     - *Offline Import*: Direct restore from existing databases.
@@ -181,10 +189,11 @@ For details and support, see the [`postgres-containers` project](https://github.
 - Multi-arch container images, including Software Bill of Materials (SBOM) and
   provenance attestations for security compliance.
 
-!!! Info
+:::info
     CloudNativePG does not use `StatefulSet`s for managing data persistence.
     Instead, it directly manages Persistent Volume Claims (PVCs).
     See ["Custom Pod Controller"](controller.md) for more details.
+:::
 
 ## About this guide
 
@@ -206,6 +215,6 @@ of Canada, and used with their permission.*
 ---
 
 CloudNativePG is a
-[Cloud Native Computing Foundation Sandbox project](https://www.cncf.io/sandbox-projects/).
+[Cloud Native Computing Foundation Incubating project](https://www.cncf.io/projects/cloudnativepg/).
 
 ![](https://github.com/cncf/artwork/blob/main/other/cncf/horizontal/color/cncf-color.png?raw=true)

@@ -21,204 +21,75 @@ package archiver
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"k8s.io/utils/ptr"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
-	"github.com/xataio/xata-cnpg/pkg/pgbackrest"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres/constants"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
-const backupHistoryFile = "000000010000000000000003.00000028.backup"
+// skipEmptyWalArchiveCheckAnnotation mirrors the unexported constant in
+// pkg/utils; the tests deliberately hard-code the literal so a divergence
+// between the annotation the operator honors and the one documented here
+// would surface as a failure.
+const skipEmptyWalArchiveCheckAnnotation = "cnpg.io/skipEmptyWalArchiveCheck"
 
-var _ = Describe("empty backup history files", func() {
-	var walDir string
+func writeMarkerFile(pgData string) {
+	markerPath := filepath.Join(pgData, constants.CheckEmptyWalArchiveFile)
+	Expect(os.WriteFile(markerPath, []byte{}, 0o600)).To(Succeed())
+}
 
-	writeFile := func(name string, content []byte) string {
-		path := filepath.Join(walDir, name)
-		Expect(os.WriteFile(path, content, 0o600)).To(Succeed())
-		return path
-	}
+var _ = Describe("shouldCheckEmptyWalArchive", func() {
+	DescribeTable(
+		"combines the skip annotation with the first-archive marker file",
+		func(annotationValue *string, createMarker bool, expected bool) {
+			pgData := GinkgoT().TempDir()
+			if createMarker {
+				writeMarkerFile(pgData)
+			}
 
-	BeforeEach(func() {
-		walDir = GinkgoT().TempDir()
-		Expect(os.Mkdir(filepath.Join(walDir, "archive_status"), 0o700)).To(Succeed())
-	})
+			cluster := &apiv1.Cluster{}
+			if annotationValue != nil {
+				cluster.Annotations = map[string]string{
+					skipEmptyWalArchiveCheckAnnotation: *annotationValue,
+				}
+			}
 
-	DescribeTable("emptyBackupHistoryFileFromError",
-		func(err error, expectedName string, expectedOK bool) {
-			name, ok := emptyBackupHistoryFileFromError(err)
-			Expect(name).To(Equal(expectedName))
-			Expect(ok).To(Equal(expectedOK))
+			Expect(shouldCheckEmptyWalArchive(context.Background(), cluster, pgData)).To(Equal(expected))
 		},
-		Entry("zero-size backup history file",
-			&pgbackrest.CommandError{
-				Command:  "archive-push",
-				ExitCode: 29,
-				Stderr:   "ERROR: [029]: size of WAL segment '" + backupHistoryFile + "' is 0",
-			},
-			backupHistoryFile, true),
-		Entry("zero-size WAL segment",
-			&pgbackrest.CommandError{
-				Command:  "archive-push",
-				ExitCode: 29,
-				Stderr:   "ERROR: [029]: size of WAL segment '000000010000000000000003' is 0",
-			},
-			"", false),
-		Entry("different pgbackrest error",
-			&pgbackrest.CommandError{
-				Command:  "archive-push",
-				ExitCode: 82,
-				Stderr:   "ERROR: [082]: WAL segment 000000010000000000000003 was not archived before the 60000ms timeout",
-			},
-			"", false),
-		Entry("not a pgbackrest error",
-			errors.New("size of WAL segment '"+backupHistoryFile+"' is 0"),
-			"", false),
-		Entry("nil error", nil, "", false),
+		Entry("no annotation and marker present: check runs", nil, true, true),
+		Entry("no annotation and marker absent: check skipped", nil, false, false),
+		Entry("opt-out annotation and marker present: check skipped", ptr.To("enabled"), true, false),
+		Entry("opt-out annotation and marker absent: check skipped", ptr.To("enabled"), false, false),
+		Entry("unrelated annotation value and marker present: check runs", ptr.To("something-else"), true, true),
+		Entry("unrelated annotation value and marker absent: check skipped", ptr.To("something-else"), false, false),
+		Entry("empty annotation value and marker present: check runs", ptr.To(""), true, true),
 	)
-
-	Describe("isEmptyBackupHistoryFile", func() {
-		It("returns true for an empty backup history file", func() {
-			Expect(isEmptyBackupHistoryFile(writeFile(backupHistoryFile, nil))).To(BeTrue())
-		})
-
-		It("returns false for a backup history file with content", func() {
-			path := writeFile(backupHistoryFile, []byte("START WAL LOCATION: 0/3000028\n"))
-			Expect(isEmptyBackupHistoryFile(path)).To(BeFalse())
-		})
-
-		It("returns false for an empty WAL segment", func() {
-			Expect(isEmptyBackupHistoryFile(writeFile("000000010000000000000003", nil))).To(BeFalse())
-		})
-
-		It("returns false for an empty timeline history file", func() {
-			Expect(isEmptyBackupHistoryFile(writeFile("00000002.history", nil))).To(BeFalse())
-		})
-
-		It("returns false when the file does not exist", func() {
-			Expect(isEmptyBackupHistoryFile(filepath.Join(walDir, backupHistoryFile))).To(BeFalse())
-		})
-	})
-
-	Describe("markEmptyBackupHistoryFileDone", func() {
-		statusFile := func(suffix string) string {
-			return filepath.Join(walDir, "archive_status", backupHistoryFile+suffix)
-		}
-
-		BeforeEach(func() {
-			writeFile(filepath.Join("archive_status", backupHistoryFile+".ready"), nil)
-		})
-
-		It("marks an empty backup history file as done", func() {
-			writeFile(backupHistoryFile, nil)
-			Expect(markEmptyBackupHistoryFileDone(walDir, backupHistoryFile)).To(Succeed())
-			Expect(statusFile(".ready")).ToNot(BeAnExistingFile())
-			Expect(statusFile(".done")).To(BeAnExistingFile())
-		})
-
-		It("refuses a backup history file with content", func() {
-			writeFile(backupHistoryFile, []byte("START WAL LOCATION: 0/3000028\n"))
-			Expect(markEmptyBackupHistoryFileDone(walDir, backupHistoryFile)).ToNot(Succeed())
-			Expect(statusFile(".ready")).To(BeAnExistingFile())
-		})
-
-		It("fails when the ready file does not exist", func() {
-			writeFile(backupHistoryFile, nil)
-			Expect(os.Remove(statusFile(".ready"))).To(Succeed())
-			Expect(markEmptyBackupHistoryFileDone(walDir, backupHistoryFile)).ToNot(Succeed())
-		})
-	})
 })
 
-var _ = Describe("archiveWALViaPgBackRest with an empty backup history file", func() {
-	const walName = "pg_wal/000000010000000000000003"
+var _ = Describe("isCheckWalArchiveFlagFilePresent", func() {
+	It("returns true when the marker file exists in PGDATA", func() {
+		pgData := GinkgoT().TempDir()
+		writeMarkerFile(pgData)
 
-	var (
-		pgData  string
-		callLog string
-		cluster *apiv1.Cluster
-	)
-
-	// fakePgBackRest puts a pgbackrest script first on PATH. The script fails
-	// with the empty backup history file error for its first failures calls.
-	fakePgBackRest := func(failures int) {
-		binDir := GinkgoT().TempDir()
-		callLog = filepath.Join(binDir, "calls")
-		script := fmt.Sprintf(`#!/bin/sh
-echo "$@" >> '%[1]s'
-if [ $(wc -l < '%[1]s') -le %[2]d ]; then
-	echo "ERROR: [029]: size of WAL segment '%[3]s' is 0"
-	exit 29
-fi
-`, callLog, failures, backupHistoryFile)
-		scriptPath := filepath.Join(binDir, "pgbackrest")
-		Expect(os.WriteFile(scriptPath, []byte(script), 0o700)).To(Succeed()) //nolint:gosec // executable script
-		GinkgoT().Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	}
-
-	pgBackRestCalls := func() int {
-		content, err := os.ReadFile(callLog) //nolint:gosec // temp path
-		if errors.Is(err, fs.ErrNotExist) {
-			return 0
-		}
-		Expect(err).ToNot(HaveOccurred())
-		return strings.Count(string(content), "\n")
-	}
-
-	statusFile := func(suffix string) string {
-		return filepath.Join(pgData, "pg_wal", "archive_status", backupHistoryFile+suffix)
-	}
-
-	BeforeEach(func() {
-		pgData = GinkgoT().TempDir()
-		cluster = &apiv1.Cluster{}
-		cluster.Name = "test"
-		Expect(os.MkdirAll(filepath.Join(pgData, "pg_wal", "archive_status"), 0o700)).To(Succeed())
-		Expect(os.WriteFile(filepath.Join(pgData, "pg_wal", backupHistoryFile), nil, 0o600)).To(Succeed())
+		Expect(isCheckWalArchiveFlagFilePresent(context.Background(), pgData)).To(BeTrue())
 	})
 
-	It("marks the backup history file as archived and pushes again", func() {
-		Expect(os.WriteFile(statusFile(".ready"), nil, 0o600)).To(Succeed())
-		fakePgBackRest(1)
+	It("returns false when the marker file is absent", func() {
+		pgData := GinkgoT().TempDir()
 
-		Expect(archiveWALViaPgBackRest(context.Background(), cluster, pgData, walName)).To(Succeed())
-		Expect(pgBackRestCalls()).To(Equal(2))
-		Expect(statusFile(".ready")).ToNot(BeAnExistingFile())
-		Expect(statusFile(".done")).To(BeAnExistingFile())
+		Expect(isCheckWalArchiveFlagFilePresent(context.Background(), pgData)).To(BeFalse())
 	})
 
-	It("returns the error when the second push fails", func() {
-		Expect(os.WriteFile(statusFile(".ready"), nil, 0o600)).To(Succeed())
-		fakePgBackRest(2)
+	It("returns false when only an unrelated file is present", func() {
+		pgData := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(pgData, "PG_VERSION"), []byte{}, 0o600)).To(Succeed())
 
-		err := archiveWALViaPgBackRest(context.Background(), cluster, pgData, walName)
-		var cmdErr *pgbackrest.CommandError
-		Expect(errors.As(err, &cmdErr)).To(BeTrue())
-		Expect(pgBackRestCalls()).To(Equal(2))
-	})
-
-	It("returns both errors when the backup history file cannot be marked", func() {
-		fakePgBackRest(1)
-
-		err := archiveWALViaPgBackRest(context.Background(), cluster, pgData, walName)
-		var cmdErr *pgbackrest.CommandError
-		Expect(errors.As(err, &cmdErr)).To(BeTrue())
-		Expect(errors.Is(err, fs.ErrNotExist)).To(BeTrue())
-		Expect(pgBackRestCalls()).To(Equal(1))
-	})
-
-	It("skips the backup history file when it is requested by name", func() {
-		fakePgBackRest(1)
-
-		Expect(archiveWALViaPgBackRest(context.Background(), cluster, pgData, "pg_wal/"+backupHistoryFile)).
-			To(Succeed())
-		Expect(pgBackRestCalls()).To(Equal(0))
+		Expect(isCheckWalArchiveFlagFilePresent(context.Background(), pgData)).To(BeFalse())
 	})
 })

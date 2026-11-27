@@ -12,9 +12,11 @@ import (
 // ExtensionConfiguration is the configuration used to add
 // PostgreSQL extensions to the Cluster.
 type ExtensionConfigurationApplyConfiguration struct {
-	// The name of the extension, required
+	// The name of the extension, required. The limit of 59 characters
+	// leaves room for the prefix the operator adds when deriving the
+	// extension's Kubernetes Volume name (capped at 63 characters).
 	Name *string `json:"name,omitempty"`
-	// The image containing the extension, required
+	// The image containing the extension.
 	ImageVolumeSource *corev1.ImageVolumeSource `json:"image,omitempty"`
 	// The list of directories inside the image which should be added to extension_control_path.
 	// If not defined, defaults to "/share".
@@ -24,6 +26,15 @@ type ExtensionConfigurationApplyConfiguration struct {
 	DynamicLibraryPath []string `json:"dynamic_library_path,omitempty"`
 	// The list of directories inside the image which should be added to ld_library_path.
 	LdLibraryPath []string `json:"ld_library_path,omitempty"`
+	// A list of directories within the image to be appended to the
+	// PostgreSQL process's `PATH` environment variable.
+	BinPath []string `json:"bin_path,omitempty"`
+	// Env is a list of custom environment variables to be set in the
+	// PostgreSQL process for this extension. It is the responsibility of the
+	// cluster administrator to ensure the variables are correct for the
+	// specific extension. Note that changes to these variables require
+	// a manual cluster restart to take effect.
+	Env []ExtensionEnvVarApplyConfiguration `json:"env,omitempty"`
 }
 
 // ExtensionConfigurationApplyConfiguration constructs a declarative configuration of the ExtensionConfiguration type for use with
@@ -74,6 +85,29 @@ func (b *ExtensionConfigurationApplyConfiguration) WithDynamicLibraryPath(values
 func (b *ExtensionConfigurationApplyConfiguration) WithLdLibraryPath(values ...string) *ExtensionConfigurationApplyConfiguration {
 	for i := range values {
 		b.LdLibraryPath = append(b.LdLibraryPath, values[i])
+	}
+	return b
+}
+
+// WithBinPath adds the given value to the BinPath field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the BinPath field.
+func (b *ExtensionConfigurationApplyConfiguration) WithBinPath(values ...string) *ExtensionConfigurationApplyConfiguration {
+	for i := range values {
+		b.BinPath = append(b.BinPath, values[i])
+	}
+	return b
+}
+
+// WithEnv adds the given value to the Env field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Env field.
+func (b *ExtensionConfigurationApplyConfiguration) WithEnv(values ...*ExtensionEnvVarApplyConfiguration) *ExtensionConfigurationApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithEnv")
+		}
+		b.Env = append(b.Env, *values[i])
 	}
 	return b
 }

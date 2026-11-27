@@ -12,7 +12,7 @@ import (
 // ExtensionSpec configures an extension in a database
 type ExtensionSpecApplyConfiguration struct {
 	// Common fields
-	DatabaseObjectSpecApplyConfiguration `json:",inline"`
+	DatabaseObjectSpecApplyConfiguration `json:""`
 	// The version of the extension to install. If empty, the operator will
 	// install the default version (whatever is specified in the
 	// extension's control file)

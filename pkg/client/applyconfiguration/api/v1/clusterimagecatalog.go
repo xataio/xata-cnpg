@@ -3,8 +3,11 @@
 package v1
 
 import (
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	internal "github.com/xataio/xata-cnpg/pkg/client/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -13,7 +16,7 @@ import (
 //
 // ClusterImageCatalog is the Schema for the clusterimagecatalogs API
 type ClusterImageCatalogApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	// Specification of the desired behavior of the ClusterImageCatalog.
 	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
@@ -28,6 +31,40 @@ func ClusterImageCatalog(name string) *ClusterImageCatalogApplyConfiguration {
 	b.WithKind("ClusterImageCatalog")
 	b.WithAPIVersion("postgresql.cnpg.io/v1")
 	return b
+}
+
+// ExtractClusterImageCatalogFrom extracts the applied configuration owned by fieldManager from
+// clusterImageCatalog for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// clusterImageCatalog must be a unmodified ClusterImageCatalog API object that was retrieved from the Kubernetes API.
+// ExtractClusterImageCatalogFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractClusterImageCatalogFrom(clusterImageCatalog *apiv1.ClusterImageCatalog, fieldManager string, subresource string) (*ClusterImageCatalogApplyConfiguration, error) {
+	b := &ClusterImageCatalogApplyConfiguration{}
+	err := managedfields.ExtractInto(clusterImageCatalog, internal.Parser().Type("com.github.xataio.xata-cnpg.api.v1.ClusterImageCatalog"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(clusterImageCatalog.Name)
+
+	b.WithKind("ClusterImageCatalog")
+	b.WithAPIVersion("postgresql.cnpg.io/v1")
+	return b, nil
+}
+
+// ExtractClusterImageCatalog extracts the applied configuration owned by fieldManager from
+// clusterImageCatalog. If no managedFields are found in clusterImageCatalog for fieldManager, a
+// ClusterImageCatalogApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// clusterImageCatalog must be a unmodified ClusterImageCatalog API object that was retrieved from the Kubernetes API.
+// ExtractClusterImageCatalog provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractClusterImageCatalog(clusterImageCatalog *apiv1.ClusterImageCatalog, fieldManager string) (*ClusterImageCatalogApplyConfiguration, error) {
+	return ExtractClusterImageCatalogFrom(clusterImageCatalog, fieldManager, "")
 }
 
 func (b ClusterImageCatalogApplyConfiguration) IsApplyConfiguration() {}

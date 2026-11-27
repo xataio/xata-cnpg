@@ -34,6 +34,7 @@ type PgBouncerSpecApplyConfiguration struct {
 	// has to be specified and no automatic CNPG Cluster integration will be triggered.
 	//
 	// Deprecated.
+	//
 	AuthQuerySecret *corev1.LocalObjectReferenceApplyConfiguration `json:"authQuerySecret,omitempty"`
 	// The query that will be used to download the hash of the password
 	// of a certain user. Default: "SELECT usename, passwd FROM public.user_search($1)".
@@ -59,6 +60,13 @@ type PgBouncerSpecApplyConfiguration struct {
 	// paused during switchover. If the switchover doesn't complete within
 	// this time, the pooler will be automatically resumed.
 	PauseDuringSwitchoverTimeout *metav1.Duration `json:"pauseDuringSwitchoverTimeout,omitempty"`
+	// Image is the pgbouncer container image to use. When set, it takes
+	// precedence over ImageCatalogRef and the operator default, but is
+	// overridden by an explicit image set in the pod template.
+	Image *string `json:"image,omitempty"`
+	// ImageCatalogRef points to an entry in an ImageCatalog or ClusterImageCatalog.
+	// Mutually exclusive with Image.
+	ImageCatalogRef *ImageCatalogComponentRefApplyConfiguration `json:"imageCatalogRef,omitempty"`
 }
 
 // PgBouncerSpecApplyConfiguration constructs a declarative configuration of the PgBouncerSpec type for use with
@@ -168,5 +176,21 @@ func (b *PgBouncerSpecApplyConfiguration) WithPauseDuringSwitchover(value bool) 
 // If called multiple times, the PauseDuringSwitchoverTimeout field is set to the value of the last call.
 func (b *PgBouncerSpecApplyConfiguration) WithPauseDuringSwitchoverTimeout(value metav1.Duration) *PgBouncerSpecApplyConfiguration {
 	b.PauseDuringSwitchoverTimeout = &value
+	return b
+}
+
+// WithImage sets the Image field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Image field is set to the value of the last call.
+func (b *PgBouncerSpecApplyConfiguration) WithImage(value string) *PgBouncerSpecApplyConfiguration {
+	b.Image = &value
+	return b
+}
+
+// WithImageCatalogRef sets the ImageCatalogRef field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ImageCatalogRef field is set to the value of the last call.
+func (b *PgBouncerSpecApplyConfiguration) WithImageCatalogRef(value *ImageCatalogComponentRefApplyConfiguration) *PgBouncerSpecApplyConfiguration {
+	b.ImageCatalogRef = value
 	return b
 }

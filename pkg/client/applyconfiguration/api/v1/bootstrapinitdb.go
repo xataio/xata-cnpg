@@ -22,14 +22,22 @@ type BootstrapInitDBApplyConfiguration struct {
 	// owner of the user database. If empty a new secret will be
 	// created from scratch
 	Secret *corev1.LocalObjectReferenceApplyConfiguration `json:"secret,omitempty"`
+	// Allows the `PUBLIC` pseudo-role to keep the `CONNECT` privilege on the
+	// `postgres` database, as PostgreSQL grants it by default. When `false`
+	// (the default), the operator revokes it when the cluster is bootstrapped.
+	// It only applies when the cluster is bootstrapped with `initdb`: the
+	// privileges of existing databases are never changed.
+	AllowPublicConnectToPostgres *bool `json:"allowPublicConnectToPostgres,omitempty"`
 	// The list of options that must be passed to initdb when creating the cluster.
 	//
 	// Deprecated: This could lead to inconsistent configurations,
 	// please use the explicit provided parameters instead.
 	// If defined, explicit values will be ignored.
 	Options []string `json:"options,omitempty"`
-	// Whether the `-k` option should be passed to initdb,
-	// enabling checksums on data pages (default: `false`)
+	// Whether data checksums are enabled on data pages, to help detect
+	// corruption by the I/O system that would otherwise be silent
+	// (default: `false` before PostgreSQL 18, `true` from PostgreSQL 18 on,
+	// matching the initdb default in each case).
 	DataChecksums *bool `json:"dataChecksums,omitempty"`
 	// The value to be passed as option `--encoding` for initdb (default:`UTF8`)
 	Encoding *string `json:"encoding,omitempty"`
@@ -125,6 +133,14 @@ func (b *BootstrapInitDBApplyConfiguration) WithOwner(value string) *BootstrapIn
 // If called multiple times, the Secret field is set to the value of the last call.
 func (b *BootstrapInitDBApplyConfiguration) WithSecret(value *corev1.LocalObjectReferenceApplyConfiguration) *BootstrapInitDBApplyConfiguration {
 	b.Secret = value
+	return b
+}
+
+// WithAllowPublicConnectToPostgres sets the AllowPublicConnectToPostgres field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AllowPublicConnectToPostgres field is set to the value of the last call.
+func (b *BootstrapInitDBApplyConfiguration) WithAllowPublicConnectToPostgres(value bool) *BootstrapInitDBApplyConfiguration {
+	b.AllowPublicConnectToPostgres = &value
 	return b
 }
 

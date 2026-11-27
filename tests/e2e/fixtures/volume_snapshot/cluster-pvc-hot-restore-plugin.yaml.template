@@ -1,0 +1,37 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cluster-pvc-hot-recovery-plugin
+spec:
+  instances: 2
+  primaryUpdateStrategy: unsupervised
+  imageName: "${POSTGRES_IMG}"
+
+  # Persistent storage configuration
+  storage:
+    storageClass: ${E2E_CSI_STORAGE_CLASS}
+    size: 1Gi
+  walStorage:
+    storageClass: ${E2E_CSI_STORAGE_CLASS}
+    size: 1Gi
+
+  # The online backup has no WAL storage snapshot: the WAL volume is created
+  # empty, and the WALs needed to finalize recovery are fetched through
+  # plugin-barman-cloud, from the same ObjectStore the source archived to
+  # (serverName matches the source cluster name).
+  bootstrap:
+    recovery:
+      source: cluster-pvc-hot-snapshot-plugin
+      volumeSnapshots:
+        storage:
+          name: ${SNAPSHOT_PLUGIN_HOT_PGDATA}
+          kind: VolumeSnapshot
+          apiGroup: snapshot.storage.k8s.io
+
+  externalClusters:
+    - name: cluster-pvc-hot-snapshot-plugin
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: cluster-pvc-hot-snapshot-plugin
+          serverName: cluster-pvc-hot-snapshot-plugin

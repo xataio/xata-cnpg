@@ -20,6 +20,7 @@ SPDX-License-Identifier: Apache-2.0
 package v1
 
 import (
+	machineryapi "github.com/cloudnative-pg/machinery/pkg/api"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -109,6 +110,12 @@ const (
 	// PGBouncerPoolerUserName is the name of the role to be used for
 	PGBouncerPoolerUserName = "cnpg_pooler_pgbouncer"
 
+	// MetricsExporterUserName is the name of the dedicated role used by the
+	// metrics exporter to connect to PostgreSQL. This role has pg_monitor
+	// granted and is never a superuser, so session_user never escalates via
+	// RESET ROLE.
+	MetricsExporterUserName = "cnpg_metrics_exporter"
+
 	// MissingWALDiskSpaceExitCode is the exit code the instance manager
 	// will use to signal that there's no more WAL disk space
 	MissingWALDiskSpaceExitCode = 4
@@ -125,8 +132,8 @@ type SnapshotOwnerReference string
 
 // Constants to represent the allowed types for SnapshotOwnerReference.
 const (
-	// ShapshotOwnerReferenceNone indicates that the snapshot does not have any owner reference.
-	ShapshotOwnerReferenceNone SnapshotOwnerReference = "none"
+	// SnapshotOwnerReferenceNone indicates that the snapshot does not have any owner reference.
+	SnapshotOwnerReferenceNone SnapshotOwnerReference = "none"
 	// SnapshotOwnerReferenceBackup indicates that the snapshot is owned by the backup resource.
 	SnapshotOwnerReferenceBackup SnapshotOwnerReference = "backup"
 	// SnapshotOwnerReferenceCluster indicates that the snapshot is owned by the cluster resource.
@@ -259,6 +266,10 @@ type ClusterSpec struct {
 	// Minimum number of instances required in synchronous replication with the
 	// primary. Undefined or 0 allow writes to complete when no standby is
 	// available.
+	//
+	// Deprecated: this field will be removed in CloudNativePG 1.33.0.
+	// Use `.spec.postgresql.synchronous` instead.
+	//
 	// +kubebuilder:default:=0
 	// +kubebuilder:validation:Minimum=0
 	// +optional
@@ -267,6 +278,10 @@ type ClusterSpec struct {
 	// The target value for the synchronous replication quorum, that can be
 	// decreased if the number of ready standbys is lower than this.
 	// Undefined or 0 disable synchronous replication.
+	//
+	// Deprecated: this field will be removed in CloudNativePG 1.33.0.
+	// Use `.spec.postgresql.synchronous` instead.
+	//
 	// +kubebuilder:default:=0
 	// +kubebuilder:validation:Minimum=0
 	// +optional
@@ -275,6 +290,15 @@ type ClusterSpec struct {
 	// Configuration of the PostgreSQL server
 	// +optional
 	PostgresConfiguration PostgresConfiguration `json:"postgresql,omitempty"`
+
+	// PodSelectorRefs defines named pod label selectors that can be referenced
+	// in pg_hba rules using the ${podselector:NAME} syntax in the address field.
+	// The operator resolves matching pod IPs and the instance manager expands
+	// pg_hba lines accordingly. Only pods in the Cluster's own namespace are considered.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	PodSelectorRefs []PodSelectorRef `json:"podSelectorRefs,omitempty"`
 
 	// Replication slots management configuration
 	// +kubebuilder:default:={"highAvailability":{"enabled":true}}
@@ -320,6 +344,18 @@ type ClusterSpec struct {
 	// +optional
 	ServiceAccountTemplate *ServiceAccountTemplate `json:"serviceAccountTemplate,omitempty"`
 
+	// Name of an existing ServiceAccount in the same namespace to use for the cluster.
+	// When specified, the operator will not create a new ServiceAccount
+	// but will use the provided one. This is useful for sharing a single
+	// ServiceAccount across multiple clusters (e.g., for cloud IAM configurations).
+	// If not specified, a ServiceAccount will be created with the cluster name.
+	// Mutually exclusive with ServiceAccountTemplate.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="serviceAccountName is immutable"
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=253
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
 	// Configuration of the storage for PostgreSQL WAL (Write-Ahead Log)
 	// +optional
 	WalStorage *StorageConfiguration `json:"walStorage,omitempty"`
@@ -344,8 +380,9 @@ type ClusterSpec struct {
 
 	// The time in seconds that controls the window of time reserved for the smart shutdown of Postgres to complete.
 	// Make sure you reserve enough time for the operator to request a fast shutdown of Postgres
-	// (that is: `stopDelay` - `smartShutdownTimeout`). Default is 180 seconds.
-	// +kubebuilder:default:=180
+	// (that is: `stopDelay` - `smartShutdownTimeout`). Default is 0 seconds, which
+	// skips the smart shutdown and requests a fast shutdown right away.
+	// +kubebuilder:default:=0
 	// +optional
 	SmartShutdownTimeout *int32 `json:"smartShutdownTimeout,omitempty"`
 
@@ -355,6 +392,15 @@ type ClusterSpec struct {
 	// +kubebuilder:default:=3600
 	// +optional
 	MaxSwitchoverDelay int32 `json:"switchoverDelay,omitempty"`
+
+	// The time in seconds that is allowed for a PostgreSQL instance to stop
+	// after an immediate shutdown request (used, for example, when a primary
+	// must step down and cannot wait for a graceful shutdown). Once this time
+	// has passed with PostgreSQL still running, the instance is considered
+	// unresponsive. Default value is 30 seconds.
+	// +kubebuilder:default:=30
+	// +optional
+	ImmediateShutdownTimeout int32 `json:"immediateShutdownTimeout,omitempty"`
 
 	// The amount of time (in seconds) to wait before triggering a failover
 	// after the primary PostgreSQL instance in the cluster was detected
@@ -385,6 +431,13 @@ type ClusterSpec struct {
 	// for more information.
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// How changes to `resources` reach running instances: `recreate`
+	// (default) rolls the Pods, `inPlace` resizes them when possible and
+	// rolls them otherwise. `inPlace` requires Kubernetes 1.33 or later.
+	// +kubebuilder:validation:Enum=recreate;inPlace
+	// +optional
+	ResourcesUpdateStrategy ResourcesUpdateStrategy `json:"resourcesUpdateStrategy,omitempty"`
 
 	// EphemeralVolumesSizeLimit allows the user to set the limits for the ephemeral
 	// volumes
@@ -503,6 +556,54 @@ type ClusterSpec struct {
 	// in the PostgreSQL Pods.
 	// +optional
 	Probes *ProbesConfiguration `json:"probes,omitempty"`
+
+	// Configuration of the Kubernetes `Lease` used to coordinate safe primary
+	// election within the cluster. When omitted, the operator applies built-in
+	// defaults; tune these values only if you understand the consequences for
+	// failover timing.
+	// +optional
+	PrimaryLease *PrimaryLeaseConfiguration `json:"primaryLease,omitempty"`
+}
+
+// PrimaryLeaseConfiguration configures the timings of the Kubernetes `Lease`
+// that the primary instance holds and renews to coordinate a safe primary
+// election. These values map directly onto the underlying Kubernetes
+// leader-election parameters.
+type PrimaryLeaseConfiguration struct {
+	// How long, in seconds, the primary lease is considered valid before it
+	// expires and another instance may acquire it. It must be greater than
+	// `renewDeadlineSeconds`.
+	// Defaults to 15.
+	// +kubebuilder:default:=15
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	LeaseDurationSeconds *int32 `json:"leaseDurationSeconds,omitempty"`
+
+	// How long, in seconds, the current primary keeps retrying to renew the
+	// lease before giving up and stopping. It must be smaller than
+	// `leaseDurationSeconds`.
+	// Defaults to 10.
+	// +kubebuilder:default:=10
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	RenewDeadlineSeconds *int32 `json:"renewDeadlineSeconds,omitempty"`
+
+	// How frequently, in seconds, a non-holder instance retries acquiring or
+	// renewing the lease.
+	// Defaults to 2.
+	// +kubebuilder:default:=2
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	RetryPeriodSeconds *int32 `json:"retryPeriodSeconds,omitempty"`
+
+	// The TTL, in seconds, written when the primary explicitly releases the
+	// lease on a clean shutdown, allowing a replica to promote without waiting
+	// for the full lease duration to expire.
+	// Defaults to 1.
+	// +kubebuilder:default:=1
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	ReleasedLeaseDurationSeconds *int32 `json:"releasedLeaseDurationSeconds,omitempty"`
 }
 
 // ProbesConfiguration represent the configuration for the probes
@@ -595,19 +696,23 @@ type LivenessProbe struct {
 	// Probe is the standard probe configuration
 	Probe `json:",inline"`
 
-	// Configure the feature that extends the liveness probe for a primary
-	// instance. In addition to the basic checks, this verifies whether the
-	// primary is isolated from the Kubernetes API server and from its
-	// replicas, ensuring that it can be safely shut down if network
-	// partition or API unavailability is detected. Enabled by default.
+	// Configure the primary isolation check, which stops a primary whose
+	// primary lease has gone past its renew deadline without a successful
+	// renewal, when at least one other instance is unreachable or names a
+	// different target primary, so that it stops accepting writes it can no
+	// longer safely serve. Its reaction time is set by the `primaryLease`
+	// timings and by `requestTimeout`, not by the liveness probe settings this
+	// stanza lives under. Enabled by default.
 	// +optional
 	IsolationCheck *IsolationCheckConfiguration `json:"isolationCheck,omitempty"`
 }
 
-// IsolationCheckConfiguration contains the configuration for the isolation check
-// functionality in the liveness probe
+// IsolationCheckConfiguration contains the configuration for the primary
+// isolation check
 type IsolationCheckConfiguration struct {
-	// Whether primary isolation checking is enabled for the liveness probe
+	// Whether primary isolation checking is enabled. When disabled, an
+	// isolated primary is not stopped, but a primary that reaches a peer
+	// reporting a different target primary still is.
 	// +optional
 	// +kubebuilder:default:=true
 	Enabled *bool `json:"enabled,omitempty"`
@@ -690,6 +795,9 @@ const (
 
 	// PhaseCannotCreateClusterObjects is set by the operator when is unable to create cluster resources
 	PhaseCannotCreateClusterObjects = "Unable to create required cluster objects"
+
+	// PhaseDefinitionInvalid is set when the cluster definition is invalid
+	PhaseDefinitionInvalid = "Invalid cluster definition"
 )
 
 // EphemeralVolumesSizeLimitConfiguration contains the configuration of the ephemeral
@@ -767,8 +875,10 @@ type ManagedRoles struct {
 	// +optional
 	ByStatus map[RoleStatus][]string `json:"byStatus,omitempty"`
 
-	// CannotReconcile lists roles that cannot be reconciled in PostgreSQL,
-	// with an explanation of the cause
+	// CannotReconcile lists roles that cannot be reconciled, with an
+	// explanation of the cause. Failures may originate in PostgreSQL
+	// (e.g. dropping a role that owns objects) or in Kubernetes (e.g.
+	// the referenced password Secret cannot be fetched).
 	// +optional
 	CannotReconcile map[string][]string `json:"cannotReconcile,omitempty"`
 
@@ -825,6 +935,13 @@ type ClusterStatus struct {
 	// +optional
 	ReadyInstances int `json:"readyInstances,omitempty"`
 
+	// Selector is the serialized form of the label selector that identifies
+	// the pods managed by this cluster. Populated by the operator and exposed
+	// through the scale sub-resource so an autoscaler (such as HPA or VPA)
+	// can discover the managed instance pods.
+	// +optional
+	Selector string `json:"selector,omitempty"`
+
 	// InstancesStatus indicates in which status the instances are
 	// +optional
 	InstancesStatus map[PodStatus][]string `json:"instancesStatus,omitempty"`
@@ -841,6 +958,13 @@ type ClusterStatus struct {
 	// +optional
 	TablespacesStatus []TablespaceState `json:"tablespacesStatus,omitempty"`
 
+	// PodSelectorRefs contains the resolved pod IPs for each named selector
+	// defined in spec.podSelectorRefs.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	PodSelectorRefs []PodSelectorRefStatus `json:"podSelectorRefs,omitempty"`
+
 	// The timeline of the Postgres cluster
 	// +optional
 	TimelineID int `json:"timelineID,omitempty"`
@@ -850,6 +974,8 @@ type ClusterStatus struct {
 	Topology Topology `json:"topology,omitempty"`
 
 	// ID of the latest generated node (used to avoid node name clashing)
+	//
+	// Deprecated: this field is not set anymore
 	// +optional
 	LatestGeneratedNode int `json:"latestGeneratedNode,omitempty"`
 
@@ -981,6 +1107,16 @@ type ClusterStatus struct {
 	// +optional
 	CurrentPrimaryFailingSinceTimestamp string `json:"currentPrimaryFailingSinceTimestamp,omitempty"`
 
+	// DivergedInstances reports the non-primary instances that replayed WAL
+	// past the point where the current primary's timeline forked away from
+	// theirs, so they can never follow it again. Each instance detects this
+	// from its own pg_wal. The operator fences it and drops its replication
+	// slot on the primary. The entry is removed when the instance stops
+	// reporting a divergence or, once parked, when its PGDATA PVC is replaced
+	// or removed.
+	// +optional
+	DivergedInstances map[PodName]DivergedInstanceStatus `json:"divergedInstances,omitempty"`
+
 	// The timestamp when the last request for a new primary has occurred
 	// +optional
 	TargetPrimaryTimestamp string `json:"targetPrimaryTimestamp,omitempty"`
@@ -992,6 +1128,12 @@ type ClusterStatus struct {
 	// The hash of the binary of the operator
 	// +optional
 	OperatorHash string `json:"cloudNativePGOperatorHash,omitempty"`
+
+	// OperatorCertificateFingerprint is the SHA256 fingerprint of the operator's
+	// in-memory client certificate public key. The instance manager pins this
+	// fingerprint to authenticate requests from the operator.
+	// +optional
+	OperatorCertificateFingerprint string `json:"operatorCertificateFingerprint,omitempty"`
 
 	// AvailableArchitectures reports the available architectures of a cluster
 	// +optional
@@ -1016,6 +1158,12 @@ type ClusterStatus struct {
 	// PGDataImageInfo contains the details of the latest image that has run on the current data directory.
 	// +optional
 	PGDataImageInfo *ImageInfo `json:"pgDataImageInfo,omitempty"`
+
+	// TargetPGDataImageInfo contains the details of the target image for an
+	// in-progress major upgrade. It is set before the upgrade Job is created,
+	// and cleared on successful completion or when the upgrade is rolled back.
+	// +optional
+	TargetPGDataImageInfo *ImageInfo `json:"targetPgDataImageInfo,omitempty"`
 
 	// PluginStatus is the status of the loaded plugins
 	// +optional
@@ -1043,6 +1191,9 @@ type ImageInfo struct {
 	Image string `json:"image"`
 	// MajorVersion is the major version of the image
 	MajorVersion int `json:"majorVersion"`
+	// Extensions contains the container image extensions available for the current Image
+	// +optional
+	Extensions []ExtensionConfiguration `json:"extensions,omitempty"`
 }
 
 // SwitchReplicaClusterStatus contains all the statuses regarding the switch of a cluster to a replica cluster
@@ -1063,6 +1214,48 @@ type InstanceReportedState struct {
 	IP string `json:"ip,omitempty"`
 }
 
+// DivergedInstanceStatus describes a non-primary instance that replayed WAL
+// past the point where the current primary's timeline forked away from its
+// own. See ClusterStatus.DivergedInstances. The details are those of the
+// first report and are not updated afterwards.
+type DivergedInstanceStatus struct {
+	// TimeLineID is the timeline of the WAL the instance held when the
+	// divergence was first reported.
+	// +kubebuilder:validation:Minimum=1
+	TimeLineID int `json:"timeLineID"`
+
+	// PrimaryTimeLineID is the newest timeline the instance had learned
+	// about from the primary, and could not switch to, when the divergence
+	// was first reported.
+	// +kubebuilder:validation:Minimum=1
+	PrimaryTimeLineID int `json:"primaryTimeLineID"`
+
+	// ForkLSN is where PrimaryTimeLineID forked away from TimeLineID. Empty
+	// when TimeLineID is not an ancestor of PrimaryTimeLineID at all.
+	// +optional
+	ForkLSN string `json:"forkLSN,omitempty"`
+
+	// ReplayLSN is how far the instance had replayed when the divergence
+	// was first reported. Together with ForkLSN it bounds the WAL
+	// (ForkLSN, ReplayLSN] the instance held that the primary did not.
+	ReplayLSN string `json:"replayLSN"`
+
+	// DetectedAt is when the divergence was first reported.
+	DetectedAt string `json:"detectedAt"`
+
+	// Parked is true once the operator has recorded the PGDATA PVC of the
+	// instance and keeps the instance fenced.
+	// +optional
+	Parked bool `json:"parked,omitempty"`
+
+	// PVCUID is the UID of the instance's PGDATA PersistentVolumeClaim when
+	// it was parked. A different UID means the data was rebuilt, for example
+	// by `kubectl cnpg destroy`. A Pod recreated over the same PVC stays
+	// contained.
+	// +optional
+	PVCUID string `json:"pvcUID,omitempty"`
+}
+
 // ClusterConditionType defines types of cluster conditions
 type ClusterConditionType string
 
@@ -1078,6 +1271,22 @@ const (
 	// ConditionConsistentSystemID is true when the all the instances of the
 	// cluster report the same System ID.
 	ConditionConsistentSystemID ClusterConditionType = "ConsistentSystemID"
+	// ConditionInitialized is False from the first reconcile until the cluster
+	// has had at least one running instance, at which point it is set to True
+	// and never cleared.
+	ConditionInitialized ClusterConditionType = "Initialized"
+
+	// ConditionSyncReplicationTopologySatisfied is True when at least one
+	// synchronous replica is running in a different failure domain than the
+	// primary, as defined by .spec.postgresql.synchronous.podFailureDomainKeys
+	// or .spec.postgresql.synchronous.nodeFailureDomainKeys.
+	// Only set when one of those fields is configured.
+	ConditionSyncReplicationTopologySatisfied ClusterConditionType = "SyncReplicationTopologySatisfied"
+
+	// ConditionReplicasHealthy is False when at least one non-primary
+	// instance is reported in ClusterStatus.DivergedInstances, and True
+	// otherwise.
+	ConditionReplicasHealthy ClusterConditionType = "ReplicasHealthy"
 )
 
 // ConditionStatus defines conditions of resources
@@ -1126,6 +1335,37 @@ const (
 
 	// DetachedVolume is the reason that is set when we do a rolling upgrade to add a PVC volume to a cluster
 	DetachedVolume ConditionReason = "DetachedVolume"
+
+	// BootstrapCompleted is the reason set on ConditionInitialized=True once the
+	// cluster has completed its first bootstrap.
+	BootstrapCompleted ConditionReason = "BootstrapCompleted"
+
+	// BootstrapPending is the reason set on ConditionInitialized=False while the
+	// cluster has not yet completed its first bootstrap.
+	BootstrapPending ConditionReason = "BootstrapPending"
+
+	// ConditionReasonTopologySatisfied means at least one synchronous replica is
+	// in a different failure domain than the primary.
+	ConditionReasonTopologySatisfied ConditionReason = "Satisfied"
+
+	// ConditionReasonTopologyNotExtracted means topology labels could not be
+	// extracted from pods or nodes, so the constraint cannot be evaluated.
+	ConditionReasonTopologyNotExtracted ConditionReason = "TopologyNotExtracted"
+
+	// ConditionReasonInsufficientCrossDomainReplicas means failure domain keys
+	// are set but no synchronous replica in a different failure domain than
+	// the primary exists.
+	ConditionReasonInsufficientCrossDomainReplicas ConditionReason = "InsufficientCrossDomainReplicas"
+
+	// ConditionReasonAllReplicasHealthy is the reason set on
+	// ConditionReplicasHealthy=True when no instance is reported in
+	// ClusterStatus.DivergedInstances.
+	ConditionReasonAllReplicasHealthy ConditionReason = "AllReplicasHealthy"
+
+	// ConditionReasonReplicasDiverged is the reason set on
+	// ConditionReplicasHealthy=False when at least one instance is reported
+	// in ClusterStatus.DivergedInstances.
+	ConditionReasonReplicasDiverged ConditionReason = "ReplicasDiverged"
 )
 
 // EmbeddedObjectMetadata contains metadata to be inherited by all resources related to a Cluster
@@ -1303,11 +1543,21 @@ type NodeMaintenanceWindow struct {
 // the primary server of the cluster as part of rolling updates
 type PrimaryUpdateStrategy string
 
-// PrimaryUpdateMethod contains the method to use when upgrading
-// the primary server of the cluster as part of rolling updates
+// PrimaryUpdateMethod defines the method to use when upgrading
+// the primary instance of the cluster as part of rolling updates.
+// The default method is "restart"
 type PrimaryUpdateMethod string
 
+// ResourcesUpdateStrategy defines how changes to `resources` reach running instances
+type ResourcesUpdateStrategy string
+
 const (
+	// ResourcesUpdateStrategyRecreate rolls the Pods (`recreate`, default)
+	ResourcesUpdateStrategyRecreate ResourcesUpdateStrategy = "recreate"
+
+	// ResourcesUpdateStrategyInPlace resizes the Pods when possible, and rolls them otherwise (`inPlace`)
+	ResourcesUpdateStrategyInPlace ResourcesUpdateStrategy = "inPlace"
+
 	// PrimaryUpdateStrategySupervised means that the operator need to wait for the
 	// user to manually issue a switchover request before updating the primary
 	// server (`supervised`)
@@ -1337,10 +1587,32 @@ const (
 	// is gracefully shutdown during a switchover.
 	DefaultMaxSwitchoverDelay = 3600
 
+	// DefaultImmediateShutdownTimeout is the default for the pg_ctl timeout in seconds when a
+	// PostgreSQL instance is shut down with an immediate shutdown request.
+	DefaultImmediateShutdownTimeout = 30
+
 	// DefaultStartupDelay is the default value for startupDelay, startupDelay will be used to calculate the
 	// FailureThreshold of startupProbe, the formula is `FailureThreshold = ceiling(startDelay / periodSeconds)`,
 	// the minimum value is 1
 	DefaultStartupDelay = 3600
+
+	// DefaultPrimaryLeaseDurationSeconds is the default validity, in seconds, of the primary lease.
+	DefaultPrimaryLeaseDurationSeconds = 15
+
+	// DefaultPrimaryLeaseRenewDeadlineSeconds is the default deadline, in seconds, for the primary
+	// to renew its lease before giving up.
+	DefaultPrimaryLeaseRenewDeadlineSeconds = 10
+
+	// DefaultPrimaryLeaseRetryPeriodSeconds is the default interval, in seconds, between lease
+	// acquisition or renewal attempts. It matches the conventional Kubernetes leader-election
+	// retry period: a smaller value lets a candidate detect a cleanly released lease sooner
+	// (faster switchover) without affecting the take-over wait that holds back a premature
+	// promotion, which is governed by the lease duration.
+	DefaultPrimaryLeaseRetryPeriodSeconds = 2
+
+	// DefaultPrimaryLeaseReleasedDurationSeconds is the default TTL, in seconds, written when the
+	// primary explicitly releases its lease on a clean shutdown.
+	DefaultPrimaryLeaseReleasedDurationSeconds = 1
 )
 
 // SynchronousReplicaConfigurationMethod configures whether to use
@@ -1371,8 +1643,10 @@ const (
 // SynchronousReplicaConfiguration contains the configuration of the
 // PostgreSQL synchronous replication feature.
 // Important: at this moment, also `.spec.minSyncReplicas` and `.spec.maxSyncReplicas`
-// need to be considered.
+// need to be considered. Those fields are deprecated and mutually exclusive with
+// this configuration.
 // +kubebuilder:validation:XValidation:rule="self.dataDurability!='preferred' || ((!has(self.standbyNamesPre) || self.standbyNamesPre.size()==0) && (!has(self.standbyNamesPost) || self.standbyNamesPost.size()==0))",message="dataDurability set to 'preferred' requires empty 'standbyNamesPre' and empty 'standbyNamesPost'"
+// +kubebuilder:validation:XValidation:rule="!(has(self.podFailureDomainKeys) && self.podFailureDomainKeys.size() > 0 && has(self.nodeFailureDomainKeys) && self.nodeFailureDomainKeys.size() > 0)",message="podFailureDomainKeys and nodeFailureDomainKeys are mutually exclusive"
 type SynchronousReplicaConfiguration struct {
 	// Method to select synchronous replication standbys from the listed
 	// servers, accepting 'any' (quorum-based synchronous replication) or
@@ -1420,9 +1694,74 @@ type SynchronousReplicaConfiguration struct {
 	// PostgreSQL clusters.
 	// +optional
 	FailoverQuorum bool `json:"failoverQuorum"`
+
+	// PodFailureDomainKeys is a list of Pod label keys used to define failure
+	// domains. The values are read exclusively from the labels of each
+	// instance Pod: a listed label that is not present on the Pod makes the
+	// whole topology extraction fail, so that the constraint is not applied,
+	// and the Node hosting the Pod is never consulted. When
+	// set, the operator selects synchronous replicas from instances whose
+	// label values differ from the primary's for all the specified keys, so
+	// that synchronous replication spans failure domains such as availability
+	// zones or regions. Starting from Kubernetes 1.35, the
+	// `topology.kubernetes.io/zone` and `topology.kubernetes.io/region`
+	// labels are automatically copied from the Node onto each Pod at
+	// scheduling time.
+	// When the replicas in failure domains different from the primary's are
+	// not enough to satisfy the configured number of synchronous standbys,
+	// the constraint is not applied and synchronous replicas are selected as
+	// if this field were not set.
+	// Mutually exclusive with `nodeFailureDomainKeys`.
+	// +optional
+	PodFailureDomainKeys []string `json:"podFailureDomainKeys,omitempty"`
+
+	// NodeFailureDomainKeys is a list of Node label keys used to define
+	// failure domains. The values are read exclusively from the labels of the
+	// Node hosting each instance Pod: when a Node cannot be found (for
+	// example, drained or deleted after the Pod was scheduled), the whole
+	// topology extraction fails and the constraint is not applied. When set,
+	// the operator selects synchronous replicas from instances running on
+	// nodes whose label values differ from the primary's node for all the
+	// specified keys, so that synchronous replication spans failure domains
+	// such as availability zones or regions.
+	// When the replicas in failure domains different from the primary's are
+	// not enough to satisfy the configured number of synchronous standbys,
+	// the constraint is not applied and synchronous replicas are selected as
+	// if this field were not set.
+	// Mutually exclusive with `podFailureDomainKeys`.
+	// +optional
+	NodeFailureDomainKeys []string `json:"nodeFailureDomainKeys,omitempty"`
+}
+
+// PodSelectorRef defines a named pod label selector for use in pg_hba rules.
+// Pods matching the selector in the Cluster's namespace will have their IPs
+// resolved and made available for pg_hba address expansion via the
+// `${podselector:NAME}` syntax.
+type PodSelectorRef struct {
+	// Name is the identifier used to reference this selector in pg_hba rules
+	// via the ${podselector:NAME} syntax in the address field.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[a-z]([a-z0-9_-]*[a-z0-9])?$`
+	Name string `json:"name"`
+
+	// Selector is a label selector that identifies the pods whose IPs
+	// should be resolved. Only pods in the Cluster's namespace are considered.
+	Selector metav1.LabelSelector `json:"selector"`
+}
+
+// PodSelectorRefStatus contains the resolved pod IPs for a named selector.
+type PodSelectorRefStatus struct {
+	// Name corresponds to the name in the spec's PodSelectorRef.
+	Name string `json:"name"`
+
+	// IPs is the list of pod IPs matching the selector.
+	// Each IP is a single address (no CIDR notation).
+	// +optional
+	IPs []string `json:"ips,omitempty"`
 }
 
 // PostgresConfiguration defines the PostgreSQL configuration
+// +kubebuilder:validation:XValidation:rule="!(has(self.syncReplicaElectionConstraint) && self.syncReplicaElectionConstraint.enabled && has(self.synchronous) && ((has(self.synchronous.podFailureDomainKeys) && self.synchronous.podFailureDomainKeys.size() > 0) || (has(self.synchronous.nodeFailureDomainKeys) && self.synchronous.nodeFailureDomainKeys.size() > 0)))",message="syncReplicaElectionConstraint and synchronous failure domain keys are mutually exclusive"
 type PostgresConfiguration struct {
 	// PostgreSQL configuration options (postgresql.conf)
 	// +optional
@@ -1433,7 +1772,9 @@ type PostgresConfiguration struct {
 	Synchronous *SynchronousReplicaConfiguration `json:"synchronous,omitempty"`
 
 	// PostgreSQL Host Based Authentication rules (lines to be appended
-	// to the pg_hba.conf file)
+	// to the pg_hba.conf file).
+	// Use the ${podselector:NAME} syntax to reference a pod selector;
+	// the rule will be expanded for each Pod IP matching that selector.
 	// +optional
 	PgHBA []string `json:"pg_hba,omitempty"`
 
@@ -1444,6 +1785,13 @@ type PostgresConfiguration struct {
 
 	// Requirements to be met by sync replicas. This will affect how the "synchronous_standby_names" parameter will be
 	// set up.
+	//
+	// This field only applies to the legacy synchronous replication method.
+	//
+	// Deprecated: this field will be removed in CloudNativePG 1.33.0, along
+	// with the method. Use the failure domain options of
+	// `.spec.postgresql.synchronous` instead.
+	//
 	// +optional
 	SyncReplicaElectionConstraint SyncReplicaElectionConstraints `json:"syncReplicaElectionConstraint,omitempty"`
 
@@ -1470,19 +1818,24 @@ type PostgresConfiguration struct {
 
 	// The configuration of the extensions to be added
 	// +optional
+	// +listType=map
+	// +listMapKey=name
 	Extensions []ExtensionConfiguration `json:"extensions,omitempty"`
 }
 
 // ExtensionConfiguration is the configuration used to add
 // PostgreSQL extensions to the Cluster.
 type ExtensionConfiguration struct {
-	// The name of the extension, required
+	// The name of the extension, required. The limit of 59 characters
+	// leaves room for the prefix the operator adds when deriving the
+	// extension's Kubernetes Volume name (capped at 63 characters).
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=59
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9_]*[a-z0-9])?$`
 	Name string `json:"name"`
 
-	// The image containing the extension, required
-	// +kubebuilder:validation:XValidation:rule="has(self.reference)",message="An image reference is required"
+	// The image containing the extension.
+	// +optional
 	ImageVolumeSource corev1.ImageVolumeSource `json:"image"`
 
 	// The list of directories inside the image which should be added to extension_control_path.
@@ -1498,6 +1851,43 @@ type ExtensionConfiguration struct {
 	// The list of directories inside the image which should be added to ld_library_path.
 	// +optional
 	LdLibraryPath []string `json:"ld_library_path,omitempty"`
+
+	// A list of directories within the image to be appended to the
+	// PostgreSQL process's `PATH` environment variable.
+	// +optional
+	BinPath []string `json:"bin_path,omitempty"`
+
+	// Env is a list of custom environment variables to be set in the
+	// PostgreSQL process for this extension. It is the responsibility of the
+	// cluster administrator to ensure the variables are correct for the
+	// specific extension. Note that changes to these variables require
+	// a manual cluster restart to take effect.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Env []ExtensionEnvVar `json:"env,omitempty"`
+}
+
+// ExtensionEnvVar defines an environment variable for a specific extension
+// image volume.
+type ExtensionEnvVar struct {
+	// Name of the environment variable to be injected into the
+	// PostgreSQL process.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z_][a-zA-Z0-9_]*$`
+	Name string `json:"name"`
+
+	// Value of the environment variable. CloudNativePG performs a direct
+	// replacement of this value, with support for placeholder expansion.
+	// The ${`image_root`} placeholder resolves to the absolute mount path
+	// of the extension's volume (e.g., `/extensions/my-extension`). This
+	// is particularly useful for allowing applications or libraries to
+	// locate specific directories within the mounted image.
+	// Unrecognized placeholders are rejected. To include a literal ${...}
+	// in the value, escape it as $${...}.
+	//
+	// +kubebuilder:validation:MinLength=1
+	Value string `json:"value"`
 }
 
 // BootstrapConfiguration contains information about how to create the PostgreSQL
@@ -1675,6 +2065,14 @@ type BootstrapInitDB struct {
 	// +optional
 	Secret *LocalObjectReference `json:"secret,omitempty"`
 
+	// Allows the `PUBLIC` pseudo-role to keep the `CONNECT` privilege on the
+	// `postgres` database, as PostgreSQL grants it by default. When `false`
+	// (the default), the operator revokes it when the cluster is bootstrapped.
+	// It only applies when the cluster is bootstrapped with `initdb`: the
+	// privileges of existing databases are never changed.
+	// +optional
+	AllowPublicConnectToPostgres bool `json:"allowPublicConnectToPostgres,omitempty"`
+
 	// The list of options that must be passed to initdb when creating the cluster.
 	//
 	// Deprecated: This could lead to inconsistent configurations,
@@ -1683,8 +2081,10 @@ type BootstrapInitDB struct {
 	// +optional
 	Options []string `json:"options,omitempty"`
 
-	// Whether the `-k` option should be passed to initdb,
-	// enabling checksums on data pages (default: `false`)
+	// Whether data checksums are enabled on data pages, to help detect
+	// corruption by the I/O system that would otherwise be silent
+	// (default: `false` before PostgreSQL 18, `true` from PostgreSQL 18 on,
+	// matching the initdb default in each case).
 	// +optional
 	DataChecksums *bool `json:"dataChecksums,omitempty"`
 
@@ -1978,7 +2378,7 @@ type DataSource struct {
 // BackupSource contains the backup we need to restore from, plus some
 // information that could be needed to correctly restore it.
 type BackupSource struct {
-	LocalObjectReference `json:",inline"`
+	machineryapi.LocalObjectReference `json:",inline"`
 	// EndpointCA store the CA bundle of the barman endpoint.
 	// Useful when using self-signed certificates to avoid
 	// errors with certificate issuer and barman-cloud-wal-archive.
@@ -2007,6 +2407,39 @@ type BootstrapPgBaseBackup struct {
 	// created from scratch
 	// +optional
 	Secret *LocalObjectReference `json:"secret,omitempty"`
+
+	// List of custom options to pass to the `pg_basebackup` command.
+	//
+	// IMPORTANT: Use with caution. The operator rejects the options it relies on,
+	// as listed in the bootstrap documentation, but it does not validate the
+	// others, and some of them may still interfere with its intended
+	// functionality or design.
+	// You are responsible for ensuring that the provided options are compatible
+	// with your environment and PostgreSQL version.
+	//
+	// +optional
+	AdditionalArgs []string `json:"additionalArgs,omitempty"`
+
+	// Maps each tablespace declared in `spec.tablespaces` to its location
+	// in the source instance.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	TablespaceMapping []TablespaceMappingEntry `json:"tablespaceMapping,omitempty"`
+}
+
+// TablespaceMappingEntry maps a tablespace managed by CloudNativePG to the
+// location of the same tablespace in the source instance of a `pg_basebackup`
+// bootstrap.
+type TablespaceMappingEntry struct {
+	// Name of the tablespace, as declared in `spec.tablespaces`.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Absolute path of the tablespace in the source instance. It must not
+	// contain the `=` or `\` characters and must be unique among the entries.
+	// +kubebuilder:validation:MinLength=1
+	SourceLocation string `json:"sourceLocation"`
 }
 
 // RecoveryTarget allows to configure the moment where the recovery process
@@ -2036,7 +2469,8 @@ type RecoveryTarget struct {
 	// +optional
 	TargetLSN string `json:"targetLSN,omitempty"`
 
-	// The target time as a timestamp in the RFC3339 standard
+	// The target time as a timestamp in RFC3339 format or PostgreSQL timestamp format.
+	// Timestamps without an explicit timezone are interpreted as UTC.
 	// +optional
 	TargetTime string `json:"targetTime,omitempty"`
 
@@ -2468,6 +2902,11 @@ type PluginStatus struct {
 	// +optional
 	RestoreJobHookCapabilities []string `json:"restoreJobHookCapabilities,omitempty"`
 
+	// PostgresCapabilities are the list of capabilities of the
+	// plugin regarding the PostgreSQL configuration
+	// +optional
+	PostgresCapabilities []string `json:"postgresCapabilities,omitempty"`
+
 	// Status contain the status reported by the plugin through the SetStatusInCluster interface
 	// +optional
 	Status string `json:"status,omitempty"`
@@ -2482,6 +2921,7 @@ type PluginStatus struct {
 type RoleConfiguration struct {
 	// Name of the role
 	Name string `json:"name"`
+
 	// Description of the role
 	// +optional
 	Comment string `json:"comment,omitempty"`
@@ -2492,8 +2932,10 @@ type RoleConfiguration struct {
 	// +optional
 	Ensure EnsureOption `json:"ensure,omitempty"`
 
-	// Secret containing the password of the role (if present)
-	// If null, the password will be ignored unless DisablePassword is set
+	// Secret containing the password of the role (if present).
+	// If null, the password will be ignored unless DisablePassword is set.
+	// When set, the secret must follow the `kubernetes.io/basic-auth` format
+	// and contain both a `username` and a `password` field.
 	// +optional
 	PasswordSecret *LocalObjectReference `json:"passwordSecret,omitempty"`
 
@@ -2505,16 +2947,22 @@ type RoleConfiguration struct {
 
 	// Date and time after which the role's password is no longer valid.
 	// When omitted, the password will never expire (default).
+	// On a `DatabaseRole` whose password the operator generates with a
+	// `password.duration`, this is controlled by the operator instead: the role
+	// is valid until the generated password expires, and setting `validUntil`
+	// explicitly is rejected.
 	// +optional
 	ValidUntil *metav1.Time `json:"validUntil,omitempty"`
 
 	// List of one or more existing roles to which this role will be
 	// immediately added as a new member. Default empty.
+	// Changes to the list are applied to an existing role through
+	// `GRANT` and `REVOKE` statements, not only at role creation.
 	// +optional
 	InRoles []string `json:"inRoles,omitempty"`
 
 	// Whether a role "inherits" the privileges of roles it is a member of.
-	// Defaults is `true`.
+	// Default is `true`.
 	// +kubebuilder:default:=true
 	// +optional
 	Inherit *bool `json:"inherit,omitempty"` // IMPORTANT default is INHERIT
@@ -2569,12 +3017,13 @@ type RoleConfiguration struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:storageversion
 // +kubebuilder:subresource:status
-// +kubebuilder:subresource:scale:specpath=.spec.instances,statuspath=.status.instances
+// +kubebuilder:subresource:scale:specpath=.spec.instances,statuspath=.status.instances,selectorpath=.status.selector
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Instances",type="integer",JSONPath=".status.instances",description="Number of instances"
 // +kubebuilder:printcolumn:name="Ready",type="integer",JSONPath=".status.readyInstances",description="Number of ready instances"
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="Cluster current status"
 // +kubebuilder:printcolumn:name="Primary",type="string",JSONPath=".status.currentPrimary",description="Primary pod"
+// +kubebuilder:printcolumn:name="SyncTopology",type="string",JSONPath=".status.conditions[?(@.type=='SyncReplicationTopologySatisfied')].reason",description="Failure domain topology satisfaction status",priority=1
 
 // Cluster defines the API schema for a highly available PostgreSQL database cluster
 // managed by CloudNativePG.
@@ -2661,8 +3110,4 @@ type ConfigMapResourceVersion struct {
 	// Map keys are the config map names, map values are the versions
 	// +optional
 	Metrics map[string]string `json:"metrics,omitempty"`
-}
-
-func init() {
-	SchemeBuilder.Register(&Cluster{}, &ClusterList{})
 }

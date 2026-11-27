@@ -123,6 +123,12 @@ namespace scope or clusterwide
 - apiGroups:
   - ""
   resources:
+  - pods/resize
+  verbs:
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - pods/status
   verbs:
   - get
@@ -166,8 +172,19 @@ namespace scope or clusterwide
   - leases
   verbs:
   - create
+  - delete
   - get
+  - list
   - update
+  - watch
+- apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - monitoring.coreos.com
   resources:
@@ -196,6 +213,7 @@ namespace scope or clusterwide
   resources:
   - backups
   - clusters
+  - databaseroles
   - databases
   - poolers
   - publications
@@ -208,16 +226,6 @@ namespace scope or clusterwide
   - list
   - patch
   - update
-  - watch
-- apiGroups:
-  - postgresql.cnpg.io
-  resources:
-  - failoverquorums
-  verbs:
-  - create
-  - delete
-  - get
-  - list
   - watch
 - apiGroups:
   - postgresql.cnpg.io
@@ -243,6 +251,7 @@ namespace scope or clusterwide
   - postgresql.cnpg.io
   resources:
   - clusters/finalizers
+  - databaseroles/finalizers
   - poolers/finalizers
   verbs:
   - update
@@ -250,12 +259,23 @@ namespace scope or clusterwide
   - postgresql.cnpg.io
   resources:
   - clusters/status
-  - poolers/status
+  - databaseroles/status
   - failoverquorums/status
+  - poolers/status
   verbs:
   - get
   - patch
   - update
+  - watch
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - failoverquorums
+  verbs:
+  - create
+  - delete
+  - get
+  - list
   - watch
 - apiGroups:
   - rbac.authorization.k8s.io

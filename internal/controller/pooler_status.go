@@ -21,7 +21,8 @@ package controller
 
 import (
 	"context"
-	"reflect"
+
+	"k8s.io/apimachinery/pkg/api/equality"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 )
@@ -54,6 +55,8 @@ func (r *PoolerReconciler) updatePoolerStatus(
 			Name:    resources.ServerCASecret.Name,
 			Version: resources.ServerCASecret.ResourceVersion,
 		}
+	} else {
+		updatedStatus.Secrets.ServerCA = apiv1.SecretVersion{}
 	}
 
 	if resources.ClientCASecret != nil {
@@ -61,6 +64,8 @@ func (r *PoolerReconciler) updatePoolerStatus(
 			Name:    resources.ClientCASecret.Name,
 			Version: resources.ClientCASecret.ResourceVersion,
 		}
+	} else {
+		updatedStatus.Secrets.ClientCA = apiv1.SecretVersion{}
 	}
 
 	if resources.ClientTLSSecret != nil {
@@ -68,6 +73,8 @@ func (r *PoolerReconciler) updatePoolerStatus(
 			Name:    resources.ClientTLSSecret.Name,
 			Version: resources.ClientTLSSecret.ResourceVersion,
 		}
+	} else {
+		updatedStatus.Secrets.ClientTLS = apiv1.SecretVersion{}
 	}
 
 	if resources.ServerTLSSecret != nil {
@@ -75,14 +82,39 @@ func (r *PoolerReconciler) updatePoolerStatus(
 			Name:    resources.ServerTLSSecret.Name,
 			Version: resources.ServerTLSSecret.ResourceVersion,
 		}
+	} else {
+		// Clear ServerTLS when not using manual TLS authentication.
+		// This is particularly important for migration from v1.27, where
+		// ServerTLS was always set to the cluster's server certificate.
+		updatedStatus.Secrets.ServerTLS = apiv1.SecretVersion{}
 	}
 
 	if resources.Deployment != nil {
 		updatedStatus.Instances = resources.Deployment.Status.Replicas
 	}
 
+	image, err := r.resolvePoolerImage(ctx, pooler)
+	switch {
+	case err != nil:
+		r.Recorder.Event(pooler, "Warning", "ImageCatalogError", err.Error())
+		updatedStatus.Phase = apiv1.PoolerPhaseFailed
+		updatedStatus.PhaseReason = err.Error()
+	case isPgBouncerPaused(pooler):
+		// The deployment still runs while paused; the manager calls PgBouncer's
+		// PAUSE command so existing connections are kept open and new clients
+		// are queued. Paused is a deliberate operational state, distinct from
+		// Inactive (which means a prerequisite is missing).
+		updatedStatus.Phase = apiv1.PoolerPhasePaused
+		updatedStatus.PhaseReason = "pgbouncer is paused"
+		updatedStatus.Image = image
+	default:
+		updatedStatus.Phase = apiv1.PoolerPhaseActive
+		updatedStatus.PhaseReason = ""
+		updatedStatus.Image = image
+	}
+
 	// then update the status if anything changed
-	if !reflect.DeepEqual(pooler.Status, updatedStatus) {
+	if !equality.Semantic.DeepEqual(pooler.Status, *updatedStatus) {
 		pooler.Status = *updatedStatus
 		return r.Status().Update(ctx, pooler)
 	}

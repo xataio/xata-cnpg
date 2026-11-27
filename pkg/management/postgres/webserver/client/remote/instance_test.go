@@ -20,70 +20,101 @@ SPDX-License-Identifier: Apache-2.0
 package remote
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
-	"testing"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-type trackedRequestBody struct {
-	closeCalls int
-	closeError error
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
-func (b *trackedRequestBody) Read(_ []byte) (int, error) {
-	return 0, io.EOF
-}
+var _ = Describe("getReplicaStatusFromPodViaHTTP", func() {
+	var pod corev1.Pod
 
-func (b *trackedRequestBody) Close() error {
-	b.closeCalls++
-	return b.closeError
-}
+	BeforeEach(func() {
+		pod = corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "cluster-1"},
+			Status:     corev1.PodStatus{PodIP: "192.0.2.1"},
+		}
+	})
 
-type eofTransport struct{}
+	It("does not retry an HTTP error and preserves its status code and body", func(ctx SpecContext) {
+		const body = "PostgreSQL socket is absent"
+		requests := 0
+		client := instanceClientImpl{Client: &http.Client{
+			Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+				requests++
+				return &http.Response{
+					StatusCode: http.StatusInternalServerError,
+					Body:       io.NopCloser(strings.NewReader(body)),
+				}, nil
+			}),
+		}}
 
-func (eofTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if err := req.Body.Close(); err != nil {
-		return nil, err
-	}
-	return nil, io.EOF
-}
+		status := client.getReplicaStatusFromPodViaHTTP(ctx, pod)
 
-func TestUpgradeInstanceManagerLeavesRequestBodyOwnershipToTransport(t *testing.T) {
-	t.Parallel()
+		Expect(status.Error).To(HaveOccurred())
+		var statusErr *StatusError
+		Expect(errors.As(status.Error, &statusErr)).To(BeTrue())
+		Expect(statusErr.StatusCode).To(Equal(http.StatusInternalServerError))
+		Expect(statusErr.Body).To(Equal(body))
+		Expect(requests).To(Equal(1))
+	})
 
-	body := &trackedRequestBody{}
-	client := &instanceClientImpl{
-		Client: &http.Client{Transport: eofTransport{}},
-	}
-	pod := &corev1.Pod{Status: corev1.PodStatus{PodIP: "127.0.0.1"}}
+	It("does not retry an authentication error and preserves its status code and body", func(ctx SpecContext) {
+		const body = "client certificate required"
+		requests := 0
+		client := instanceClientImpl{Client: &http.Client{
+			Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+				requests++
+				return &http.Response{
+					StatusCode: http.StatusUnauthorized,
+					Body:       io.NopCloser(strings.NewReader(body)),
+				}, nil
+			}),
+		}}
 
-	if err := client.upgradeInstanceManager(context.Background(), pod, body); err != nil {
-		t.Fatalf("expected EOF to indicate a successful upgrade, got %v", err)
-	}
-	if body.closeCalls != 1 {
-		t.Fatalf("expected transport to close request body once, got %d calls", body.closeCalls)
-	}
-}
+		status := client.getReplicaStatusFromPodViaHTTP(ctx, pod)
 
-func TestUpgradeInstanceManagerReturnsRequestBodyCloseError(t *testing.T) {
-	t.Parallel()
+		Expect(status.Error).To(HaveOccurred())
+		var statusErr *StatusError
+		Expect(errors.As(status.Error, &statusErr)).To(BeTrue())
+		Expect(statusErr.StatusCode).To(Equal(http.StatusUnauthorized))
+		Expect(statusErr.Body).To(Equal(body))
+		Expect(IsTransientAuthError(status.Error)).To(BeFalse())
+		Expect(requests).To(Equal(1))
+	})
 
-	closeError := errors.New("close request body")
-	body := &trackedRequestBody{closeError: closeError}
-	client := &instanceClientImpl{
-		Client: &http.Client{Transport: eofTransport{}},
-	}
-	pod := &corev1.Pod{Status: corev1.PodStatus{PodIP: "127.0.0.1"}}
+	It("retries a transient transport error and decodes the successful response", func(ctx SpecContext) {
+		requests := 0
+		client := instanceClientImpl{Client: &http.Client{
+			Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+				requests++
+				if requests == 1 {
+					return nil, io.EOF
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"systemID":"12345","isPrimary":true}`)),
+				}, nil
+			}),
+		}}
 
-	err := client.upgradeInstanceManager(context.Background(), pod, body)
-	if !errors.Is(err, closeError) {
-		t.Fatalf("expected request body close error, got %v", err)
-	}
-	if body.closeCalls != 1 {
-		t.Fatalf("expected transport to close request body once, got %d calls", body.closeCalls)
-	}
-}
+		status := client.getReplicaStatusFromPodViaHTTP(ctx, pod)
+
+		Expect(requests).To(Equal(2))
+		Expect(status.Error).ToNot(HaveOccurred())
+		Expect(status.SystemID).To(Equal("12345"))
+		Expect(status.IsPrimary).To(BeTrue())
+	})
+})

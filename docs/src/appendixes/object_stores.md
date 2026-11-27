@@ -6,13 +6,18 @@ title: Appendix C - Common object stores for backups
 # Appendix C - Common object stores for backups
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-!!! Warning
+:::warning
     As of CloudNativePG 1.26, **native Barman Cloud support is deprecated** in
-    favor of the **Barman Cloud Plugin**. While the native integration remains
-    functional for now, we strongly recommend beginning a gradual migration to
-    the plugin-based interface after appropriate testing. The Barman Cloud
-    Plugin documentation describes
-    [how to use common object stores](https://cloudnative-pg.io/plugin-barman-cloud/docs/object_stores/).
+    favor of the **Barman Cloud Plugin**. **CloudNativePG 1.31 is the last
+    minor release that ships with native Barman Cloud support, which is removed
+    starting from 1.32.0.** Releases up to and including 1.31, and their patch
+    releases, keep native support for as long as they are supported. You must
+    migrate to the plugin before upgrading to 1.32 or later. We strongly
+    recommend migrating to the plugin-based interface after appropriate testing.
+    The Barman Cloud Plugin documentation describes
+    [how to use common object stores](https://cloudnative-pg.io/plugin-barman-cloud/docs/object_stores/)
+    and [how to migrate from the built-in backup](https://cloudnative-pg.io/plugin-barman-cloud/docs/migration/).
+:::
 
 You can store the [backup](../backup.md) files in any service that is supported
 by the Barman Cloud infrastructure. That is:
@@ -25,6 +30,16 @@ You can also use any compatible implementation of the supported services.
 
 The required setup depends on the chosen storage provider and is
 discussed in the following sections.
+
+:::note Authentication Methods
+CloudNativePG does not independently test all authentication methods
+supported by `barman-cloud`. CloudNativePG's responsibility is limited to passing
+the provided credentials to `barman-cloud`, which then handles authentication
+according to its own implementation. Users should refer to the
+[Barman Cloud documentation](https://docs.pgbarman.org/release/latest/) to
+verify that their chosen authentication method is supported and properly
+configured.
+:::
 
 ## AWS S3
 
@@ -125,6 +140,15 @@ In case you're using S3-compatible object storage, like **MinIO** or
 **Linode Object Storage**, you can specify an endpoint instead of using the
 default S3 one.
 
+:::warning
+Barman Cloud uses the Boto3 SDK and takes AWS S3 as its reference
+implementation. Issues you can reproduce on AWS S3 are treated as Barman Cloud
+defects. Issues that happen only on a third-party object store are API
+incompatibilities, and you must resolve them with your storage vendor. See the
+[Barman Cloud documentation](https://docs.pgbarman.org/release/latest/) for
+known workarounds.
+:::
+
 In this example, it will use the `bucket` of **Linode** in the region
 `us-east1`.
 
@@ -157,6 +181,89 @@ spec:
         [...]
 ```
 
+:::note
+Recent changes to the [boto3 implementation](https://github.com/boto/boto3/issues/4392)
+of [Amazon S3 Data Integrity Protections](https://docs.aws.amazon.com/sdkref/latest/guide/feature-dataintegrity.html)
+may lead to the `x-amz-content-sha256` error. If you encounter this issue, you
+can apply the following workaround by setting specific environment variables at
+the cluster level through `spec.env`:
+
+```yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+[...]
+spec:
+  env:
+    - name: AWS_REQUEST_CHECKSUM_CALCULATION
+      value: when_required
+    - name: AWS_RESPONSE_CHECKSUM_VALIDATION
+      value: when_required
+```
+:::
+
+### Server-Side Encryption with customer-provided keys (SSE-C)
+
+Some S3-compatible providers, such as Hetzner Object Storage, do not offer
+bucket-managed server-side encryption (SSE-S3 / SSE-KMS) and only support
+Server-Side Encryption with customer-provided keys (SSE-C). With SSE-C, the
+encryption key is supplied with every request, and the provider uses it to
+encrypt and decrypt objects without storing it.
+
+To enable SSE-C, set the `sseCustomerKey` field in the `s3Credentials` section
+to a reference to a secret holding a base64-encoded 256-bit (32-byte) AES key.
+SSE-C requires Barman Cloud 3.20 or later in the operand image: with an older
+version, WAL archiving and backups fail with
+`unrecognized arguments: --sse-customer-key`.
+
+Generate the key and store it in a Kubernetes secret:
+
+```sh
+openssl rand 32 | base64 > encryption.key
+
+kubectl create secret generic aws-sse-c \
+  --from-file=key=encryption.key
+```
+
+:::warning
+    Keep this key safe and backed up **outside** the object store. If you lose
+    it, your backups and WAL files become permanently unrecoverable: the
+    provider cannot decrypt them for you.
+:::
+
+Then reference the secret in the `Cluster` definition:
+
+```yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+[...]
+spec:
+  backup:
+    barmanObjectStore:
+      destinationPath: "s3://BUCKET_NAME/path/to/folder"
+      endpointURL: "https://fsn1.your-objectstorage.com"
+      s3Credentials:
+        accessKeyId:
+          name: aws-creds
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: aws-creds
+          key: ACCESS_SECRET_KEY
+        sseCustomerKey:
+          name: aws-sse-c
+          key: key
+      [...]
+```
+
+The same key is used for every operation: base backups, WAL archiving, WAL
+restore and recovery. It must remain unchanged and available for the whole
+lifetime of the backups it protects. To use a new key, use a new
+`destinationPath` or `serverName`.
+
+`sseCustomerKey` works with any authentication method, including
+`inheritFromIAMRole`. It cannot be combined with the bucket-managed
+`encryption` setting of the `data` and `wal` sections: a `Cluster` that sets
+both is rejected.
+
 ### Using Object Storage with a private CA
 
 Suppose you configure an Object Storage provider which uses a certificate
@@ -183,27 +290,26 @@ spec:
         key: ca.crt
 ```
 
-!!! Note
+:::note
     If you want ConfigMaps and Secrets to be **automatically** reloaded by instances, you can
     add a label with key `cnpg.io/reload` to the Secrets/ConfigMaps. Otherwise, you will have to reload
     the instances using the `kubectl cnpg reload` subcommand.
+:::
 
 ## Azure Blob Storage
 
 [Azure Blob Storage](https://azure.microsoft.com/en-us/services/storage/blobs/) is the
 object storage service provided by Microsoft.
 
-In order to access your storage account for backup and recovery of
-CloudNativePG managed databases, you will need one of the following
-combinations of credentials:
+CloudNativePG supports the following authentication methods for Azure Blob Storage:
 
 - [Connection String](https://docs.microsoft.com/en-us/azure/storage/common/storage-configure-connection-string#configure-a-connection-string-for-an-azure-storage-account)
-- Storage account name and [Storage account access key](https://docs.microsoft.com/en-us/azure/storage/common/storage-account-keys-manage)
-- Storage account name and [Storage account SAS Token](https://docs.microsoft.com/en-us/azure/storage/blobs/sas-service-create)
-- Storage account name and [Azure AD Workload Identity](https://azure.github.io/azure-workload-identity/docs/introduction.html)
-properly configured.
+- Storage Account Name + [Storage Account Access Key](https://docs.microsoft.com/en-us/azure/storage/common/storage-account-keys-manage)
+- Storage Account Name + [Storage Account SAS Token](https://docs.microsoft.com/en-us/azure/storage/blobs/sas-service-create)
+- [Azure AD Managed Identity](https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/overview)
+- [Default Azure Credentials](https://learn.microsoft.com/en-us/python/api/azure-identity/azure.identity.defaultazurecredential?view=azure-python)
 
-Using **Azure AD Workload Identity**, you can avoid saving the credentials into a Kubernetes Secret,
+Using **Azure AD Managed Identity**, you can avoid saving the credentials into a Kubernetes Secret,
 and have a Cluster configuration adding the `inheritFromAzureAD` as follows:
 
 ```yaml
@@ -216,6 +322,23 @@ spec:
       destinationPath: "<destination path here>"
       azureCredentials:
         inheritFromAzureAD: true
+```
+
+Alternatively, you can use the **Default Azure Credentials** authentication mechanism, which provides
+a seamless authentication experience by supporting multiple authentication methods including environment
+variables, managed identities, and Azure CLI credentials. Add the `useDefaultAzureCredentials` flag
+as follows:
+
+```yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+[...]
+spec:
+  backup:
+    barmanObjectStore:
+      destinationPath: "<destination path here>"
+      azureCredentials:
+        useDefaultAzureCredentials: true
 ```
 
 On the other side, using both **Storage account access key** or **Storage account SAS Token**,
@@ -351,7 +474,8 @@ spec:
 
 Now the operator will use the credentials to authenticate against Google Cloud Storage.
 
-!!! Important
+:::info[Important]
     This way of authentication will create a JSON file inside the container with all the needed
     information to access your Google Cloud Storage bucket, meaning that if someone gets access to the pod
     will also have write permissions to the bucket.
+:::

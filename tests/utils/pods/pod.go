@@ -21,14 +21,13 @@ SPDX-License-Identifier: Apache-2.0
 package pods
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"time"
 
-	"github.com/avast/retry-go/v4"
+	"github.com/avast/retry-go/v5"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -92,23 +91,24 @@ func waitForReady(
 	pod *corev1.Pod,
 	timeoutSeconds uint,
 ) error {
-	err := retry.Do(
-		func() error {
-			if err := crudClient.Get(ctx, client.ObjectKey{
-				Namespace: pod.Namespace,
-				Name:      pod.Name,
-			}, pod); err != nil {
-				return err
-			}
-			if !utils.IsPodReady(*pod) {
-				return fmt.Errorf("pod not ready. Namespace: %v, Name: %v", pod.Namespace, pod.Name)
-			}
-			return nil
-		},
+	err := retry.New(
 		retry.Attempts(timeoutSeconds),
 		retry.Delay(time.Second),
-		retry.DelayType(retry.FixedDelay),
-	)
+		retry.DelayType(retry.FixedDelay)).
+		Do(
+			func() error {
+				if err := crudClient.Get(ctx, client.ObjectKey{
+					Namespace: pod.Namespace,
+					Name:      pod.Name,
+				}, pod); err != nil {
+					return err
+				}
+				if !utils.IsPodReady(*pod) {
+					return fmt.Errorf("pod not ready. Namespace: %v, Name: %v", pod.Namespace, pod.Name)
+				}
+				return nil
+			},
+		)
 	return err
 }
 
@@ -118,25 +118,31 @@ func Logs(
 	kubeInterface kubernetes.Interface,
 	namespace, podName string,
 ) (string, error) {
-	req := kubeInterface.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{})
+	return ContainerLogs(ctx, kubeInterface, namespace, podName, "")
+}
+
+// ContainerLogs gathers the logs of a container of a pod, or of its only
+// container when the name is empty
+func ContainerLogs(
+	ctx context.Context,
+	kubeInterface kubernetes.Interface,
+	namespace, podName, containerName string,
+) (string, error) {
+	req := kubeInterface.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{Container: containerName})
 	podLogs, err := req.Stream(ctx)
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		innerErr := podLogs.Close()
-		if err == nil && innerErr != nil {
-			err = innerErr
-		}
-	}()
 
-	// Create a buffer to hold JSON data
-	buf := new(bytes.Buffer)
-	_, err = io.Copy(buf, podLogs)
+	logs, err := io.ReadAll(podLogs)
+	closeErr := podLogs.Close()
 	if err != nil {
 		return "", err
 	}
-	return buf.String(), nil
+	if closeErr != nil {
+		return "", closeErr
+	}
+	return string(logs), nil
 }
 
 // Get gets a pod by namespace and name

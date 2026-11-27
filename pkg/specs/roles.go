@@ -30,11 +30,30 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/utils"
 )
 
-// CreateRole create a role with the permissions needed by the instance manager.
-// activeBackups are the names of the Backups of the cluster that are not done.
-// The instance manager can read and write only those Backups, and read only the
-// Backup the cluster bootstraps from.
-func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups []string) rbacv1.Role {
+// RoleOptions are the information needed to create the Role object
+// with the permissions used by the CNPG instance manager
+type RoleOptions struct {
+	// Cluster is the cluster that should be used to generate
+	// the permissions
+	Cluster *apiv1.Cluster
+
+	// BackupOrigin is the backup object that is being used to restore
+	// this cluster, if any.
+	BackupOrigin *apiv1.Backup
+
+	// Roles is the list of PostgreSQL roles. It is used to grant
+	// the instance manager permissions to read the secrets that
+	// contain the roles' password.
+	Roles []apiv1.DatabaseRole
+
+	// ActiveBackups are the names of the Backups of the cluster that are
+	// not done. The instance manager can read and write only those Backups,
+	// and read only the Backup the cluster bootstraps from.
+	ActiveBackups []string
+}
+
+// CreateRole create a role with the permissions needed by the instance manager
+func CreateRole(opts RoleOptions) rbacv1.Role {
 	rules := []rbacv1.PolicyRule{
 		{
 			APIGroups: []string{
@@ -47,7 +66,7 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 				"get",
 				"watch",
 			},
-			ResourceNames: getInvolvedConfigMapNames(cluster),
+			ResourceNames: getInvolvedConfigMapNames(opts.Cluster),
 		},
 		{
 			APIGroups: []string{
@@ -60,11 +79,11 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 				"get",
 				"watch",
 			},
-			ResourceNames: getInvolvedSecretNames(cluster, backupOrigin),
+			ResourceNames: getInvolvedSecretNames(opts),
 		},
 		{
 			APIGroups: []string{
-				"postgresql.cnpg.io",
+				apiv1.SchemeGroupVersion.Group,
 			},
 			Resources: []string{
 				"clusters",
@@ -75,12 +94,12 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 				"watch",
 			},
 			ResourceNames: []string{
-				cluster.Name,
+				opts.Cluster.Name,
 			},
 		},
 		{
 			APIGroups: []string{
-				"postgresql.cnpg.io",
+				apiv1.SchemeGroupVersion.Group,
 			},
 			Resources: []string{
 				"clusters/status",
@@ -92,7 +111,7 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 				"watch",
 			},
 			ResourceNames: []string{
-				cluster.Name,
+				opts.Cluster.Name,
 			},
 		},
 		{
@@ -109,7 +128,7 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 		},
 		{
 			APIGroups: []string{
-				"postgresql.cnpg.io",
+				apiv1.SchemeGroupVersion.Group,
 			},
 			Resources: []string{
 				"databases",
@@ -124,7 +143,7 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 		},
 		{
 			APIGroups: []string{
-				"postgresql.cnpg.io",
+				apiv1.SchemeGroupVersion.Group,
 			},
 			Resources: []string{
 				"databases/status",
@@ -137,7 +156,7 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 		},
 		{
 			APIGroups: []string{
-				"postgresql.cnpg.io",
+				apiv1.SchemeGroupVersion.Group,
 			},
 			Resources: []string{
 				"publications",
@@ -152,7 +171,7 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 		},
 		{
 			APIGroups: []string{
-				"postgresql.cnpg.io",
+				apiv1.SchemeGroupVersion.Group,
 			},
 			Resources: []string{
 				"publications/status",
@@ -165,7 +184,7 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 		},
 		{
 			APIGroups: []string{
-				"postgresql.cnpg.io",
+				apiv1.SchemeGroupVersion.Group,
 			},
 			Resources: []string{
 				"subscriptions",
@@ -180,7 +199,7 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 		},
 		{
 			APIGroups: []string{
-				"postgresql.cnpg.io",
+				apiv1.SchemeGroupVersion.Group,
 			},
 			Resources: []string{
 				"subscriptions/status",
@@ -193,7 +212,22 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 		},
 		{
 			APIGroups: []string{
-				"postgresql.cnpg.io",
+				"coordination.k8s.io",
+			},
+			Resources: []string{
+				"leases",
+			},
+			Verbs: []string{
+				"get",
+				"update",
+			},
+			ResourceNames: []string{
+				opts.Cluster.Name,
+			},
+		},
+		{
+			APIGroups: []string{
+				apiv1.SchemeGroupVersion.Group,
 			},
 			Resources: []string{
 				"failoverquorums",
@@ -204,12 +238,12 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 				"watch",
 			},
 			ResourceNames: []string{
-				cluster.Name,
+				opts.Cluster.Name,
 			},
 		},
 		{
 			APIGroups: []string{
-				"postgresql.cnpg.io",
+				apiv1.SchemeGroupVersion.Group,
 			},
 			Resources: []string{
 				"failoverquorums/status",
@@ -221,48 +255,82 @@ func CreateRole(cluster apiv1.Cluster, backupOrigin *apiv1.Backup, activeBackups
 				"watch",
 			},
 			ResourceNames: []string{
-				cluster.Name,
+				opts.Cluster.Name,
+			},
+		},
+		{
+			APIGroups: []string{
+				"postgresql.cnpg.io",
+			},
+			Resources: []string{
+				"databaseroles",
+			},
+			Verbs: []string{
+				"get",
+				"update",
+				"list",
+				"watch",
+			},
+			ResourceNames: []string{},
+		},
+		{
+			APIGroups: []string{
+				"postgresql.cnpg.io",
+			},
+			Resources: []string{
+				"databaseroles/status",
+			},
+			Verbs: []string{
+				"get",
+				"patch",
+				"update",
 			},
 		},
 	}
 
 	return rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: cluster.Namespace,
-			Name:      cluster.Name,
+			Namespace: opts.Cluster.Namespace,
+			Name:      opts.Cluster.Name,
 			Labels: map[string]string{
 				utils.KubernetesAppManagedByLabelName: utils.ManagerName,
 			},
 		},
-		Rules: slices.Concat(rules, backupRules(backupOrigin, activeBackups)),
+		Rules: slices.Concat(rules, backupRules(opts.BackupOrigin, opts.ActiveBackups)),
 	}
 }
 
-func getInvolvedSecretNames(cluster apiv1.Cluster, backupOrigin *apiv1.Backup) []string {
+func getInvolvedSecretNames(opts RoleOptions) []string {
 	involvedSecretNames := []string{
-		cluster.GetReplicationSecretName(),
-		cluster.GetClientCASecretName(),
-		cluster.GetServerCASecretName(),
-		cluster.GetServerTLSSecretName(),
-		cluster.GetApplicationSecretName(),
-		cluster.GetSuperuserSecretName(),
-		cluster.GetLDAPSecretName(),
+		opts.Cluster.GetReplicationSecretName(),
+		opts.Cluster.GetClientCASecretName(),
+		opts.Cluster.GetServerCASecretName(),
+		opts.Cluster.GetServerTLSSecretName(),
+		opts.Cluster.GetApplicationSecretName(),
+		opts.Cluster.GetSuperuserSecretName(),
+		opts.Cluster.GetLDAPSecretName(),
 	}
 
-	if cluster.Spec.Monitoring != nil {
-		for _, secretName := range cluster.Spec.Monitoring.CustomQueriesSecret {
+	if opts.Cluster.Spec.Monitoring != nil {
+		for _, secretName := range opts.Cluster.Spec.Monitoring.CustomQueriesSecret {
 			involvedSecretNames = append(involvedSecretNames, secretName.Name)
 		}
 	}
 
-	involvedSecretNames = append(involvedSecretNames, backupSecrets(cluster, backupOrigin)...)
-	involvedSecretNames = append(involvedSecretNames, externalClusterSecrets(cluster)...)
-	involvedSecretNames = append(involvedSecretNames, managedRolesSecrets(cluster)...)
+	if bootstrap := opts.Cluster.Spec.Bootstrap; bootstrap != nil && bootstrap.Recovery != nil &&
+		bootstrap.Recovery.Backup != nil && bootstrap.Recovery.Backup.EndpointCA != nil {
+		involvedSecretNames = append(involvedSecretNames, bootstrap.Recovery.Backup.EndpointCA.Name)
+	}
+
+	involvedSecretNames = append(involvedSecretNames, backupSecrets(opts.Cluster, opts.BackupOrigin)...)
+	involvedSecretNames = append(involvedSecretNames, externalClusterSecrets(opts.Cluster)...)
+	involvedSecretNames = append(involvedSecretNames, managedRolesSecrets(opts.Cluster)...)
+	involvedSecretNames = append(involvedSecretNames, customResourceRolesSecrets(opts.Roles)...)
 
 	return cleanupResourceList(involvedSecretNames)
 }
 
-func getInvolvedConfigMapNames(cluster apiv1.Cluster) []string {
+func getInvolvedConfigMapNames(cluster *apiv1.Cluster) []string {
 	involvedConfigMapNames := []string{
 		cluster.Name,
 	}
@@ -287,7 +355,7 @@ func cleanupResourceList(resourceList []string) []string {
 	})
 }
 
-func externalClusterSecrets(cluster apiv1.Cluster) []string {
+func externalClusterSecrets(cluster *apiv1.Cluster) []string {
 	var result []string
 
 	for _, server := range cluster.Spec.ExternalClusters {
@@ -308,15 +376,7 @@ func externalClusterSecrets(cluster apiv1.Cluster) []string {
 				server.Password.Name)
 		}
 		if barmanObjStore := server.BarmanObjectStore; barmanObjStore != nil {
-			result = append(
-				result,
-				s3CredentialsSecrets(barmanObjStore.AWS)...)
-			result = append(
-				result,
-				azureCredentialsSecrets(barmanObjStore.Azure)...)
-			result = append(
-				result,
-				googleCredentialsSecrets(barmanObjStore.Google)...)
+			result = append(result, barmanObjStore.SecretNames()...)
 			if barmanObjStore.EndpointCA != nil {
 				result = append(result, barmanObjStore.EndpointCA.Name)
 			}
@@ -329,22 +389,14 @@ func externalClusterSecrets(cluster apiv1.Cluster) []string {
 	return result
 }
 
-func backupSecrets(cluster apiv1.Cluster, backupOrigin *apiv1.Backup) []string {
+func backupSecrets(cluster *apiv1.Cluster, backupOrigin *apiv1.Backup) []string {
 	var result []string
 
 	// Secrets needed by the configured backup method (barman or pgbackrest, never both)
 	if cluster.Spec.Backup != nil && cluster.Spec.Backup.IsPgBackRestConfigured() {
 		result = append(result, pgbackrestSecrets(cluster)...)
 	} else if cluster.Spec.Backup != nil && cluster.Spec.Backup.BarmanObjectStore != nil {
-		result = append(
-			result,
-			s3CredentialsSecrets(cluster.Spec.Backup.BarmanObjectStore.AWS)...)
-		result = append(
-			result,
-			azureCredentialsSecrets(cluster.Spec.Backup.BarmanObjectStore.Azure)...)
-		result = append(
-			result,
-			googleCredentialsSecrets(cluster.Spec.Backup.BarmanObjectStore.Google)...)
+		result = append(result, cluster.Spec.Backup.BarmanObjectStore.SecretNames()...)
 
 		// Secrets needed by Barman, if set
 		if cluster.Spec.Backup.IsBarmanEndpointCASet() {
@@ -355,21 +407,16 @@ func backupSecrets(cluster apiv1.Cluster, backupOrigin *apiv1.Backup) []string {
 	}
 
 	if backupOrigin != nil {
-		result = append(
-			result,
-			s3CredentialsSecrets(backupOrigin.Status.AWS)...)
-		result = append(
-			result,
-			azureCredentialsSecrets(backupOrigin.Status.Azure)...)
-		result = append(
-			result,
-			googleCredentialsSecrets(backupOrigin.Status.Google)...)
+		result = append(result, backupOrigin.Status.SecretNames()...)
+		if backupOrigin.Status.EndpointCA != nil {
+			result = append(result, backupOrigin.Status.EndpointCA.Name)
+		}
 	}
 
 	return result
 }
 
-func pgbackrestSecrets(cluster apiv1.Cluster) []string {
+func pgbackrestSecrets(cluster *apiv1.Cluster) []string {
 	if cluster.Spec.Backup == nil || !cluster.Spec.Backup.IsPgBackRestConfigured() {
 		return nil
 	}
@@ -402,73 +449,7 @@ func pgbackrestRepositorySecrets(repository *apiv1.PgBackRestRepository) []strin
 	return result
 }
 
-func azureCredentialsSecrets(azureCredentials *apiv1.AzureCredentials) []string {
-	var result []string
-
-	if azureCredentials == nil {
-		return nil
-	}
-
-	if azureCredentials.ConnectionString != nil {
-		result = append(result,
-			azureCredentials.ConnectionString.Name)
-	}
-	if azureCredentials.StorageAccount != nil {
-		result = append(result,
-			azureCredentials.StorageAccount.Name)
-	}
-	if azureCredentials.StorageKey != nil {
-		result = append(result,
-			azureCredentials.StorageKey.Name)
-	}
-
-	if azureCredentials.StorageSasToken != nil {
-		result = append(result,
-			azureCredentials.StorageSasToken.Name)
-	}
-	return result
-}
-
-func s3CredentialsSecrets(s3Credentials *apiv1.S3Credentials) []string {
-	if s3Credentials == nil {
-		return nil
-	}
-
-	var secrets []string
-
-	if s3Credentials.AccessKeyIDReference != nil {
-		secrets = append(secrets, s3Credentials.AccessKeyIDReference.Name)
-	}
-
-	if s3Credentials.SecretAccessKeyReference != nil {
-		secrets = append(secrets, s3Credentials.SecretAccessKeyReference.Name)
-	}
-
-	if s3Credentials.RegionReference != nil {
-		secrets = append(secrets, s3Credentials.RegionReference.Name)
-	}
-
-	if s3Credentials.SessionToken != nil {
-		secrets = append(secrets, s3Credentials.SessionToken.Name)
-	}
-
-	return secrets
-}
-
-func googleCredentialsSecrets(googleCredentials *apiv1.GoogleCredentials) []string {
-	if googleCredentials == nil {
-		return nil
-	}
-	var secrets []string
-
-	if googleCredentials.ApplicationCredentials != nil {
-		return append(secrets, googleCredentials.ApplicationCredentials.Name)
-	}
-
-	return secrets
-}
-
-func managedRolesSecrets(cluster apiv1.Cluster) []string {
+func managedRolesSecrets(cluster *apiv1.Cluster) []string {
 	if cluster.Spec.Managed == nil {
 		return nil
 	}
@@ -524,4 +505,27 @@ func backupRules(backupOrigin *apiv1.Backup, activeBackups []string) []rbacv1.Po
 			ResourceNames: names,
 		},
 	)
+}
+
+func customResourceRolesSecrets(roles []apiv1.DatabaseRole) []string {
+	result := make([]string, 0, len(roles))
+
+	for i := range roles {
+		if secretName := crdRoleSecretName(&roles[i]); secretName != "" {
+			result = append(result, secretName)
+		}
+	}
+
+	return result
+}
+
+// crdRoleSecretName returns the Secret the instance manager must read to apply
+// the password of a DatabaseRole, be it supplied through `passwordSecret` or
+// generated by the operator. Without it in the RBAC rule the instance manager
+// cannot even create the role, since it cannot read the password to give it.
+func crdRoleSecretName(role *apiv1.DatabaseRole) string {
+	if role.Spec.DisablePassword {
+		return ""
+	}
+	return role.GetPasswordSecretName()
 }

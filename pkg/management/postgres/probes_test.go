@@ -21,18 +21,327 @@ package postgres
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/blang/semver"
+	"github.com/Masterminds/semver/v3"
+	"k8s.io/utils/ptr"
 
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
+var _ = Describe("GetStatus", func() {
+	It("reports the system ID from pg_control while PostgreSQL might be unavailable", func() {
+		binDir := GinkgoT().TempDir()
+		fakePgControldata := "#!/bin/sh\necho 'Database system identifier:           7412345678901234567'\n"
+		fakePath := filepath.Join(binDir, pgControlDataName)
+		Expect(os.WriteFile(fakePath, []byte(fakePgControldata), 0o700)).To(Succeed()) //nolint:gosec // executable
+		GinkgoT().Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+		instance := NewInstance().WithPodName("cluster-example-1")
+		instance.PgData = GinkgoT().TempDir()
+		instance.SocketDirectory = GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(instance.PgData, "standby.signal"), nil, 0o600)).To(Succeed())
+		instance.SetMightBeUnavailable(true)
+
+		status, err := instance.GetStatus()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(status.MightBeUnavailableMaskedError).ToNot(BeEmpty())
+		Expect(status.IsPrimary).To(BeFalse())
+		Expect(status.SystemID).To(Equal("7412345678901234567"))
+	})
+})
+
+var _ = Describe("system ID", func() {
+	var binDir string
+	var instance *Instance
+
+	writeFakePgControldata := func(content string) {
+		fakePath := filepath.Join(binDir, pgControlDataName)
+		Expect(os.WriteFile(fakePath, []byte(content), 0o700)).To(Succeed()) //nolint:gosec // executable
+	}
+
+	BeforeEach(func() {
+		binDir = GinkgoT().TempDir()
+		GinkgoT().Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		instance = NewInstance()
+		instance.PgData = GinkgoT().TempDir()
+	})
+
+	It("is cached once loaded", func() {
+		writeFakePgControldata("#!/bin/sh\necho 'Database system identifier:           7412345678901234567'\n")
+		Expect(instance.GetSystemID()).To(Equal("7412345678901234567"))
+
+		// pg_controldata is not invoked again once the ID is known
+		writeFakePgControldata("#!/bin/sh\nexit 1\n")
+		Expect(instance.GetSystemID()).To(Equal("7412345678901234567"))
+	})
+
+	It("is empty, and read again later, when pg_control can't be read", func() {
+		writeFakePgControldata("#!/bin/sh\nexit 1\n")
+		Expect(instance.GetSystemID()).To(BeEmpty())
+
+		writeFakePgControldata("#!/bin/sh\necho 'Database system identifier:           7412345678901234567'\n")
+		Expect(instance.GetSystemID()).To(Equal("7412345678901234567"))
+	})
+
+	It("is empty if the output has no system ID", func() {
+		writeFakePgControldata("#!/bin/sh\necho 'pg_control version number:            1300'\n")
+		Expect(instance.GetSystemID()).To(BeEmpty())
+	})
+})
+
+var _ = Describe("DetectTimelineDivergence", func() {
+	var instance *Instance
+
+	BeforeEach(func() {
+		instance = NewInstance()
+		instance.PgData = GinkgoT().TempDir()
+		Expect(os.Mkdir(filepath.Join(instance.PgData, pgWalDirectory), 0o700)).To(Succeed())
+	})
+
+	writeWalFile := func(name, content string) {
+		Expect(os.WriteFile(filepath.Join(instance.PgData, pgWalDirectory, name), []byte(content), 0o600)).
+			To(Succeed())
+	}
+
+	It("detects a standby left behind on its own timeline", func() {
+		writeWalFile("000000010000000000000003", "")
+		writeWalFile("000000010000000000000004", "")
+		writeWalFile("00000002.history", "1\t0/4000000\tno recovery target specified\n")
+
+		divergence, err := instance.DetectTimelineDivergence("0/46210C8")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(divergence).ToNot(BeNil())
+		Expect(divergence.ForkLSN).To(BeEquivalentTo("0/4000000"))
+	})
+
+	It("does not read any history when the standby follows the newest timeline", func() {
+		writeWalFile("000000010000000000000004", "")
+		writeWalFile("000000020000000000000004", "")
+		// unreadable on purpose: reading it would fail the probe
+		Expect(os.Mkdir(filepath.Join(instance.PgData, pgWalDirectory, "00000002.history"), 0o700)).
+			To(Succeed())
+
+		divergence, err := instance.DetectTimelineDivergence("0/46210C8")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(divergence).To(BeNil())
+	})
+
+	It("does not list pg_wal when nothing was replayed, as on a primary", func() {
+		// unlistable on purpose: listing it would fail the probe
+		Expect(os.RemoveAll(filepath.Join(instance.PgData, pgWalDirectory))).To(Succeed())
+
+		divergence, err := instance.DetectTimelineDivergence("")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(divergence).To(BeNil())
+	})
+
+	It("fails when pg_wal cannot be listed", func() {
+		Expect(os.RemoveAll(filepath.Join(instance.PgData, pgWalDirectory))).To(Succeed())
+
+		_, err := instance.DetectTimelineDivergence("0/46210C8")
+		Expect(err).To(HaveOccurred())
+	})
+})
+
+var _ = Describe("areAllParamsUpdated", func() {
+	It("should return true when all params match", func() {
+		decreased := map[string]int{maxConnectionsParameter: 90, "max_worker_processes": 4}
+		controldata := map[string]int{maxConnectionsParameter: 90, "max_worker_processes": 4}
+		Expect(areAllParamsUpdated(decreased, controldata)).To(BeTrue())
+	})
+
+	It("should return false when a param doesn't match", func() {
+		decreased := map[string]int{maxConnectionsParameter: 90}
+		controldata := map[string]int{maxConnectionsParameter: 100}
+		Expect(areAllParamsUpdated(decreased, controldata)).To(BeFalse())
+	})
+
+	It("should return false when a param is missing from controldata", func() {
+		decreased := map[string]int{maxConnectionsParameter: 90}
+		controldata := map[string]int{}
+		Expect(areAllParamsUpdated(decreased, controldata)).To(BeFalse())
+	})
+
+	It("should return true for empty decreased values", func() {
+		decreased := map[string]int{}
+		controldata := map[string]int{maxConnectionsParameter: 100}
+		Expect(areAllParamsUpdated(decreased, controldata)).To(BeTrue())
+	})
+})
+
+var _ = Describe("updateResultForDecrease", func() {
+	// decreasedSettingsQuery matches the SQL used by GetDecreasedSensibleSettings
+	decreasedSettingsQuery := regexp.QuoteMeta(
+		`SELECT pending_settings.name, CAST(coalesce(new_setting,default_setting) AS INTEGER) as new_setting`)
+
+	Context("when there are no decreased standby-sensitive settings", func() {
+		It("should not modify the result", func() {
+			db, mock, err := sqlmock.New()
+			Expect(err).ToNot(HaveOccurred())
+
+			mock.ExpectQuery(decreasedSettingsQuery).
+				WillReturnRows(sqlmock.NewRows([]string{"name", "new_setting"}))
+
+			instance := &Instance{}
+			result := &postgres.PostgresqlStatus{
+				IsPrimary:      false,
+				PendingRestart: true,
+			}
+
+			err = updateResultForDecrease(instance, db, result)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.PendingRestart).To(BeTrue())
+			Expect(result.PendingRestartForDecrease).To(BeFalse())
+			Expect(mock.ExpectationsWereMet()).To(Succeed())
+		})
+	})
+
+	Context("when this is a primary instance", func() {
+		It("should keep PendingRestart true and set PendingRestartForDecrease", func() {
+			db, mock, err := sqlmock.New()
+			Expect(err).ToNot(HaveOccurred())
+
+			mock.ExpectQuery(decreasedSettingsQuery).
+				WillReturnRows(sqlmock.NewRows([]string{"name", "new_setting"}).
+					AddRow(maxConnectionsParameter, 90))
+
+			instance := &Instance{}
+			result := &postgres.PostgresqlStatus{
+				IsPrimary:      true,
+				PendingRestart: true,
+			}
+
+			err = updateResultForDecrease(instance, db, result)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.PendingRestart).To(BeTrue())
+			Expect(result.PendingRestartForDecrease).To(BeTrue())
+			Expect(mock.ExpectationsWereMet()).To(Succeed())
+		})
+	})
+
+	Context("when this is a replica cluster instance", func() {
+		DescribeTable("should keep PendingRestart true regardless of pod role",
+			func(podName string, currentPrimary string) {
+				db, mock, err := sqlmock.New()
+				Expect(err).ToNot(HaveOccurred())
+
+				mock.ExpectQuery(decreasedSettingsQuery).
+					WillReturnRows(sqlmock.NewRows([]string{"name", "new_setting"}).
+						AddRow(maxConnectionsParameter, 95))
+
+				instance := (&Instance{}).WithPodName(podName)
+				instance.SetCluster(&apiv1.Cluster{
+					Spec: apiv1.ClusterSpec{
+						ReplicaCluster: &apiv1.ReplicaClusterConfiguration{
+							Enabled: ptr.To(true),
+							Source:  "cluster-example",
+						},
+					},
+					Status: apiv1.ClusterStatus{
+						CurrentPrimary: currentPrimary,
+					},
+				})
+
+				result := &postgres.PostgresqlStatus{
+					IsPrimary:      false,
+					PendingRestart: true,
+				}
+
+				err = updateResultForDecrease(instance, db, result)
+				Expect(err).ToNot(HaveOccurred())
+				// In a replica cluster, PendingRestart should remain true
+				// because pg_controldata values come from the external source
+				// primary, not from this cluster
+				Expect(result.PendingRestart).To(BeTrue())
+				Expect(result.PendingRestartForDecrease).To(BeTrue())
+				Expect(mock.ExpectationsWereMet()).To(Succeed())
+			},
+			Entry("designated primary",
+				"cluster-replica-tls-1", "cluster-replica-tls-1"),
+			Entry("non-designated-primary standby",
+				"cluster-replica-tls-2", "cluster-replica-tls-1"),
+		)
+	})
+})
+
 var _ = Describe("probes", func() {
+	Context("pg_stat_wal", func() {
+		// A never-reset instance (or PostgreSQL 18+, where stats_reset starts as
+		// NULL) is coalesced to '-infinity' in the query, so the value always
+		// scans into the plain string field instead of failing on a NULL.
+		DescribeTable("scans the coalesced stats_reset",
+			func(isPG18OrNewer bool) {
+				db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+				Expect(err).ToNot(HaveOccurred())
+				DeferCleanup(func() {
+					_ = db.Close()
+				})
+
+				const query = "SELECT pg_stat_wal"
+				var walStat PgStatWal
+				var rows *sqlmock.Rows
+				var scanArgs []any
+
+				if isPG18OrNewer {
+					rows = sqlmock.NewRows([]string{
+						"wal_records",
+						"wal_fpi",
+						"wal_bytes",
+						"wal_buffers_full",
+						"stats_reset",
+					}).AddRow(int64(1), int64(2), int64(3), int64(4), "-infinity")
+					scanArgs = []any{
+						&walStat.WalRecords,
+						&walStat.WalFpi,
+						&walStat.WalBytes,
+						&walStat.WALBuffersFull,
+						&walStat.StatsReset,
+					}
+				} else {
+					rows = sqlmock.NewRows([]string{
+						"wal_records",
+						"wal_fpi",
+						"wal_bytes",
+						"wal_buffers_full",
+						"wal_write",
+						"wal_sync",
+						"wal_write_time",
+						"wal_sync_time",
+						"stats_reset",
+					}).AddRow(int64(1), int64(2), int64(3), int64(4), int64(5), int64(6), 7.5, 8.5, "-infinity")
+					scanArgs = []any{
+						&walStat.WalRecords,
+						&walStat.WalFpi,
+						&walStat.WalBytes,
+						&walStat.WALBuffersFull,
+						&walStat.WalWrite,
+						&walStat.WalSync,
+						&walStat.WalWriteTime,
+						&walStat.WalSyncTime,
+						&walStat.StatsReset,
+					}
+				}
+
+				mock.ExpectQuery(query).WillReturnRows(rows)
+
+				err = db.QueryRow(query).Scan(scanArgs...)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(walStat.StatsReset).To(Equal("-infinity"))
+				Expect(mock.ExpectationsWereMet()).To(Succeed())
+			},
+			Entry("before PostgreSQL 18", false),
+			Entry("from PostgreSQL 18", true),
+		)
+	})
+
 	It("fillWalStatus should properly handle errors", func() {
 		instance := &Instance{}
 		status := &postgres.PostgresqlStatus{
@@ -95,7 +404,7 @@ var _ = Describe("probes", func() {
 	Context("Fill basebackup stats", func() {
 		It("set the information", func() {
 			instance := (&Instance{
-				pgVersion: &semver.Version{Major: 13},
+				pgVersion: semver.New(13, 0, 0, "", ""),
 			}).WithPodName("test-1")
 			status := &postgres.PostgresqlStatus{
 				IsPrimary: false,

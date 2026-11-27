@@ -12,7 +12,8 @@ import (
 // SynchronousReplicaConfiguration contains the configuration of the
 // PostgreSQL synchronous replication feature.
 // Important: at this moment, also `.spec.minSyncReplicas` and `.spec.maxSyncReplicas`
-// need to be considered.
+// need to be considered. Those fields are deprecated and mutually exclusive with
+// this configuration.
 type SynchronousReplicaConfigurationApplyConfiguration struct {
 	// Method to select synchronous replication standbys from the listed
 	// servers, accepting 'any' (quorum-based synchronous replication) or
@@ -46,6 +47,39 @@ type SynchronousReplicaConfigurationApplyConfiguration struct {
 	// data durability and safety during failover events in CloudNativePG-managed
 	// PostgreSQL clusters.
 	FailoverQuorum *bool `json:"failoverQuorum,omitempty"`
+	// PodFailureDomainKeys is a list of Pod label keys used to define failure
+	// domains. The values are read exclusively from the labels of each
+	// instance Pod: a listed label that is not present on the Pod makes the
+	// whole topology extraction fail, so that the constraint is not applied,
+	// and the Node hosting the Pod is never consulted. When
+	// set, the operator selects synchronous replicas from instances whose
+	// label values differ from the primary's for all the specified keys, so
+	// that synchronous replication spans failure domains such as availability
+	// zones or regions. Starting from Kubernetes 1.35, the
+	// `topology.kubernetes.io/zone` and `topology.kubernetes.io/region`
+	// labels are automatically copied from the Node onto each Pod at
+	// scheduling time.
+	// When the replicas in failure domains different from the primary's are
+	// not enough to satisfy the configured number of synchronous standbys,
+	// the constraint is not applied and synchronous replicas are selected as
+	// if this field were not set.
+	// Mutually exclusive with `nodeFailureDomainKeys`.
+	PodFailureDomainKeys []string `json:"podFailureDomainKeys,omitempty"`
+	// NodeFailureDomainKeys is a list of Node label keys used to define
+	// failure domains. The values are read exclusively from the labels of the
+	// Node hosting each instance Pod: when a Node cannot be found (for
+	// example, drained or deleted after the Pod was scheduled), the whole
+	// topology extraction fails and the constraint is not applied. When set,
+	// the operator selects synchronous replicas from instances running on
+	// nodes whose label values differ from the primary's node for all the
+	// specified keys, so that synchronous replication spans failure domains
+	// such as availability zones or regions.
+	// When the replicas in failure domains different from the primary's are
+	// not enough to satisfy the configured number of synchronous standbys,
+	// the constraint is not applied and synchronous replicas are selected as
+	// if this field were not set.
+	// Mutually exclusive with `podFailureDomainKeys`.
+	NodeFailureDomainKeys []string `json:"nodeFailureDomainKeys,omitempty"`
 }
 
 // SynchronousReplicaConfigurationApplyConfiguration constructs a declarative configuration of the SynchronousReplicaConfiguration type for use with
@@ -111,5 +145,25 @@ func (b *SynchronousReplicaConfigurationApplyConfiguration) WithDataDurability(v
 // If called multiple times, the FailoverQuorum field is set to the value of the last call.
 func (b *SynchronousReplicaConfigurationApplyConfiguration) WithFailoverQuorum(value bool) *SynchronousReplicaConfigurationApplyConfiguration {
 	b.FailoverQuorum = &value
+	return b
+}
+
+// WithPodFailureDomainKeys adds the given value to the PodFailureDomainKeys field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the PodFailureDomainKeys field.
+func (b *SynchronousReplicaConfigurationApplyConfiguration) WithPodFailureDomainKeys(values ...string) *SynchronousReplicaConfigurationApplyConfiguration {
+	for i := range values {
+		b.PodFailureDomainKeys = append(b.PodFailureDomainKeys, values[i])
+	}
+	return b
+}
+
+// WithNodeFailureDomainKeys adds the given value to the NodeFailureDomainKeys field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the NodeFailureDomainKeys field.
+func (b *SynchronousReplicaConfigurationApplyConfiguration) WithNodeFailureDomainKeys(values ...string) *SynchronousReplicaConfigurationApplyConfiguration {
+	for i := range values {
+		b.NodeFailureDomainKeys = append(b.NodeFailureDomainKeys, values[i])
+	}
 	return b
 }

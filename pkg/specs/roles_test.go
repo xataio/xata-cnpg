@@ -33,7 +33,7 @@ import (
 )
 
 var _ = Describe("Roles", func() {
-	cluster := apiv1.Cluster{
+	cluster := &apiv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "thisTest",
 			Namespace: "default",
@@ -117,7 +117,7 @@ var _ = Describe("Roles", func() {
 		},
 	}
 
-	backupOrigin := apiv1.Backup{
+	backupOrigin := &apiv1.Backup{
 		Status: apiv1.BackupStatus{
 			BarmanCredentials: apiv1.BarmanCredentials{
 				Azure: &apiv1.AzureCredentials{
@@ -161,25 +161,33 @@ var _ = Describe("Roles", func() {
 							Name: "testS3Session",
 						},
 					},
+					SSECustomerKey: &apiv1.SecretKeySelector{
+						LocalObjectReference: apiv1.LocalObjectReference{
+							Name: "testS3SSECKey",
+						},
+					},
 				},
 			},
 		},
 	}
 
 	It("are created with the cluster name for pure k8s", func() {
-		serviceAccount := CreateRole(cluster, nil, nil)
+		serviceAccount := CreateRole(RoleOptions{Cluster: cluster})
 		Expect(serviceAccount.Name).To(Equal(cluster.Name))
 		Expect(serviceAccount.Namespace).To(Equal(cluster.Namespace))
-		Expect(serviceAccount.Rules).To(HaveLen(13))
+		Expect(serviceAccount.Rules).To(HaveLen(16))
 	})
 
 	It("grants no access to backups when the cluster has none", func() {
-		role := CreateRole(cluster, nil, nil)
+		role := CreateRole(RoleOptions{Cluster: cluster})
 		Expect(backupRulesOf(role)).To(BeEmpty())
 	})
 
 	It("grants access only to the active backups of the cluster", func() {
-		role := CreateRole(cluster, nil, []string{"backup-b", "backup-a", "backup-b"})
+		role := CreateRole(RoleOptions{
+			Cluster:       cluster,
+			ActiveBackups: []string{"backup-b", "backup-a", "backup-b"},
+		})
 		Expect(backupRulesOf(role)).To(ConsistOf(
 			rbacv1.PolicyRule{
 				APIGroups:     []string{"postgresql.cnpg.io"},
@@ -197,7 +205,10 @@ var _ = Describe("Roles", func() {
 	})
 
 	It("grants only get on the origin backup", func() {
-		role := CreateRole(cluster, &apiv1.Backup{ObjectMeta: metav1.ObjectMeta{Name: "origin"}}, nil)
+		role := CreateRole(RoleOptions{
+			Cluster:      cluster,
+			BackupOrigin: &apiv1.Backup{ObjectMeta: metav1.ObjectMeta{Name: "origin"}},
+		})
 		Expect(backupRulesOf(role)).To(ConsistOf(
 			rbacv1.PolicyRule{
 				APIGroups:     []string{"postgresql.cnpg.io"},
@@ -209,7 +220,7 @@ var _ = Describe("Roles", func() {
 	})
 
 	It("should contain every secret of the origin backup and backup configuration of every external cluster", func() {
-		serviceAccount := CreateRole(cluster, &backupOrigin, nil)
+		serviceAccount := CreateRole(RoleOptions{Cluster: cluster, BackupOrigin: backupOrigin})
 		Expect(serviceAccount.Name).To(Equal(cluster.Name))
 		Expect(serviceAccount.Namespace).To(Equal(cluster.Namespace))
 		Expect(serviceAccount.Rules[0].ResourceNames).To(ConsistOf("thisTest", "testConfigMapKeySelector"))
@@ -226,6 +237,7 @@ var _ = Describe("Roles", func() {
 			"testS3Access",
 			"testS3Region",
 			"testS3Session",
+			"testS3SSECKey",
 			"testAzureStorageAccount",
 			"testAzureStorageKey",
 			"testAzureStorageSasToken",
@@ -239,18 +251,18 @@ var _ = Describe("Roles", func() {
 
 var _ = Describe("Secrets", func() {
 	var (
-		cluster apiv1.Cluster
-		backup  apiv1.Backup
+		cluster *apiv1.Cluster
+		backup  *apiv1.Backup
 	)
 
 	BeforeEach(func() {
-		cluster = apiv1.Cluster{
+		cluster = &apiv1.Cluster{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "thisTest",
 				Namespace: "default",
 			},
 		}
-		backup = apiv1.Backup{
+		backup = &apiv1.Backup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "testBackup",
 				Namespace: "default",
@@ -261,6 +273,11 @@ var _ = Describe("Secrets", func() {
 						AccessKeyIDReference: &apiv1.SecretKeySelector{
 							LocalObjectReference: apiv1.LocalObjectReference{
 								Name: "aws-status-secret-test",
+							},
+						},
+						SSECustomerKey: &apiv1.SecretKeySelector{
+							LocalObjectReference: apiv1.LocalObjectReference{
+								Name: "aws-status-sse-c-key-test",
 							},
 						},
 					},
@@ -278,6 +295,12 @@ var _ = Describe("Secrets", func() {
 							},
 						},
 					},
+				},
+				EndpointCA: &apiv1.SecretKeySelector{
+					LocalObjectReference: apiv1.LocalObjectReference{
+						Name: "backup-origin-endpoint-ca-test",
+					},
+					Key: "ca.crt",
 				},
 			},
 		}
@@ -304,6 +327,9 @@ var _ = Describe("Secrets", func() {
 							SessionToken: &apiv1.SecretKeySelector{
 								LocalObjectReference: apiv1.LocalObjectReference{Name: "test-session"},
 							},
+							SSECustomerKey: &apiv1.SecretKeySelector{
+								LocalObjectReference: apiv1.LocalObjectReference{Name: "test-sse-c-key"},
+							},
 						},
 					},
 					EndpointCA: &apiv1.SecretKeySelector{
@@ -314,11 +340,18 @@ var _ = Describe("Secrets", func() {
 			},
 		}
 		secrets = backupSecrets(cluster, nil)
-		Expect(secrets).To(ConsistOf("test-secret", "test-access", "test-region", "test-session", "test-endpoint-ca-name"))
+		Expect(secrets).To(ConsistOf("test-secret", "test-access", "test-region", "test-session",
+			"test-sse-c-key", "test-endpoint-ca-name"))
+	})
+
+	It("includes the backup origin's endpoint CA secret", func() {
+		secrets := backupSecrets(cluster, backup)
+		Expect(secrets).To(ContainElement("backup-origin-endpoint-ca-test"))
+		Expect(secrets).To(ContainElement("aws-status-sse-c-key-test"))
 	})
 
 	It("should contain default secrets only", func() {
-		Expect(getInvolvedSecretNames(cluster, nil)).To(Equal([]string{
+		Expect(getInvolvedSecretNames(RoleOptions{Cluster: cluster})).To(Equal([]string{
 			"thisTest-app",
 			"thisTest-ca",
 			"thisTest-replication",
@@ -328,9 +361,11 @@ var _ = Describe("Secrets", func() {
 	})
 
 	It("should created an ordered string list with the backup secrets", func() {
-		Expect(getInvolvedSecretNames(cluster, &backup)).To(Equal([]string{
+		Expect(getInvolvedSecretNames(RoleOptions{Cluster: cluster, BackupOrigin: backup})).To(Equal([]string{
 			"aws-status-secret-test",
+			"aws-status-sse-c-key-test",
 			"azure-storage-key-secret-test",
+			"backup-origin-endpoint-ca-test",
 			"google-application-secret-test",
 			"thisTest-app",
 			"thisTest-ca",
@@ -339,10 +374,66 @@ var _ = Describe("Secrets", func() {
 			"thisTest-superuser",
 		}))
 	})
+
+	It("includes the recovery backup's direct endpoint CA secret", func() {
+		cluster.Spec.Bootstrap = &apiv1.BootstrapConfiguration{
+			Recovery: &apiv1.BootstrapRecovery{
+				Backup: &apiv1.BackupSource{
+					LocalObjectReference: apiv1.LocalObjectReference{Name: "some-backup"},
+					EndpointCA: &apiv1.SecretKeySelector{
+						LocalObjectReference: apiv1.LocalObjectReference{
+							Name: "recovery-backup-endpoint-ca-test",
+						},
+						Key: "ca.crt",
+					},
+				},
+			},
+		}
+
+		Expect(getInvolvedSecretNames(RoleOptions{Cluster: cluster})).To(
+			ContainElement("recovery-backup-endpoint-ca-test"))
+	})
 })
 
-var _ = Describe("Managed Roles", func() {
-	cluster := apiv1.Cluster{
+var _ = Describe("Database Roles", func() {
+	crdRoles := []apiv1.DatabaseRole{
+		{
+			Spec: apiv1.DatabaseRoleSpec{
+				RoleConfiguration: apiv1.RoleConfiguration{
+					PasswordSecret: &apiv1.LocalObjectReference{
+						Name: "my_secret5",
+					},
+					Name: "role5",
+				},
+			},
+		},
+		{
+			Spec: apiv1.DatabaseRoleSpec{
+				RoleConfiguration: apiv1.RoleConfiguration{
+					Name: "role6",
+				},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "role7"},
+			Spec: apiv1.DatabaseRoleSpec{
+				RoleConfiguration: apiv1.RoleConfiguration{
+					Name: "role7",
+				},
+				Password: &apiv1.PasswordConfiguration{Mode: apiv1.PasswordModeGenerate},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "role8"},
+			Spec: apiv1.DatabaseRoleSpec{
+				RoleConfiguration: apiv1.RoleConfiguration{
+					Name: "role8",
+				},
+				Password: &apiv1.PasswordConfiguration{Mode: apiv1.PasswordModeGenerate, Secret: "my_secret8"},
+			},
+		},
+	}
+	cluster := &apiv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "thisTest",
 			Namespace: "default",
@@ -383,7 +474,7 @@ var _ = Describe("Managed Roles", func() {
 	It("gets the list of secrets needed by the managed roles", func() {
 		Expect(managedRolesSecrets(cluster)).
 			To(ConsistOf("my_secret1", "my_secret3"))
-		serviceAccount := CreateRole(cluster, nil, nil)
+		serviceAccount := CreateRole(RoleOptions{Cluster: cluster, Roles: crdRoles})
 		Expect(serviceAccount.Name).To(Equal(cluster.Name))
 		Expect(serviceAccount.Namespace).To(Equal(cluster.Namespace))
 		var secretsPolicy rbacv1.PolicyRule
@@ -392,7 +483,56 @@ var _ = Describe("Managed Roles", func() {
 				secretsPolicy = policy
 			}
 		}
-		Expect(secretsPolicy.ResourceNames).To(ContainElements("my_secret1", "my_secret3"))
+		// The instance manager needs to read the Secrets the operator generates
+		// too, or it cannot apply the password it did not choose.
+		Expect(secretsPolicy.ResourceNames).To(ContainElements(
+			"my_secret1", "my_secret3", "my_secret5", "role7-password", "my_secret8"))
+	})
+})
+
+var _ = Describe("CRD database role secret name", func() {
+	It("should be empty when password is disabled", func() {
+		role := apiv1.DatabaseRole{
+			Spec: apiv1.DatabaseRoleSpec{
+				RoleConfiguration: apiv1.RoleConfiguration{
+					DisablePassword: true,
+					PasswordSecret:  &apiv1.LocalObjectReference{},
+				},
+			},
+		}
+		secrets := crdRoleSecretName(&role)
+		Expect(secrets).To(BeEmpty())
+	})
+	It("should be empty when password secret is nil", func() {
+		role := apiv1.DatabaseRole{
+			Spec: apiv1.DatabaseRoleSpec{},
+		}
+		secrets := crdRoleSecretName(&role)
+		Expect(secrets).To(BeEmpty())
+	})
+	It("should be empty when password secret name is empty", func() {
+		role := apiv1.DatabaseRole{
+			Spec: apiv1.DatabaseRoleSpec{
+				RoleConfiguration: apiv1.RoleConfiguration{
+					PasswordSecret: &apiv1.LocalObjectReference{},
+				},
+			},
+		}
+		secrets := crdRoleSecretName(&role)
+		Expect(secrets).To(BeEmpty())
+	})
+	It("should work properly when the password secret name is set", func() {
+		role := apiv1.DatabaseRole{
+			Spec: apiv1.DatabaseRoleSpec{
+				RoleConfiguration: apiv1.RoleConfiguration{
+					PasswordSecret: &apiv1.LocalObjectReference{
+						Name: "secret-name",
+					},
+				},
+			},
+		}
+		secrets := crdRoleSecretName(&role)
+		Expect(secrets).To(BeIdenticalTo("secret-name"))
 	})
 })
 
@@ -401,7 +541,7 @@ var _ = Describe("pgbackrest secrets", func() {
 		cluster := apiv1.Cluster{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
 		}
-		Expect(pgbackrestSecrets(cluster)).To(BeNil())
+		Expect(pgbackrestSecrets(&cluster)).To(BeNil())
 	})
 
 	It("returns nil when pgbackrest is not configured", func() {
@@ -411,7 +551,7 @@ var _ = Describe("pgbackrest secrets", func() {
 				Backup: &apiv1.BackupConfiguration{},
 			},
 		}
-		Expect(pgbackrestSecrets(cluster)).To(BeNil())
+		Expect(pgbackrestSecrets(&cluster)).To(BeNil())
 	})
 
 	It("returns nil when using IAM role (no secrets needed)", func() {
@@ -424,14 +564,14 @@ var _ = Describe("pgbackrest secrets", func() {
 							S3: &apiv1.PgBackRestS3{
 								Bucket:             "test-bucket",
 								Region:             "us-east-1",
-								InheritFromIAMRole: true,
+								InheritFromIAMRole: true, //nolint:staticcheck // exercises the deprecated field
 							},
 						},
 					},
 				},
 			},
 		}
-		Expect(pgbackrestSecrets(cluster)).To(BeEmpty())
+		Expect(pgbackrestSecrets(&cluster)).To(BeEmpty())
 	})
 
 	It("returns secret names when using explicit S3 credentials", func() {
@@ -458,7 +598,7 @@ var _ = Describe("pgbackrest secrets", func() {
 				},
 			},
 		}
-		secrets := pgbackrestSecrets(cluster)
+		secrets := pgbackrestSecrets(&cluster)
 		Expect(secrets).To(ContainElements("s3-access-key", "s3-secret-key"))
 	})
 
@@ -473,7 +613,7 @@ var _ = Describe("pgbackrest secrets", func() {
 								S3: &apiv1.PgBackRestS3{
 									Bucket:             "test-bucket",
 									Region:             "us-east-1",
-									InheritFromIAMRole: true,
+									InheritFromIAMRole: true, //nolint:staticcheck // exercises the deprecated field
 								},
 								Cipher: &apiv1.PgBackRestCipher{
 									Type: "aes-256-cbc",
@@ -489,7 +629,7 @@ var _ = Describe("pgbackrest secrets", func() {
 			},
 		}
 
-		Expect(externalClusterSecrets(cluster)).To(ConsistOf("restore-cipher"))
+		Expect(externalClusterSecrets(&cluster)).To(ConsistOf("restore-cipher"))
 	})
 
 	It("includes pgbackrest secrets in backup secrets list", func() {
@@ -512,7 +652,7 @@ var _ = Describe("pgbackrest secrets", func() {
 				},
 			},
 		}
-		secrets := backupSecrets(cluster, nil)
+		secrets := backupSecrets(&cluster, nil)
 		Expect(secrets).To(ContainElement("pgbr-key"))
 	})
 })

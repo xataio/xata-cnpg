@@ -22,6 +22,7 @@ package controller
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -34,6 +35,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	schemeBuilder "github.com/xataio/xata-cnpg/internal/scheme"
@@ -47,6 +49,24 @@ import (
 const databaseDetectionQuery = `SELECT count(*)
 			FROM pg_catalog.pg_database
 			WHERE datname = $1`
+
+// expectCreateDatabase expects the creation of a database: the check of the
+// metrics exporter role, the creation itself, and the restriction of the
+// CONNECT privilege
+func expectCreateDatabase(mock sqlmock.Sqlmock, createQuery string, createResult driver.Result, name string) {
+	mock.ExpectQuery("SELECT COUNT(*) > 0 FROM pg_catalog.pg_roles WHERE rolname = $1").
+		WithArgs(apiv1.MetricsExporterUserName).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectExec(createQuery).WillReturnResult(createResult)
+	mock.ExpectBegin()
+	mock.ExpectExec(fmt.Sprintf("REVOKE CONNECT ON DATABASE %s FROM PUBLIC",
+		pgx.Identifier{name}.Sanitize())).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(fmt.Sprintf("GRANT CONNECT ON DATABASE %s TO %s",
+		pgx.Identifier{name}.Sanitize(), apiv1.MetricsExporterUserName)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+}
 
 var _ = Describe("Managed Database status", func() {
 	var (
@@ -129,14 +149,33 @@ var _ = Describe("Managed Database status", func() {
 			pgx.Identifier{database.Spec.Name}.Sanitize(),
 			pgx.Identifier{database.Spec.Owner}.Sanitize(),
 		)
-		dbMock.ExpectExec(expectedQuery).WillReturnResult(expectedCreate)
+		expectCreateDatabase(dbMock, expectedQuery, expectedCreate, database.Spec.Name)
 
 		err := reconcileDatabase(ctx, fakeClient, r, database)
 		Expect(err).ToNot(HaveOccurred())
 
-		Expect(database.Status.Applied).Should(HaveValue(BeTrue()))
 		Expect(database.GetStatusMessage()).Should(BeEmpty())
+		Expect(database.Status.Applied).Should(HaveValue(BeTrue()))
 		Expect(database.GetFinalizers()).NotTo(BeEmpty())
+	})
+
+	It("does not create the database while the metrics exporter role is missing", func(ctx SpecContext) {
+		dbMock.ExpectQuery(databaseDetectionQuery).WithArgs(database.Spec.Name).
+			WillReturnRows(sqlmock.NewRows([]string{""}).AddRow("0"))
+		dbMock.ExpectQuery("SELECT COUNT(*) > 0 FROM pg_catalog.pg_roles WHERE rolname = $1").
+			WithArgs(apiv1.MetricsExporterUserName).
+			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+		result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+			Namespace: database.GetNamespace(),
+			Name:      database.GetName(),
+		}})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(metricsExporterRoleRetryInterval))
+
+		Expect(fakeClient.Get(ctx, client.ObjectKeyFromObject(database), database)).To(Succeed())
+		Expect(database.Status.Applied).To(BeNil())
+		Expect(database.GetStatusMessage()).Should(ContainSubstring("waiting for the cnpg_metrics_exporter role"))
 	})
 
 	It("database object inherits error after patching", func(ctx SpecContext) {
@@ -158,6 +197,50 @@ var _ = Describe("Managed Database status", func() {
 		Expect(database.GetStatusMessage()).Should(ContainSubstring(expectedError.Error()))
 	})
 
+	Context("with database permissions", func() {
+		BeforeEach(func(ctx SpecContext) {
+			database.Spec.Permissions = &apiv1.DatabasePermissionsSpec{
+				Connect: []apiv1.UsageSpec{
+					{Name: "ghost", Type: apiv1.GrantUsageSpecType},
+					{Name: "public", Type: apiv1.RevokeUsageSpecType},
+				},
+			}
+			Expect(fakeClient.Update(ctx, database)).To(Succeed())
+
+			dbMock.ExpectQuery(databaseDetectionQuery).WithArgs(database.Spec.Name).
+				WillReturnRows(sqlmock.NewRows([]string{""}).AddRow("1"))
+			dbMock.ExpectExec(fmt.Sprintf("ALTER DATABASE %s OWNER TO %s",
+				pgx.Identifier{database.Spec.Name}.Sanitize(),
+				pgx.Identifier{database.Spec.Owner}.Sanitize(),
+			)).WillReturnResult(sqlmock.NewResult(0, 0))
+			dbMock.ExpectQuery(expectedACLQuery).WithArgs(database.Spec.Name).
+				WillReturnRows(sqlmock.NewRows([]string{"grantee", "privilege_type"}).
+					AddRow(0, "CONNECT").AddRow(10, "CONNECT"))
+			dbMock.ExpectQuery(expectedRoleOidQuery).WithArgs("ghost").
+				WillReturnRows(sqlmock.NewRows([]string{"oid"}))
+		})
+
+		It("applies them and is not ready until every entry is applied", func(ctx SpecContext) {
+			dbMock.ExpectExec(fmt.Sprintf("REVOKE CONNECT ON DATABASE %s FROM PUBLIC",
+				pgx.Identifier{database.Spec.Name}.Sanitize(),
+			)).WillReturnResult(sqlmock.NewResult(0, 0))
+
+			Expect(reconcileDatabase(ctx, fakeClient, r, database)).To(Succeed())
+
+			Expect(database.Status.Permissions).To(ConsistOf(
+				apiv1.DatabasePermissionStatus{
+					Privilege: "CONNECT", Name: "ghost", Type: apiv1.GrantUsageSpecType,
+					Applied: false, Message: "role does not exist",
+				},
+				apiv1.DatabasePermissionStatus{
+					Privilege: "CONNECT", Name: "public", Type: apiv1.RevokeUsageSpecType,
+					Applied: true,
+				},
+			))
+			Expect(database.Status.Applied).Should(HaveValue(BeFalse()))
+		})
+	})
+
 	When("reclaim policy is delete", func() {
 		It("on deletion it removes finalizers and drops DB", func(ctx SpecContext) {
 			// Mocking DetectDB
@@ -172,7 +255,7 @@ var _ = Describe("Managed Database status", func() {
 				pgx.Identifier{database.Spec.Name}.Sanitize(),
 				pgx.Identifier{database.Spec.Owner}.Sanitize(),
 			)
-			dbMock.ExpectExec(expectedQuery).WillReturnResult(expectedCreate)
+			expectCreateDatabase(dbMock, expectedQuery, expectedCreate, database.Spec.Name)
 
 			// Mocking Drop Database
 			expectedDrop := fmt.Sprintf("DROP DATABASE IF EXISTS %s",
@@ -204,6 +287,22 @@ var _ = Describe("Managed Database status", func() {
 		})
 	})
 
+	When("reclaim policy is delete but the object never reconciled", func() {
+		It("on deletion it removes finalizers and does NOT drop the DB", func(ctx SpecContext) {
+			// Model the state of a conflicting duplicate: it carries the
+			// finalizer, but the exclusivity check blocked it before it could
+			// apply anything, so it has no recorded reconciliation.
+			database.Finalizers = []string{utils.DatabaseFinalizerName}
+			Expect(fakeClient.Update(ctx, database)).To(Succeed())
+			Expect(fakeClient.Delete(ctx, database)).To(Succeed())
+
+			// No SQL is expected: dbMock would fail on any statement.
+			err := reconcileDatabase(ctx, fakeClient, r, database)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		})
+	})
+
 	When("reclaim policy is retain", func() {
 		It("on deletion it removes finalizers and does NOT drop the DB", func(ctx SpecContext) {
 			database.Spec.ReclaimPolicy = apiv1.DatabaseReclaimRetain
@@ -221,7 +320,7 @@ var _ = Describe("Managed Database status", func() {
 				pgx.Identifier{database.Spec.Name}.Sanitize(),
 				pgx.Identifier{database.Spec.Owner}.Sanitize(),
 			)
-			dbMock.ExpectExec(expectedQuery).WillReturnResult(expectedCreate)
+			expectCreateDatabase(dbMock, expectedQuery, expectedCreate, database.Spec.Name)
 
 			err := reconcileDatabase(ctx, fakeClient, r, database)
 			Expect(err).ToNot(HaveOccurred())
@@ -242,6 +341,49 @@ var _ = Describe("Managed Database status", func() {
 			Expect(fakeClient.Delete(ctx, database)).To(Succeed())
 
 			err = reconcileDatabase(ctx, fakeClient, r, database)
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		})
+	})
+
+	When("the cluster is a replica", func() {
+		It("on deletion it releases the finalizer without dropping the DB", func(ctx SpecContext) {
+			// Mocking DetectDB
+			expectedValue := sqlmock.NewRows([]string{""}).AddRow("0")
+			dbMock.ExpectQuery(databaseDetectionQuery).WithArgs(database.Spec.Name).
+				WillReturnRows(expectedValue)
+
+			// Mocking CreateDB
+			expectedCreate := sqlmock.NewResult(0, 1)
+			expectedQuery := fmt.Sprintf(
+				"CREATE DATABASE %s OWNER %s",
+				pgx.Identifier{database.Spec.Name}.Sanitize(),
+				pgx.Identifier{database.Spec.Owner}.Sanitize(),
+			)
+			expectCreateDatabase(dbMock, expectedQuery, expectedCreate, database.Spec.Name)
+
+			err := reconcileDatabase(ctx, fakeClient, r, database)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(database.GetFinalizers()).NotTo(BeEmpty())
+
+			// Demote the cluster to a replica after the finalizer was added.
+			cluster.Spec.ReplicaCluster = &apiv1.ReplicaClusterConfiguration{
+				Enabled: ptr.To(true),
+			}
+			Expect(fakeClient.Update(ctx, cluster)).To(Succeed())
+
+			// A real apiserver bumps the generation when deletionTimestamp is
+			// set, which the fake client does not; simulate it so the reconciler
+			// does not skip on Generation == ObservedGeneration.
+			database.SetGeneration(database.GetGeneration() + 1)
+			Expect(fakeClient.Update(ctx, database)).To(Succeed())
+
+			// Deleting on a replica must release the finalizer without issuing a
+			// DROP: no DROP is mocked, so any attempt would fail the AfterEach
+			// ExpectationsWereMet check.
+			Expect(fakeClient.Delete(ctx, database)).To(Succeed())
+
+			err = reconcileDatabase(ctx, fakeClient, r, database)
+			Expect(err).To(HaveOccurred())
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
 	})
@@ -369,6 +511,218 @@ var _ = Describe("Managed Database status", func() {
 
 		Expect(database.Status.Applied).Should(BeNil())
 		Expect(database.Status.Message).Should(ContainSubstring("waiting for the cluster to become primary"))
+		// The replica gate runs before the finalizer reconciler, so no
+		// finalizer is added while the cluster is a replica.
+		Expect(database.GetFinalizers()).Should(BeEmpty())
+	})
+
+	// The demotion behavior is identical across the three managed-object
+	// controllers, and so are its tests.
+	It("reports the replica condition when the cluster is demoted after apply", func(ctx SpecContext) { //nolint:dupl
+		database.Status.Applied = ptr.To(true)
+		database.Status.ObservedGeneration = database.Generation
+		Expect(fakeClient.Status().Update(ctx, database)).To(Succeed())
+
+		initialCluster := cluster.DeepCopy()
+		cluster.Spec.ReplicaCluster = &apiv1.ReplicaClusterConfiguration{
+			Enabled: ptr.To(true),
+		}
+		Expect(fakeClient.Patch(ctx, cluster, client.MergeFrom(initialCluster))).To(Succeed())
+
+		result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+			Namespace: database.GetNamespace(),
+			Name:      database.GetName(),
+		}})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(databaseReconciliationInterval))
+
+		Expect(fakeClient.Get(ctx, client.ObjectKeyFromObject(database), database)).To(Succeed())
+		Expect(database.Status.Applied).To(BeNil())
+		Expect(database.Status.Message).To(ContainSubstring("waiting for the cluster to become primary"))
+		// the recorded reconciliation is kept, so the database retains the
+		// ownership of the managed Postgres database
+		Expect(database.Status.ObservedGeneration).To(Equal(database.Generation))
+	})
+
+	It("keeps an applied database untouched on pods other than the designated primary", func(ctx SpecContext) {
+		database.Status.Applied = ptr.To(true)
+		database.Status.ObservedGeneration = database.Generation
+		Expect(fakeClient.Status().Update(ctx, database)).To(Succeed())
+
+		initialCluster := cluster.DeepCopy()
+		cluster.Spec.ReplicaCluster = &apiv1.ReplicaClusterConfiguration{
+			Enabled: ptr.To(true),
+		}
+		Expect(fakeClient.Patch(ctx, cluster, client.MergeFrom(initialCluster))).To(Succeed())
+		cluster.Status.CurrentPrimary = "another-pod"
+		cluster.Status.TargetPrimary = "another-pod"
+		Expect(fakeClient.Status().Update(ctx, cluster)).To(Succeed())
+
+		result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+			Namespace: database.GetNamespace(),
+			Name:      database.GetName(),
+		}})
+		Expect(err).ToNot(HaveOccurred())
+		// the demotion may be racing a failover: poll until the designated
+		// primary has reported the replica condition
+		Expect(result.RequeueAfter).To(Equal(databaseReconciliationInterval))
+
+		Expect(fakeClient.Get(ctx, client.ObjectKeyFromObject(database), database)).To(Succeed())
+		Expect(database.Status.Applied).To(HaveValue(BeTrue()))
+		Expect(database.Status.ObservedGeneration).NotTo(BeZero())
+	})
+
+	It("re-applies a database when the cluster is promoted back", func(ctx SpecContext) {
+		database.Status.Applied = ptr.To(true)
+		database.Status.ObservedGeneration = database.Generation
+		Expect(fakeClient.Status().Update(ctx, database)).To(Succeed())
+
+		initialCluster := cluster.DeepCopy()
+		cluster.Spec.ReplicaCluster = &apiv1.ReplicaClusterConfiguration{
+			Enabled: ptr.To(true),
+		}
+		Expect(fakeClient.Patch(ctx, cluster, client.MergeFrom(initialCluster))).To(Succeed())
+
+		err := reconcileDatabase(ctx, fakeClient, r, database)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(database.Status.Applied).To(BeNil())
+
+		demotedCluster := cluster.DeepCopy()
+		cluster.Spec.ReplicaCluster.Enabled = ptr.To(false)
+		Expect(fakeClient.Patch(ctx, cluster, client.MergeFrom(demotedCluster))).To(Succeed())
+
+		expectedValue := sqlmock.NewRows([]string{""}).AddRow("1")
+		dbMock.ExpectQuery(databaseDetectionQuery).WithArgs(database.Spec.Name).
+			WillReturnRows(expectedValue)
+		expectedQuery := fmt.Sprintf("ALTER DATABASE %s OWNER TO %s",
+			pgx.Identifier{database.Spec.Name}.Sanitize(),
+			pgx.Identifier{database.Spec.Owner}.Sanitize(),
+		)
+		dbMock.ExpectExec(expectedQuery).WillReturnResult(sqlmock.NewResult(0, 1))
+
+		err = reconcileDatabase(ctx, fakeClient, r, database)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(database.Status.Applied).To(HaveValue(BeTrue()))
+		Expect(database.Status.Message).To(BeEmpty())
+		Expect(database.Status.ObservedGeneration).To(Equal(database.Generation))
+	})
+
+	It("retries the apply at the same generation after a failed reconciliation", func(ctx SpecContext) {
+		// A previously failed reconciliation that left the recorded
+		// reconciliation in place: the generation gate must not let it sit
+		// at applied=false, the object has to be evaluated again.
+		database.Status.Applied = ptr.To(false)
+		database.Status.ObservedGeneration = database.Generation
+		Expect(fakeClient.Status().Update(ctx, database)).To(Succeed())
+
+		expectedValue := sqlmock.NewRows([]string{""}).AddRow("1")
+		dbMock.ExpectQuery(databaseDetectionQuery).WithArgs(database.Spec.Name).
+			WillReturnRows(expectedValue)
+		expectedQuery := fmt.Sprintf("ALTER DATABASE %s OWNER TO %s",
+			pgx.Identifier{database.Spec.Name}.Sanitize(),
+			pgx.Identifier{database.Spec.Owner}.Sanitize(),
+		)
+		dbMock.ExpectExec(expectedQuery).WillReturnResult(sqlmock.NewResult(0, 1))
+
+		err := reconcileDatabase(ctx, fakeClient, r, database)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(database.Status.Applied).To(HaveValue(BeTrue()))
+		Expect(database.Status.Message).To(BeEmpty())
+	})
+
+	It("retains the ownership of the managed database across a demotion", func(ctx SpecContext) {
+		database.Status.Applied = ptr.To(true)
+		database.Status.ObservedGeneration = database.Generation
+		Expect(fakeClient.Status().Update(ctx, database)).To(Succeed())
+
+		initialCluster := cluster.DeepCopy()
+		cluster.Spec.ReplicaCluster = &apiv1.ReplicaClusterConfiguration{
+			Enabled: ptr.To(true),
+		}
+		Expect(fakeClient.Patch(ctx, cluster, client.MergeFrom(initialCluster))).To(Succeed())
+
+		err := reconcileDatabase(ctx, fakeClient, r, database)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(database.Status.Applied).To(BeNil())
+
+		// A second object targeting the same Postgres database, created
+		// while the cluster is demoted
+		dbDuplicate := &apiv1.Database{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "db-duplicate",
+				Namespace:  "default",
+				Generation: 1,
+			},
+			Spec: apiv1.DatabaseSpec{
+				ClusterRef: corev1.LocalObjectReference{
+					Name: cluster.Name,
+				},
+				Name:  database.Spec.Name,
+				Owner: "app",
+			},
+		}
+		Expect(fakeClient.Create(ctx, dbDuplicate)).To(Succeed())
+
+		demotedCluster := cluster.DeepCopy()
+		cluster.Spec.ReplicaCluster.Enabled = ptr.To(false)
+		Expect(fakeClient.Patch(ctx, cluster, client.MergeFrom(demotedCluster))).To(Succeed())
+
+		err = reconcileDatabase(ctx, fakeClient, r, dbDuplicate)
+		Expect(err).ToNot(HaveOccurred())
+
+		expectedError := fmt.Sprintf("%q is already managed by object %q",
+			dbDuplicate.Spec.Name, database.Name)
+		Expect(dbDuplicate.Status.Applied).To(HaveValue(BeFalse()))
+		Expect(dbDuplicate.Status.Message).To(ContainSubstring(expectedError))
+	})
+
+	// The cluster-fetch behavior is identical across the three
+	// managed-object controllers, and so are its tests.
+	It("keeps a reconciled database status when the cluster cannot be fetched", func(ctx SpecContext) { //nolint:dupl
+		database.Status.Applied = ptr.To(true)
+		database.Status.ObservedGeneration = database.Generation
+		Expect(fakeClient.Status().Update(ctx, database)).To(Succeed())
+
+		Expect(fakeClient.Delete(ctx, cluster)).To(Succeed())
+
+		result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+			Namespace: database.GetNamespace(),
+			Name:      database.GetName(),
+		}})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result).To(Equal(ctrl.Result{}))
+
+		Expect(fakeClient.Get(ctx, client.ObjectKeyFromObject(database), database)).To(Succeed())
+		Expect(database.Status.Applied).To(HaveValue(BeTrue()))
+		Expect(database.Status.Message).To(BeEmpty())
+	})
+
+	It("marks an unreconciled database as failed when the cluster cannot be fetched", func(ctx SpecContext) {
+		Expect(fakeClient.Delete(ctx, cluster)).To(Succeed())
+
+		err := reconcileDatabase(ctx, fakeClient, r, database)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(database.Status.Applied).To(HaveValue(BeFalse()))
+		Expect(database.Status.Message).To(ContainSubstring("while fetching the cluster"))
+	})
+
+	It("enqueues only the Databases of this instance's cluster on cluster events", func(ctx SpecContext) {
+		mapFn := mapClusterToManagedResources(r.instance, fakeClient,
+			func() client.ObjectList { return &apiv1.DatabaseList{} })
+
+		// A database targeting another cluster in the same namespace
+		other := database.DeepCopy()
+		other.Name = "obj-other-cluster"
+		other.ResourceVersion = ""
+		other.Spec.ClusterRef.Name = "another-cluster"
+		Expect(fakeClient.Create(ctx, other)).To(Succeed())
+
+		Expect(mapFn(ctx, cluster)).To(ConsistOf(reconcile.Request{
+			NamespacedName: types.NamespacedName{Namespace: database.GetNamespace(), Name: database.GetName()},
+		}))
 	})
 })
 

@@ -10,13 +10,15 @@ title: Examples
 The examples show configuration files for setting up
 your PostgreSQL cluster.
 
-!!! Important
+:::info[Important]
     These examples are for demonstration and experimentation
     purposes. You can execute them on a personal Kubernetes cluster with Minikube
     or Kind, as described in [Quick start](quickstart.md).
+:::
 
-!!! Seealso "Reference"
+:::note[Reference]
     For a list of available options, see [API reference](cloudnative-pg.v1.md).
+:::
 
 ## Basics
 
@@ -28,6 +30,11 @@ your PostgreSQL cluster.
 :  [`cluster-example-custom.yaml`](samples/cluster-example-custom.yaml)
    A basic cluster that uses the default storage class and custom parameters for
    the `postgresql.conf` and `pg_hba.conf` files.
+
+**Cluster with dynamic pg_hba address resolution**
+:  [`cluster-example-pod-selector-refs.yaml`](samples/cluster-example-pod-selector-refs.yaml)
+   A cluster that uses `podSelectorRefs` to dynamically resolve pod IPs in
+   `pg_hba` rules via the `${podselector:NAME}` syntax.
 
 **Cluster with customized storage class**
 : [`cluster-storage-class.yaml`](samples/cluster-storage-class.yaml):
@@ -116,9 +123,9 @@ your PostgreSQL cluster.
 
 ## PostGIS
 
-**PostGIS example**
+**PostGIS example with image volume extensions**
 : [`postgis-example.yaml`](samples/postgis-example.yaml):
-   An example of a PostGIS cluster. See [PostGIS](postgis.md) for details.
+   An example of a PostGIS cluster using image volume extensions. See [PostGIS](postgis.md) for details.
 
 ## Managed roles
 
@@ -126,6 +133,11 @@ your PostgreSQL cluster.
 : [`cluster-example-with-roles.yaml`](samples/cluster-example-with-roles.yaml):
   Declares a role with the `managed` stanza. Includes password management with
   Kubernetes secrets.
+
+**Declarative role management with the `DatabaseRole` resource**
+: [`role-examples.yaml`](samples/role-examples.yaml):
+  Standalone `DatabaseRole` resources targeting an existing cluster, with
+  operator-generated passwords and a client certificate.
 
 ## Managed services
 

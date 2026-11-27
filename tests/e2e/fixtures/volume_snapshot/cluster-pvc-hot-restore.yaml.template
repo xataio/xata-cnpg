@@ -23,20 +23,16 @@ spec:
           name: ${SNAPSHOT_PITR_PGDATA}
           kind: VolumeSnapshot
           apiGroup: snapshot.storage.k8s.io
-        walStorage:
-          name: ${SNAPSHOT_PITR_PGWAL}
-          kind: VolumeSnapshot
-          apiGroup: snapshot.storage.k8s.io
 
 
   externalClusters:
     - name: cluster-pvc-hot-snapshot
       barmanObjectStore:
         destinationPath: s3://cluster-pvc-hot-snapshot/
-        endpointURL: https://minio-service.minio:9000
+        endpointURL: https://object-store.object-store:9000
         endpointCA:
           key: ca.crt
-          name: minio-server-ca-secret
+          name: object-store-ca-secret
         s3Credentials:
           accessKeyId:
             name: backup-storage-creds

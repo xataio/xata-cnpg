@@ -44,12 +44,18 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.BootstrapPgBaseBackupApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("BootstrapRecovery"):
 		return &apiv1.BootstrapRecoveryApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("CatalogComponentImage"):
+		return &apiv1.CatalogComponentImageApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("CatalogImage"):
 		return &apiv1.CatalogImageApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("CertificatesConfiguration"):
 		return &apiv1.CertificatesConfigurationApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("CertificatesStatus"):
 		return &apiv1.CertificatesStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ClientCertificateConfiguration"):
+		return &apiv1.ClientCertificateConfigurationApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ClientCertificateState"):
+		return &apiv1.ClientCertificateStateApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Cluster"):
 		return &apiv1.ClusterApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ClusterImageCatalog"):
@@ -68,20 +74,34 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.DatabaseObjectSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("DatabaseObjectStatus"):
 		return &apiv1.DatabaseObjectStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("DatabasePermissionsSpec"):
+		return &apiv1.DatabasePermissionsSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("DatabasePermissionStatus"):
+		return &apiv1.DatabasePermissionStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("DatabaseRole"):
+		return &apiv1.DatabaseRoleApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("DatabaseRoleRef"):
 		return &apiv1.DatabaseRoleRefApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("DatabaseRoleSpec"):
+		return &apiv1.DatabaseRoleSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("DatabaseRoleStatus"):
+		return &apiv1.DatabaseRoleStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("DatabaseSpec"):
 		return &apiv1.DatabaseSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("DatabaseStatus"):
 		return &apiv1.DatabaseStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("DataSource"):
 		return &apiv1.DataSourceApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("DivergedInstanceStatus"):
+		return &apiv1.DivergedInstanceStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EmbeddedObjectMetadata"):
 		return &apiv1.EmbeddedObjectMetadataApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("EphemeralVolumesSizeLimitConfiguration"):
 		return &apiv1.EphemeralVolumesSizeLimitConfigurationApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ExtensionConfiguration"):
 		return &apiv1.ExtensionConfigurationApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ExtensionEnvVar"):
+		return &apiv1.ExtensionEnvVarApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ExtensionSpec"):
 		return &apiv1.ExtensionSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ExternalCluster"):
@@ -92,8 +112,12 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.FailoverQuorumStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("FDWSpec"):
 		return &apiv1.FDWSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("GeneratedPasswordState"):
+		return &apiv1.GeneratedPasswordStateApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ImageCatalog"):
 		return &apiv1.ImageCatalogApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("ImageCatalogComponentRef"):
+		return &apiv1.ImageCatalogComponentRefApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ImageCatalogRef"):
 		return &apiv1.ImageCatalogRefApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ImageCatalogSpec"):
@@ -136,6 +160,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.OnlineConfigurationApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("OptionSpec"):
 		return &apiv1.OptionSpecApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("PasswordConfiguration"):
+		return &apiv1.PasswordConfigurationApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("PasswordCriteria"):
+		return &apiv1.PasswordCriteriaApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PasswordState"):
 		return &apiv1.PasswordStateApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PgBackRestAzure"):
@@ -166,6 +194,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.PluginConfigurationApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PluginStatus"):
 		return &apiv1.PluginStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("PodSelectorRef"):
+		return &apiv1.PodSelectorRefApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("PodSelectorRefStatus"):
+		return &apiv1.PodSelectorRefStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PodTemplateSpec"):
 		return &apiv1.PodTemplateSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Pooler"):
@@ -174,6 +206,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.PoolerIntegrationsApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PoolerMonitoringConfiguration"):
 		return &apiv1.PoolerMonitoringConfigurationApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("PoolerMonitoringTLSConfiguration"):
+		return &apiv1.PoolerMonitoringTLSConfigurationApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PoolerSecrets"):
 		return &apiv1.PoolerSecretsApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PoolerSpec"):
@@ -182,6 +216,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.PoolerStatusApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("PostgresConfiguration"):
 		return &apiv1.PostgresConfigurationApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("PrimaryLeaseConfiguration"):
+		return &apiv1.PrimaryLeaseConfigurationApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Probe"):
 		return &apiv1.ProbeApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ProbesConfiguration"):
@@ -216,6 +252,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.ScheduledBackupSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("ScheduledBackupStatus"):
 		return &apiv1.ScheduledBackupStatusApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("SchemaPermissionsSpec"):
+		return &apiv1.SchemaPermissionsSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("SchemaSpec"):
 		return &apiv1.SchemaSpecApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("SecretsResourceVersion"):
@@ -248,6 +286,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1.SyncReplicaElectionConstraintsApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("TablespaceConfiguration"):
 		return &apiv1.TablespaceConfigurationApplyConfiguration{}
+	case v1.SchemeGroupVersion.WithKind("TablespaceMappingEntry"):
+		return &apiv1.TablespaceMappingEntryApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("TablespaceState"):
 		return &apiv1.TablespaceStateApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("Topology"):

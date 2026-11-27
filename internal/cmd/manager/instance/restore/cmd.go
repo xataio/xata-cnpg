@@ -38,6 +38,7 @@ import (
 	"github.com/xataio/xata-cnpg/internal/management/istio"
 	"github.com/xataio/xata-cnpg/internal/management/linkerd"
 	"github.com/xataio/xata-cnpg/internal/scheme"
+	"github.com/xataio/xata-cnpg/pkg/management"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver"
 )
@@ -57,6 +58,16 @@ func NewCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			contextLogger := log.FromContext(cmd.Context())
 
+			completed, err := postgres.IsBootstrapCompleted()
+			if err != nil {
+				contextLogger.Error(err, "Error while checking bootstrap status")
+				return err
+			}
+			if completed {
+				contextLogger.Warning("The bootstrap is not pending in this Pod, leaving the volumes untouched")
+				return nil
+			}
+
 			// Canceling this context
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
@@ -72,7 +83,7 @@ func NewCmd() *cobra.Command {
 			localSrv, err := webserver.NewLocalWebServer(
 				postgres.NewInstance().WithClusterName(clusterName).WithNamespace(namespace),
 				mgr.GetClient(),
-				mgr.GetEventRecorderFor("local-webserver"),
+				mgr.GetEventRecorderFor("local-webserver"), //nolint:staticcheck
 			)
 			if err != nil {
 				return err
@@ -111,6 +122,7 @@ func NewCmd() *cobra.Command {
 		},
 
 		PostRunE: func(cmd *cobra.Command, _ []string) error {
+			management.ShutdownLogExport()
 			if err := istio.TryInvokeQuitEndpoint(cmd.Context()); err != nil {
 				return err
 			}

@@ -11,14 +11,49 @@ spec:
   template: template0
   cluster:
     name: cluster-with-declarative-databases
+  # Every default privilege PUBLIC gets on a new database is touched on
+  # purpose, as the owner "app" holds all of them by default, which would make
+  # an assertion on that role meaningless. The role "reporting" gets
+  # everything through `all`, as it holds nothing by default.
+  permissions:
+    connect:
+      - name: public
+        type: revoke
+    temporary:
+      - name: public
+        type: revoke
+    create:
+      - name: public
+        type: grant
+    all:
+      - name: reporting
+        type: grant
   extensions:
     - name: bloom
       ensure: present
     - name: postgres_fdw
       ensure: present
   schemas:
+    # Revoke access from "public" (group) to "public" (schema)
+    - name: public
+      ensure: present
+      permissions:
+        usage:
+          - name: public
+            type: revoke
     - name: test_schema
       ensure: present
+      # USAGE goes to "public" and CREATE to a named role on purpose. A
+      # privilege held by PUBLIC satisfies has_schema_privilege() for every
+      # role, so granting both to "public" would make the assertion on the
+      # named role pass even if that grant never ran.
+      permissions:
+        usage:
+          - name: public
+            type: grant
+        create:
+          - name: app
+            type: grant
   fdws:
     - name: postgres_fdw
       ensure: present

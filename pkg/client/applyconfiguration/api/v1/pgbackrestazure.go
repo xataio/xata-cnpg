@@ -21,7 +21,7 @@ type PgBackRestAzureApplyConfiguration struct {
 	// from KeyRef. "sas" reads a shared access signature token from KeyRef.
 	KeyType *string `json:"keyType,omitempty"`
 	// The Azure Blob Storage endpoint, overriding the default
-	// <account>.blob.core.windows.net. Rarely needed, mostly for testing
+	// `<account>.blob.core.windows.net`. Rarely needed, mostly for testing
 	// against Azurite.
 	Endpoint *string `json:"endpoint,omitempty"`
 	// The reference to a Secret holding the storage account shared key when

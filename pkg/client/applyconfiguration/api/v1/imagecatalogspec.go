@@ -9,6 +9,9 @@ package v1
 type ImageCatalogSpecApplyConfiguration struct {
 	// List of CatalogImages available in the catalog
 	Images []CatalogImageApplyConfiguration `json:"images,omitempty"`
+	// ComponentImages is a list of named images for components other than PostgreSQL
+	// (e.g. pgbouncer). Keys must be unique within a catalog.
+	ComponentImages []CatalogComponentImageApplyConfiguration `json:"componentImages,omitempty"`
 }
 
 // ImageCatalogSpecApplyConfiguration constructs a declarative configuration of the ImageCatalogSpec type for use with
@@ -26,6 +29,19 @@ func (b *ImageCatalogSpecApplyConfiguration) WithImages(values ...*CatalogImageA
 			panic("nil value passed to WithImages")
 		}
 		b.Images = append(b.Images, *values[i])
+	}
+	return b
+}
+
+// WithComponentImages adds the given value to the ComponentImages field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the ComponentImages field.
+func (b *ImageCatalogSpecApplyConfiguration) WithComponentImages(values ...*CatalogComponentImageApplyConfiguration) *ImageCatalogSpecApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithComponentImages")
+		}
+		b.ComponentImages = append(b.ComponentImages, *values[i])
 	}
 	return b
 }

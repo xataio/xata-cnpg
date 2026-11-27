@@ -59,6 +59,9 @@ const (
 
 	// BackupPhaseWalArchivingFailing means wal archiving isn't properly working
 	BackupPhaseWalArchivingFailing = "walArchivingFailing"
+
+	// BackupPhaseDefinitionInvalid means the backup definition is invalid
+	BackupPhaseDefinitionInvalid = "invalid backup definition"
 )
 
 // BackupFailureReason is the class of error that failed or cancelled a backup.
@@ -90,13 +93,14 @@ type BarmanCredentials = barmanApi.BarmanCredentials
 
 // AzureCredentials is the type for the credentials to be used to upload
 // files to Azure Blob Storage. The connection string contains every needed
-// information. If the connection string is not specified, we'll need the
-// storage account name and also one (and only one) of:
+// information. If the connection string is not specified, one (and only one)
+// of the following authentication methods must be specified:
 //
-// - storageKey
-// - storageSasToken
+// - storageKey (requires storageAccount)
+// - storageSasToken (requires storageAccount)
+// - inheritFromAzureAD (inheriting credentials from the pod environment)
+// - useDefaultAzureCredentials (using the default Azure authentication flow)
 //
-// - inheriting the credentials from the pod environment by setting inheritFromAzureAD to true
 // +kubebuilder:object:generate:=false
 type AzureCredentials = barmanApi.AzureCredentials
 
@@ -172,7 +176,7 @@ type PgBackRestConfiguration struct {
 
 	// StanzaName is the pgbackrest stanza this cluster archives to. It is the
 	// logical identity of the backup set in the repository (the repo layout is
-	// <repoPath>/{archive,backup}/<stanza>/). When unset it defaults to the
+	// `<repoPath>/{archive,backup}/<stanza>/`). When unset it defaults to the
 	// cluster name.
 	// +optional
 	StanzaName string `json:"stanzaName,omitempty"`
@@ -336,7 +340,7 @@ type PgBackRestOptions struct {
 	Retention *PgBackRestRetention `json:"retention,omitempty"`
 	// RepoPath is the pgbackrest repo1-path — the prefix in the storage
 	// backend where backups and WAL archives are stored. When unset, it
-	// defaults to /<clusterName>. Configure this to isolate a new cluster
+	// defaults to `/<clusterName>`. Configure this to isolate a new cluster
 	// incarnation from existing data under the default path, or to restore
 	// from a custom path.
 	// +optional
@@ -390,7 +394,7 @@ type PgBackRestAzure struct {
 	// +kubebuilder:default:=auto
 	KeyType string `json:"keyType,omitempty"`
 	// The Azure Blob Storage endpoint, overriding the default
-	// <account>.blob.core.windows.net. Rarely needed, mostly for testing
+	// `<account>.blob.core.windows.net`. Rarely needed, mostly for testing
 	// against Azurite.
 	// +optional
 	Endpoint string `json:"endpoint,omitempty"`
@@ -483,7 +487,7 @@ type BackupSnapshotElementStatus struct {
 // BackupStatus defines the observed state of Backup
 type BackupStatus struct {
 	// The potential credentials for each cloud provider
-	BarmanCredentials `json:",inline"`
+	barmanApi.BarmanCredentials `json:",inline"`
 
 	// The PostgreSQL major version that was running when the
 	// backup was taken.
@@ -527,13 +531,21 @@ type BackupStatus struct {
 	// +optional
 	Phase BackupPhase `json:"phase,omitempty"`
 
-	// When the backup was started
+	// When the backup execution was started by the backup tool
 	// +optional
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
 
-	// When the backup was terminated
+	// When the backup execution was terminated by the backup tool
 	// +optional
 	StoppedAt *metav1.Time `json:"stoppedAt,omitempty"`
+
+	// When the backup process was started by the operator
+	// +optional
+	ReconciliationStartedAt *metav1.Time `json:"reconciliationStartedAt,omitempty"`
+
+	// When the reconciliation was terminated by the operator (either successfully or not)
+	// +optional
+	ReconciliationTerminatedAt *metav1.Time `json:"reconciliationTerminatedAt,omitempty"`
 
 	// The starting WAL
 	// +optional
@@ -610,6 +622,12 @@ type InstanceID struct {
 	// The container ID
 	// +optional
 	ContainerID string `json:"ContainerID,omitempty"`
+	// The instance manager session ID. This is a unique identifier generated at instance manager
+	// startup and changes on every restart (including container reboots). Used to detect if
+	// the instance manager was restarted during long-running operations like backups, which
+	// would terminate any running backup process.
+	// +optional
+	SessionID string `json:"sessionID,omitempty"`
 }
 
 // +genclient
@@ -648,8 +666,4 @@ type BackupList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	// List of backups
 	Items []Backup `json:"items"`
-}
-
-func init() {
-	SchemeBuilder.Register(&Backup{}, &BackupList{})
 }

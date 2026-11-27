@@ -3,8 +3,11 @@
 package v1
 
 import (
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	internal "github.com/xataio/xata-cnpg/pkg/client/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -14,7 +17,7 @@ import (
 // Cluster defines the API schema for a highly available PostgreSQL database cluster
 // managed by CloudNativePG.
 type ClusterApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	// Specification of the desired behavior of the cluster.
 	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
@@ -34,6 +37,47 @@ func Cluster(name, namespace string) *ClusterApplyConfiguration {
 	b.WithKind("Cluster")
 	b.WithAPIVersion("postgresql.cnpg.io/v1")
 	return b
+}
+
+// ExtractClusterFrom extracts the applied configuration owned by fieldManager from
+// cluster for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// cluster must be a unmodified Cluster API object that was retrieved from the Kubernetes API.
+// ExtractClusterFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractClusterFrom(cluster *apiv1.Cluster, fieldManager string, subresource string) (*ClusterApplyConfiguration, error) {
+	b := &ClusterApplyConfiguration{}
+	err := managedfields.ExtractInto(cluster, internal.Parser().Type("com.github.xataio.xata-cnpg.api.v1.Cluster"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(cluster.Name)
+	b.WithNamespace(cluster.Namespace)
+
+	b.WithKind("Cluster")
+	b.WithAPIVersion("postgresql.cnpg.io/v1")
+	return b, nil
+}
+
+// ExtractCluster extracts the applied configuration owned by fieldManager from
+// cluster. If no managedFields are found in cluster for fieldManager, a
+// ClusterApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// cluster must be a unmodified Cluster API object that was retrieved from the Kubernetes API.
+// ExtractCluster provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractCluster(cluster *apiv1.Cluster, fieldManager string) (*ClusterApplyConfiguration, error) {
+	return ExtractClusterFrom(cluster, fieldManager, "")
+}
+
+// ExtractClusterStatus extracts the applied configuration owned by fieldManager from
+// cluster for the status subresource.
+func ExtractClusterStatus(cluster *apiv1.Cluster, fieldManager string) (*ClusterApplyConfiguration, error) {
+	return ExtractClusterFrom(cluster, fieldManager, "status")
 }
 
 func (b ClusterApplyConfiguration) IsApplyConfiguration() {}

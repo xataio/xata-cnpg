@@ -39,6 +39,7 @@ type ScheduledBackupSpec struct {
 	Schedule string `json:"schedule"`
 
 	// The cluster to backup
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="cluster reference is immutable after creation"
 	Cluster LocalObjectReference `json:"cluster"`
 
 	// Indicates which ownerReference should be put inside the created backup resources.<br />
@@ -103,6 +104,10 @@ type ScheduledBackupStatus struct {
 	// Next time we will run a backup
 	// +optional
 	NextScheduleTime *metav1.Time `json:"nextScheduleTime,omitempty"`
+
+	// Error is the latest admission validation error
+	// +optional
+	Error string `json:"error,omitempty"`
 }
 
 // +genclient
@@ -139,8 +144,4 @@ type ScheduledBackupList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	// List of clusters
 	Items []ScheduledBackup `json:"items"`
-}
-
-func init() {
-	SchemeBuilder.Register(&ScheduledBackup{}, &ScheduledBackupList{})
 }

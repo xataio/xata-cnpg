@@ -27,6 +27,9 @@ type PluginStatusApplyConfiguration struct {
 	// RestoreJobHookCapabilities are the list of capabilities of the
 	// plugin regarding the RestoreJobHook management
 	RestoreJobHookCapabilities []string `json:"restoreJobHookCapabilities,omitempty"`
+	// PostgresCapabilities are the list of capabilities of the
+	// plugin regarding the PostgreSQL configuration
+	PostgresCapabilities []string `json:"postgresCapabilities,omitempty"`
 	// Status contain the status reported by the plugin through the SetStatusInCluster interface
 	Status *string `json:"status,omitempty"`
 }
@@ -99,6 +102,16 @@ func (b *PluginStatusApplyConfiguration) WithBackupCapabilities(values ...string
 func (b *PluginStatusApplyConfiguration) WithRestoreJobHookCapabilities(values ...string) *PluginStatusApplyConfiguration {
 	for i := range values {
 		b.RestoreJobHookCapabilities = append(b.RestoreJobHookCapabilities, values[i])
+	}
+	return b
+}
+
+// WithPostgresCapabilities adds the given value to the PostgresCapabilities field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the PostgresCapabilities field.
+func (b *PluginStatusApplyConfiguration) WithPostgresCapabilities(values ...string) *PluginStatusApplyConfiguration {
+	for i := range values {
+		b.PostgresCapabilities = append(b.PostgresCapabilities, values[i])
 	}
 	return b
 }

@@ -79,7 +79,9 @@ func (r *PgBouncerReconciler) Run(ctx context.Context) {
 		if err != nil {
 			// If this is "connection refused" error, it means that apiserver is probably not responsive.
 			// If that's the case wait and resend watch request.
-			time.Sleep(time.Second) //nolint:gosec
+			//
+			//nolint:gosec
+			time.Sleep(time.Second)
 		}
 	}
 }

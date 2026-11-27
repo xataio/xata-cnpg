@@ -11,6 +11,8 @@ type ImageInfoApplyConfiguration struct {
 	Image *string `json:"image,omitempty"`
 	// MajorVersion is the major version of the image
 	MajorVersion *int `json:"majorVersion,omitempty"`
+	// Extensions contains the container image extensions available for the current Image
+	Extensions []ExtensionConfigurationApplyConfiguration `json:"extensions,omitempty"`
 }
 
 // ImageInfoApplyConfiguration constructs a declarative configuration of the ImageInfo type for use with
@@ -32,5 +34,18 @@ func (b *ImageInfoApplyConfiguration) WithImage(value string) *ImageInfoApplyCon
 // If called multiple times, the MajorVersion field is set to the value of the last call.
 func (b *ImageInfoApplyConfiguration) WithMajorVersion(value int) *ImageInfoApplyConfiguration {
 	b.MajorVersion = &value
+	return b
+}
+
+// WithExtensions adds the given value to the Extensions field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Extensions field.
+func (b *ImageInfoApplyConfiguration) WithExtensions(values ...*ExtensionConfigurationApplyConfiguration) *ImageInfoApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithExtensions")
+		}
+		b.Extensions = append(b.Extensions, *values[i])
+	}
 	return b
 }

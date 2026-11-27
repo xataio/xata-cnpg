@@ -13,8 +13,10 @@ import (
 type ManagedRolesApplyConfiguration struct {
 	// ByStatus gives the list of roles in each state
 	ByStatus map[apiv1.RoleStatus][]string `json:"byStatus,omitempty"`
-	// CannotReconcile lists roles that cannot be reconciled in PostgreSQL,
-	// with an explanation of the cause
+	// CannotReconcile lists roles that cannot be reconciled, with an
+	// explanation of the cause. Failures may originate in PostgreSQL
+	// (e.g. dropping a role that owns objects) or in Kubernetes (e.g.
+	// the referenced password Secret cannot be fetched).
 	CannotReconcile map[string][]string `json:"cannotReconcile,omitempty"`
 	// PasswordStatus gives the last transaction id and password secret version for each managed role
 	PasswordStatus map[string]PasswordStateApplyConfiguration `json:"passwordStatus,omitempty"`

@@ -24,6 +24,7 @@ import (
 
 	"github.com/xataio/xata-cnpg/pkg/utils"
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
 	"github.com/xataio/xata-cnpg/tests/utils/operator"
 	podutils "github.com/xataio/xata-cnpg/tests/utils/pods"
@@ -77,13 +78,14 @@ var _ = Describe("Operator High Availability", Serial,
 			Expect(err).ToNot(HaveOccurred())
 
 			// Create Cluster
-			AssertCreateCluster(namespace, clusterName, sampleFile, env)
+			clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFile)
 
 			By("verifying current leader", func() {
 				// Check for the current Operator Pod leader from ConfigMap
 				Expect(operator.GetLeaderInfoFromLease(
 					env.Ctx, env.Interface,
-					operatorNamespace)).To(HavePrefix(operatorPodName.GetName()))
+					operatorNamespace,
+				)).To(HavePrefix(operatorPodName.GetName()))
 			})
 
 			By("scale up operator replicas to 3", func() {
@@ -153,7 +155,7 @@ var _ = Describe("Operator High Availability", Serial,
 				Expect(err).ToNot(HaveOccurred())
 
 				// Expect a new primary to be elected and promoted
-				AssertNewPrimary(namespace, clusterName, oldPrimary)
+				clusterasserts.AssertNewPrimary(env, namespace, clusterName, oldPrimary)
 			})
 
 			By("scale down operator replicas to 1", func() {

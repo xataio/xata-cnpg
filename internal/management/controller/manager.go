@@ -29,10 +29,13 @@ import (
 	"go.uber.org/atomic"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/run/lease"
 	"github.com/xataio/xata-cnpg/internal/cnpi/plugin/repository"
+	"github.com/xataio/xata-cnpg/internal/webhook/guard"
 	"github.com/xataio/xata-cnpg/pkg/concurrency"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/metricserver"
@@ -48,11 +51,32 @@ type pgBackRestTLSServer interface {
 
 type certificateRefresher interface {
 	RefreshSecrets(context.Context, *apiv1.Cluster) (bool, error)
+	EnsureServerCertificateLoaded(context.Context, *apiv1.Cluster) error
+}
+
+// PrimaryLeaseAcquirer is the interface the primary lease runnable exposes to the reconciler.
+type PrimaryLeaseAcquirer interface {
+	// Acquire blocks until this pod holds the primary lease, or ctx is done.
+	// It also undoes a previous Yield.
+	Acquire(ctx context.Context, config lease.Config) error
+
+	// Yield stops renewing the primary lease, without stopping PostgreSQL and
+	// without releasing the lease record, so that a new target primary can take
+	// it over once it goes stale. The next Acquire takes the lease back.
+	Yield(ctx context.Context)
+
+	// Position returns the position annotation of the primary lease, empty if
+	// there is none. It fails unless this pod holds the lease.
+	Position(ctx context.Context) (string, error)
+
+	// MarkPromoting records on the primary lease that this pod is about to
+	// promote, replacing the position of the previous primary
+	MarkPromoting(ctx context.Context) error
 }
 
 // InstanceReconciler reconciles the status of the Cluster resource with
 // the one of this PostgreSQL instance. Also, the configuration in the
-// ConfigMap is applied when needed
+// ConfigMap is applied when needed.
 type InstanceReconciler struct {
 	client        ctrl.Client
 	instance      *postgres.Instance
@@ -73,6 +97,46 @@ type InstanceReconciler struct {
 	pgBackRestStanzaCreated atomic.Pointer[string]
 	pgBackRestReloadPending atomic.Bool
 	pgBackRestTLSServer     pgBackRestTLSServer
+
+	// pendingReload is set when the configuration files have been changed
+	// and PostgreSQL has not been reloaded yet
+	pendingReload bool
+
+	primaryLeaseAcquirer PrimaryLeaseAcquirer
+
+	// availablePluginNames are the plugins whose sidecar this Pod has: their
+	// sockets are registered once, when the instance manager starts
+	availablePluginNames []string
+
+	// promotionRequested is set before the first pg_ctl promote of this
+	// process. Once set, this pod may be or become a primary whatever
+	// standby.signal says, so the lease is never yielded. Written and read
+	// only by Reconcile. Never reset: a stale true only means never yield.
+	promotionRequested bool
+
+	// promoteInstance is what handlePromotion runs to promote PostgreSQL. Nil
+	// means instance.PromoteAndWait; tests set a stub.
+	promoteInstance func(ctx context.Context) error
+
+	// readReplicaPosition is how the promotion gate reads the position of this
+	// replica. Nil means to query PostgreSQL, and is replaced by a stub in the
+	// unit tests.
+	readReplicaPosition func(ctx context.Context) (replicaPosition, error)
+
+	// checkpoint requests a checkpoint for the promotion gate. Nil means
+	// requestCheckpoint; tests set a stub.
+	checkpoint func(ctx context.Context) error
+
+	// waitWalReceiverDown is how handlePromotion waits for the WAL receiver of
+	// this replica to stop. Nil means to query PostgreSQL, and is replaced by
+	// a stub in the unit tests.
+	waitWalReceiverDown func(ctx context.Context) error
+
+	admission *guard.Admission[*apiv1.Cluster]
+
+	// recorder is how the promotion gate reports on the Cluster that it holds
+	// a promotion back. Nil means that no event is emitted.
+	recorder record.EventRecorder
 }
 
 // NewInstanceReconciler creates a new instance reconciler
@@ -81,6 +145,10 @@ func NewInstanceReconciler(
 	client ctrl.Client,
 	metricsExporter *metricserver.Exporter,
 	pluginRepository repository.Interface,
+	availablePluginNames []string,
+	primaryLeaseAcquirer PrimaryLeaseAcquirer,
+	admission *guard.Admission[*apiv1.Cluster],
+	recorder record.EventRecorder,
 ) *InstanceReconciler {
 	return &InstanceReconciler{
 		instance:              instance,
@@ -92,12 +160,16 @@ func NewInstanceReconciler(
 		certificateReconciler: instancecertificate.NewReconciler(client, instance),
 		pluginRepository:      pluginRepository,
 		pgBackRestTLSServer:   &pgbackrest.TLSServer{},
+		availablePluginNames:  availablePluginNames,
+		primaryLeaseAcquirer:  primaryLeaseAcquirer,
+		admission:             admission,
+		recorder:              recorder,
 	}
 }
 
-// GetExecutedCondition returns the condition that can be checked in order to
+// GetInitializedCondition returns the condition that can be checked in order to
 // be sure initialization has been done
-func (r *InstanceReconciler) GetExecutedCondition() *concurrency.Executed {
+func (r *InstanceReconciler) GetInitializedCondition() *concurrency.Executed {
 	return r.systemInitialization
 }
 

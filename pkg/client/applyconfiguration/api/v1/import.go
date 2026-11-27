@@ -32,6 +32,7 @@ type ImportApplyConfiguration struct {
 	// and certain flags may interfere with its intended functionality or design.
 	// You are responsible for ensuring that the provided options are compatible
 	// with your environment and desired behavior.
+	//
 	PgDumpExtraOptions []string `json:"pgDumpExtraOptions,omitempty"`
 	// List of custom options to pass to the `pg_restore` command.
 	//
@@ -39,6 +40,7 @@ type ImportApplyConfiguration struct {
 	// and certain flags may interfere with its intended functionality or design.
 	// You are responsible for ensuring that the provided options are compatible
 	// with your environment and desired behavior.
+	//
 	PgRestoreExtraOptions []string `json:"pgRestoreExtraOptions,omitempty"`
 	// Custom options to pass to the `pg_restore` command during the `pre-data`
 	// section. This setting overrides the generic `pgRestoreExtraOptions` value.
@@ -47,6 +49,7 @@ type ImportApplyConfiguration struct {
 	// and certain flags may interfere with its intended functionality or design.
 	// You are responsible for ensuring that the provided options are compatible
 	// with your environment and desired behavior.
+	//
 	PgRestorePredataOptions []string `json:"pgRestorePredataOptions,omitempty"`
 	// Custom options to pass to the `pg_restore` command during the `data`
 	// section. This setting overrides the generic `pgRestoreExtraOptions` value.
@@ -55,6 +58,7 @@ type ImportApplyConfiguration struct {
 	// and certain flags may interfere with its intended functionality or design.
 	// You are responsible for ensuring that the provided options are compatible
 	// with your environment and desired behavior.
+	//
 	PgRestoreDataOptions []string `json:"pgRestoreDataOptions,omitempty"`
 	// Custom options to pass to the `pg_restore` command during the `post-data`
 	// section. This setting overrides the generic `pgRestoreExtraOptions` value.
@@ -63,6 +67,7 @@ type ImportApplyConfiguration struct {
 	// and certain flags may interfere with its intended functionality or design.
 	// You are responsible for ensuring that the provided options are compatible
 	// with your environment and desired behavior.
+	//
 	PgRestorePostdataOptions []string `json:"pgRestorePostdataOptions,omitempty"`
 }
 

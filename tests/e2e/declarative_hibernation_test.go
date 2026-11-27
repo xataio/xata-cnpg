@@ -27,7 +27,10 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/reconciler/hibernation"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	pgasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/postgres"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
+	"github.com/xataio/xata-cnpg/tests/utils/objects"
 	testsUtils "github.com/xataio/xata-cnpg/tests/utils/postgres"
 	"github.com/xataio/xata-cnpg/tests/utils/yaml"
 
@@ -49,7 +52,7 @@ var _ = Describe("Cluster declarative hibernation", func() {
 		}
 	})
 
-	It("hibernates an existing cluster", func(ctx SpecContext) {
+	It("hibernates an existing cluster", func() {
 		const namespacePrefix = "declarative-hibernation"
 
 		clusterName, err := yaml.GetResourceNameFromYAML(env.Scheme, sampleFileCluster)
@@ -59,15 +62,15 @@ var _ = Describe("Cluster declarative hibernation", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		By("creating a new cluster", func() {
-			AssertCreateCluster(namespace, clusterName, sampleFileCluster, env)
+			clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFileCluster)
 			// Write a table and some data on the "app" database
-			tableLocator := TableLocator{
+			tableLocator := pgasserts.TableLocator{
 				Namespace:    namespace,
 				ClusterName:  clusterName,
 				DatabaseName: testsUtils.AppDBName,
 				TableName:    tableName,
 			}
-			AssertCreateTestData(env, tableLocator)
+			pgasserts.AssertCreateTestData(env, tableLocator)
 		})
 
 		By("hibernating the new cluster", func() {
@@ -79,7 +82,7 @@ var _ = Describe("Cluster declarative hibernation", func() {
 			originCluster := cluster.DeepCopy()
 			cluster.Annotations[utils.HibernationAnnotationName] = hibernation.HibernationOn
 
-			Expect(env.Client.Patch(ctx, cluster, ctrlclient.MergeFrom(originCluster))).To(Succeed())
+			Expect(objects.Patch(env.Ctx, env.Client, cluster, ctrlclient.MergeFrom(originCluster))).To(Succeed())
 		})
 
 		By("waiting for the cluster to be hibernated correctly", func() {
@@ -104,7 +107,7 @@ var _ = Describe("Cluster declarative hibernation", func() {
 			}
 			originCluster := cluster.DeepCopy()
 			cluster.Annotations[utils.HibernationAnnotationName] = hibernation.HibernationOff
-			Expect(env.Client.Patch(ctx, cluster, ctrlclient.MergeFrom(originCluster))).To(Succeed())
+			Expect(objects.Patch(env.Ctx, env.Client, cluster, ctrlclient.MergeFrom(originCluster))).To(Succeed())
 		})
 
 		var cluster *apiv1.Cluster
@@ -127,13 +130,13 @@ var _ = Describe("Cluster declarative hibernation", func() {
 		})
 
 		By("verifying the data has been preserved", func() {
-			tableLocator := TableLocator{
+			tableLocator := pgasserts.TableLocator{
 				Namespace:    namespace,
 				ClusterName:  clusterName,
 				DatabaseName: testsUtils.AppDBName,
 				TableName:    tableName,
 			}
-			AssertDataExpectedCount(env, tableLocator, 2)
+			pgasserts.AssertDataExpectedCount(env, tableLocator, 2)
 		})
 	})
 })

@@ -290,19 +290,35 @@ var _ = Describe("Managed Extensions SQL", func() {
 	})
 
 	Context("createDatabaseExtension", func() {
+		setSearchPathSQL := `SET search_path TO "$user", public`
+		resetSearchPathSQL := `RESET search_path`
 		createExtensionSQL := "CREATE EXTENSION \"testext\" VERSION \"1.0\" SCHEMA \"default\""
 
 		It("returns success when the extension has been created", func(ctx SpecContext) {
 			dbMock.
+				ExpectExec(setSearchPathSQL).
+				WillReturnResult(sqlmock.NewResult(0, 0))
+			dbMock.
 				ExpectExec(createExtensionSQL).
 				WillReturnResult(sqlmock.NewResult(0, 1))
+			dbMock.
+				ExpectExec(resetSearchPathSQL).
+				WillReturnResult(sqlmock.NewResult(0, 0))
 			Expect(createDatabaseExtension(ctx, db, ext)).Error().NotTo(HaveOccurred())
 		})
 
 		It("fails when the extension could not be created", func(ctx SpecContext) {
 			dbMock.
+				ExpectExec(setSearchPathSQL).
+				WillReturnResult(sqlmock.NewResult(0, 0))
+			dbMock.
 				ExpectExec(createExtensionSQL).
 				WillReturnError(testError)
+			// search_path is reset even when CREATE EXTENSION fails, so the
+			// connection returns to the pool with the pinned default.
+			dbMock.
+				ExpectExec(resetSearchPathSQL).
+				WillReturnResult(sqlmock.NewResult(0, 0))
 			Expect(createDatabaseExtension(ctx, db, ext)).Error().To(Equal(testError))
 		})
 	})
@@ -493,6 +509,99 @@ var _ = Describe("Managed schema SQL", func() {
 
 			Expect(updateDatabaseSchema(ctx, db, schema,
 				&schemaInfo{Name: schema.Name, Owner: "old"})).Error().To(MatchError(testError))
+		})
+	})
+
+	Context("schema permissions", func() {
+		BeforeEach(func() {
+			schema.Permissions = &apiv1.SchemaPermissionsSpec{
+				Usage:  []apiv1.UsageSpec{{Name: "reader", Type: apiv1.GrantUsageSpecType}},
+				Create: []apiv1.UsageSpec{{Name: "writer", Type: apiv1.RevokeUsageSpecType}},
+			}
+		})
+
+		It("applies usage and create permissions after creating the schema", func(ctx SpecContext) {
+			dbMock.
+				ExpectExec("CREATE SCHEMA \"testschema\" AUTHORIZATION \"owner\"").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			dbMock.
+				ExpectExec("GRANT USAGE ON SCHEMA \"testschema\" TO \"reader\"").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			dbMock.
+				ExpectExec("REVOKE CREATE ON SCHEMA \"testschema\" FROM \"writer\"").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+
+			Expect(createDatabaseSchema(ctx, db, schema)).Error().NotTo(HaveOccurred())
+		})
+
+		It("applies permissions when reconciling an existing schema", func(ctx SpecContext) {
+			dbMock.
+				ExpectExec("GRANT USAGE ON SCHEMA \"testschema\" TO \"reader\"").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			dbMock.
+				ExpectExec("REVOKE CREATE ON SCHEMA \"testschema\" FROM \"writer\"").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+
+			Expect(updateDatabaseSchema(ctx, db, schema,
+				&schemaInfo{Name: schema.Name, Owner: schema.Owner})).Error().NotTo(HaveOccurred())
+		})
+
+		It("returns an error when applying a permission fails", func(ctx SpecContext) {
+			dbMock.
+				ExpectExec("CREATE SCHEMA \"testschema\" AUTHORIZATION \"owner\"").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			dbMock.
+				ExpectExec("GRANT USAGE ON SCHEMA \"testschema\" TO \"reader\"").
+				WillReturnError(testError)
+
+			Expect(createDatabaseSchema(ctx, db, schema)).Error().To(MatchError(testError))
+		})
+
+		It("is a no-op when no permissions are configured", func(ctx SpecContext) {
+			schema.Permissions = nil
+
+			Expect(updateDatabaseSchema(ctx, db, schema,
+				&schemaInfo{Name: schema.Name, Owner: schema.Owner})).Error().NotTo(HaveOccurred())
+		})
+
+		It("returns an error naming the schema when the CREATE grant fails", func(ctx SpecContext) {
+			dbMock.
+				ExpectExec("GRANT USAGE ON SCHEMA \"testschema\" TO \"reader\"").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			dbMock.
+				ExpectExec("REVOKE CREATE ON SCHEMA \"testschema\" FROM \"writer\"").
+				WillReturnError(testError)
+
+			err := updateDatabaseSchemaGrants(ctx, db, schema)
+			Expect(err).To(MatchError(testError))
+			Expect(err.Error()).To(ContainSubstring("testschema"))
+		})
+
+		It("reports the grant failure once, without an extra wrapping layer", func(ctx SpecContext) {
+			dbMock.
+				ExpectExec("GRANT USAGE ON SCHEMA \"testschema\" TO \"reader\"").
+				WillReturnError(testError)
+
+			err := updateDatabaseSchema(ctx, db, schema, &schemaInfo{Name: schema.Name, Owner: schema.Owner})
+			Expect(err).To(MatchError(fmt.Sprintf(
+				"applying USAGE grants for schema %q: granting USAGE on SCHEMA: %v", schema.Name, testError)))
+		})
+
+		It("issues no SQL when both permission lists are empty", func(ctx SpecContext) {
+			schema.Permissions = &apiv1.SchemaPermissionsSpec{}
+
+			Expect(updateDatabaseSchemaGrants(ctx, db, schema)).Error().NotTo(HaveOccurred())
+		})
+
+		It("grants to the PUBLIC pseudo-role unquoted", func(ctx SpecContext) {
+			schema.Permissions = &apiv1.SchemaPermissionsSpec{
+				Usage: []apiv1.UsageSpec{{Name: "public", Type: apiv1.GrantUsageSpecType}},
+			}
+			dbMock.
+				ExpectExec("GRANT USAGE ON SCHEMA \"testschema\" TO PUBLIC").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+
+			Expect(updateDatabaseSchemaGrants(ctx, db, schema)).Error().NotTo(HaveOccurred())
 		})
 	})
 
@@ -1014,5 +1123,102 @@ var _ = Describe("Managed Foreign Server SQL", func() {
 
 			Expect(dropDatabaseForeignServer(ctx, db, server)).Error().To(Equal(testError))
 		})
+	})
+})
+
+var _ = Describe("sanitizeGrantee", func() {
+	It("renders the PUBLIC pseudo-role verbatim, case-insensitively", func() {
+		Expect(sanitizeGrantee("public")).To(Equal("PUBLIC"))
+		Expect(sanitizeGrantee("PUBLIC")).To(Equal("PUBLIC"))
+		Expect(sanitizeGrantee("Public")).To(Equal("PUBLIC"))
+	})
+
+	It("quotes ordinary roles as identifiers", func() {
+		Expect(sanitizeGrantee("app")).To(Equal("\"app\""))
+	})
+
+	It("safely quotes roles containing special characters", func() {
+		Expect(sanitizeGrantee("weird\"name")).To(Equal("\"weird\"\"name\""))
+	})
+})
+
+var _ = Describe("applyObjectPrivilege", func() {
+	var (
+		dbMock sqlmock.Sqlmock
+		db     *sql.DB
+		err    error
+
+		testError error
+	)
+
+	BeforeEach(func() {
+		db, dbMock, err = sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+		Expect(err).ToNot(HaveOccurred())
+		testError = fmt.Errorf("test error")
+	})
+
+	AfterEach(func() {
+		Expect(dbMock.ExpectationsWereMet()).To(Succeed())
+	})
+
+	It("is a no-op when there are no grantees", func(ctx SpecContext) {
+		Expect(applyObjectPrivilege(ctx, db, "CONNECT", "DATABASE", "app", nil)).
+			Error().NotTo(HaveOccurred())
+	})
+
+	It("emits the supplied privilege keyword on GRANT", func(ctx SpecContext) {
+		dbMock.ExpectExec("GRANT CONNECT ON DATABASE \"app\" TO \"angus\"").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		grantees := []apiv1.UsageSpec{{Name: "angus", Type: apiv1.GrantUsageSpecType}}
+		Expect(applyObjectPrivilege(ctx, db, "CONNECT", "DATABASE", "app", grantees)).
+			Error().NotTo(HaveOccurred())
+	})
+
+	It("emits the supplied privilege keyword on REVOKE", func(ctx SpecContext) {
+		dbMock.ExpectExec("REVOKE CREATE ON DATABASE \"app\" FROM \"brian\"").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		grantees := []apiv1.UsageSpec{{Name: "brian", Type: apiv1.RevokeUsageSpecType}}
+		Expect(applyObjectPrivilege(ctx, db, "CREATE", "DATABASE", "app", grantees)).
+			Error().NotTo(HaveOccurred())
+	})
+
+	It("revokes a privilege from PUBLIC without quoting the pseudo-role", func(ctx SpecContext) {
+		dbMock.ExpectExec("REVOKE CONNECT ON DATABASE \"app\" FROM PUBLIC").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		grantees := []apiv1.UsageSpec{{Name: "public", Type: apiv1.RevokeUsageSpecType}}
+		Expect(applyObjectPrivilege(ctx, db, "CONNECT", "DATABASE", "app", grantees)).
+			Error().NotTo(HaveOccurred())
+	})
+
+	It("applies each grantee in order", func(ctx SpecContext) {
+		dbMock.ExpectExec("REVOKE CONNECT ON DATABASE \"app\" FROM PUBLIC").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		dbMock.ExpectExec("GRANT CONNECT ON DATABASE \"app\" TO \"app\"").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		grantees := []apiv1.UsageSpec{
+			{Name: "public", Type: apiv1.RevokeUsageSpecType},
+			{Name: "app", Type: apiv1.GrantUsageSpecType},
+		}
+		Expect(applyObjectPrivilege(ctx, db, "CONNECT", "DATABASE", "app", grantees)).
+			Error().NotTo(HaveOccurred())
+	})
+
+	It("wraps the privilege keyword in the error on failure", func(ctx SpecContext) {
+		dbMock.ExpectExec("GRANT CONNECT ON DATABASE \"app\" TO \"angus\"").
+			WillReturnError(testError)
+
+		grantees := []apiv1.UsageSpec{{Name: "angus", Type: apiv1.GrantUsageSpecType}}
+		Expect(applyObjectPrivilege(ctx, db, "CONNECT", "DATABASE", "app", grantees)).
+			Error().To(MatchError(testError))
+	})
+
+	It("errors out on entries with an unknown type", func(ctx SpecContext) {
+		grantees := []apiv1.UsageSpec{{Name: "angus", Type: "bogus"}}
+		Expect(applyObjectPrivilege(ctx, db, "CONNECT", "DATABASE", "app", grantees)).
+			Error().To(MatchError(ContainSubstring(`unknown usage spec type "bogus"`)))
 	})
 })

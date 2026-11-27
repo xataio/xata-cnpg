@@ -11,6 +11,11 @@ type InstanceIDApplyConfiguration struct {
 	PodName *string `json:"podName,omitempty"`
 	// The container ID
 	ContainerID *string `json:"ContainerID,omitempty"`
+	// The instance manager session ID. This is a unique identifier generated at instance manager
+	// startup and changes on every restart (including container reboots). Used to detect if
+	// the instance manager was restarted during long-running operations like backups, which
+	// would terminate any running backup process.
+	SessionID *string `json:"sessionID,omitempty"`
 }
 
 // InstanceIDApplyConfiguration constructs a declarative configuration of the InstanceID type for use with
@@ -32,5 +37,13 @@ func (b *InstanceIDApplyConfiguration) WithPodName(value string) *InstanceIDAppl
 // If called multiple times, the ContainerID field is set to the value of the last call.
 func (b *InstanceIDApplyConfiguration) WithContainerID(value string) *InstanceIDApplyConfiguration {
 	b.ContainerID = &value
+	return b
+}
+
+// WithSessionID sets the SessionID field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the SessionID field is set to the value of the last call.
+func (b *InstanceIDApplyConfiguration) WithSessionID(value string) *InstanceIDApplyConfiguration {
+	b.SessionID = &value
 	return b
 }

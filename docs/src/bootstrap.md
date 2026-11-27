@@ -21,27 +21,30 @@ Kubernetes or running a different major version of PostgreSQL.
 For more detailed information about this feature, please refer to the
 ["Importing Postgres databases"](database_import.md) section.
 
-!!! Important
+:::info[Important]
     Bootstrapping from an existing cluster enables the creation of a
     **replica cluster**—an independent PostgreSQL cluster that remains in
     continuous recovery, stays synchronized with the source cluster, and
     accepts read-only connections.
     For more details, refer to the [Replica Cluster section](replica_cluster.md).
+:::
 
-!!! Warning
+:::warning
     CloudNativePG requires both the `postgres` user and database to
     always exist. Using the local Unix Domain Socket, it needs to connect
     as the `postgres` user to the `postgres` database via `peer` authentication in
     order to perform administrative tasks on the cluster.
     **DO NOT DELETE** the `postgres` user or the `postgres` database!!!
+:::
 
-!!! Info
+:::info
     CloudNativePG is gradually introducing support for
     [Kubernetes' native `VolumeSnapshot` API](https://github.com/cloudnative-pg/cloudnative-pg/issues/2081)
     for both incremental and differential copy in backup and recovery
     operations - if supported by the underlying storage classes.
     Please see ["Recovery from Volume Snapshot objects"](recovery.md#recovery-from-volumesnapshot-objects)
     for details.
+:::
 
 ## The `bootstrap` section
 
@@ -73,9 +76,10 @@ Given the amount of possible backup methods and combinations of backup
 storage that the CloudNativePG operator provides for `recovery`, please refer to
 the dedicated ["Recovery" section](recovery.md) for guidance on each method.
 
-!!! Seealso "API reference"
-    Please refer to the ["API reference for the `bootstrap` section](cloudnative-pg.v1.md#postgresql-cnpg-io-v1-BootstrapConfiguration)
+:::note[API reference]
+    Please refer to the ["API reference for the `bootstrap` section](cloudnative-pg.v1.md#bootstrapconfiguration)
     for more information.
+:::
 
 ## The `externalClusters` section
 
@@ -93,10 +97,11 @@ The primary use cases include:
   given Point-In-Time, a PostgreSQL cluster by referencing a physical base
   backup.
 
-!!! Info
+:::info
     Ongoing development will extend the functionality of `externalClusters` to
     accommodate additional use cases, such as logical replication and foreign
     servers in future releases.
+:::
 
 As far as bootstrapping is concerned, `externalClusters` can be used
 to define the source PostgreSQL cluster for either the `pg_basebackup`
@@ -112,9 +117,10 @@ method or the `recovery` one. An external cluster needs to have:
         - the WAL archive (required for Point In Time Recovery)
         - the catalog of physical base backups for the Postgres cluster
 
-!!! Note
+:::note
     A recovery object store is normally an AWS S3, Azure Blob Storage,
     or Google Cloud Storage source that is managed by Barman Cloud.
+:::
 
 When only the streaming connection is defined, the source can be used for the
 `pg_basebackup` method. When only the recovery object store is defined, the
@@ -133,9 +139,10 @@ cluster is eligible for replica cluster mode. This means that the cluster is
 continuously fed from the source, either via streaming, via WAL shipping
 through the PostgreSQL's `restore_command`, or any of the two.
 
-!!! Seealso "API reference"
-    Please refer to the ["API reference for the `externalClusters` section](cloudnative-pg.v1.md#postgresql-cnpg-io-v1-ExternalCluster)
+:::note[API reference]
+    Please refer to the ["API reference for the `externalClusters` section](cloudnative-pg.v1.md#externalcluster)
     for more information.
+:::
 
 ### Password files
 
@@ -181,7 +188,27 @@ The above example of bootstrap will:
 2. create an *unprivileged* user named `app`
 3. set the password of the latter (`app`) using the one in the `app-secret`
    secret (make sure that `username` matches the same name of the `owner`)
-4. create a database called `app` owned by the `app` user.
+4. create a database called `app` owned by the `app` user
+5. revoke `CONNECT` from `PUBLIC` on the `postgres`, `template1` and `app`
+   databases, and grant it to the `cnpg_metrics_exporter` role. On the
+   `postgres` database, `CONNECT` is also granted to the `streaming_replica`
+   role, which `pg_rewind` uses. See
+   [Managing Database Permissions](declarative_database_management.md#managing-database-permissions)
+   for details.
+
+:::warning
+    Every role that needs to connect to the `postgres` database, such as the
+    role that a `Pooler` with a custom authentication method uses to run its
+    `auth_query`, must be granted `CONNECT` on it. We recommend granting it to
+    those roles only, with a SQL command run as the superuser once they exist.
+
+    If you can't do that, for example because the roles are created after the
+    bootstrap and the grant can't be automated, set
+    `.spec.bootstrap.initdb.allowPublicConnectToPostgres` to `true`. The
+    operator then doesn't revoke `CONNECT` from `PUBLIC` on the `postgres`
+    database, which every role can connect to, as in PostgreSQL. The option
+    only applies when the cluster is bootstrapped.
+:::
 
 Thanks to the *convention over configuration paradigm*, you can let the
 operator choose a default database name (`app`) and a default application
@@ -214,9 +241,10 @@ The application database is the one that should be used to store application
 data. Applications should connect to the cluster with the user that owns
 the application database.
 
-!!! Important
+:::info[Important]
     If you need to create additional users, please refer to
     ["Declarative database role management"](declarative_role_management.md).
+:::
 
 In case you don't supply any database name, the operator will proceed
 by convention and create the `app` database, and adds it to the cluster
@@ -234,12 +262,13 @@ The PostgreSQL data directory is initialized using the
 CloudNativePG enables you to customize the behavior of `initdb` to modify
 settings such as default locale configurations and data checksums.
 
-!!! Warning
+:::warning
     CloudNativePG acts only as a direct proxy to `initdb` for locale-related
     options, due to the ongoing and significant enhancements in PostgreSQL's locale
     support. It is your responsibility to ensure that the correct options are
     provided, following the PostgreSQL documentation, and to verify that the
     bootstrap process completes successfully.
+:::
 
 To include custom options in the `initdb` command, you can use the following
 parameters:
@@ -252,9 +281,13 @@ builtinLocale
     `localeProvider` to be set to `builtin`. Available from PostgreSQL 17.
 
 dataChecksums
-:   When `dataChecksums` is set to `true`, CloudNativePG invokes the `-k` option in
-    `initdb` to enable checksums on data pages and help detect corruption by the
-    I/O system - that would otherwise be silent (default: `false`).
+:   Data checksums help detect corruption of data pages that would otherwise
+    be silent. From PostgreSQL 18, where data checksums are enabled by default,
+    setting `dataChecksums` to `false` makes CloudNativePG pass the
+    `--no-data-checksums` option to `initdb` to disable them. On PostgreSQL
+    versions before 18, setting `dataChecksums` to `true` makes CloudNativePG
+    pass the `--data-checksums` option to `initdb` to enable them. When unset,
+    the `initdb` default of the PostgreSQL version in use applies.
 
 encoding
 :   When `encoding` set to a value, CloudNativePG passes it to the `--encoding`
@@ -309,12 +342,13 @@ walSegmentSize
 :   When `walSegmentSize` is set to a value, CloudNativePG passes it to the `--wal-segsize`
     option in `initdb` (default: not set - defined by PostgreSQL as 16 megabytes).
 
-!!! Note
+:::note
     The only two locale options that CloudNativePG implements during
     the `initdb` bootstrap refer to the `LC_COLLATE` and `LC_TYPE` subcategories.
     The remaining locale subcategories can be configured directly in the PostgreSQL
     configuration, using the `lc_messages`, `lc_monetary`, `lc_numeric`, and
     `lc_time` parameters.
+:::
 
 The following example enables data checksums and sets the default encoding to
 `LATIN1`:
@@ -337,12 +371,13 @@ spec:
     size: 1Gi
 ```
 
-!!! Warning
+:::warning
     CloudNativePG supports another way to customize the behavior of the
     `initdb` invocation, using the `options` subsection. However, given that there
     are options that can break the behavior of the operator (such as `--auth` or
     `-d`), this technique is deprecated and will be removed from future versions of
     the API.
+:::
 
 ### Executing Queries After Initialization
 
@@ -366,18 +401,38 @@ queries, executed in the following order:
 
 Objects in each list will be processed sequentially.
 
-!!! Warning
+The default `CONNECT` privileges of the `postgres`, `template1` and application
+databases are applied before these queries run. To give other roles access to
+the application database, we recommend assigning the privileges through a
+`Database` resource, following the principle of least privilege, instead of
+granting `CONNECT` to `PUBLIC` with these queries. See
+[Managing Database Permissions](declarative_database_management.md#managing-database-permissions)
+for details.
+
+:::warning
     Use the `postInit`, `postInitTemplate`, and `postInitApplication` options
     with extreme care, as queries are run as a superuser and can disrupt the entire
     cluster. An error in any of those queries will interrupt the bootstrap phase,
     leaving the cluster incomplete and requiring manual intervention.
+:::
 
-!!! Important
+:::note
+These queries run with the standard `"$user", public` `search_path`, even
+though operator-issued connections otherwise pin a fixed `search_path` for
+security reasons.
+See [Schema resolution and `search_path` hardening](security.md#schema-resolution-and-search_path-hardening)
+for details.
+Schema-qualify object references if you need them to be independent of the
+`search_path`.
+:::
+
+:::info[Important]
     Ensure the existence of entries inside the ConfigMaps or Secrets specified
     in `postInitSQLRefs`, `postInitTemplateSQLRefs`, and
     `postInitApplicationSQLRefs`, otherwise the bootstrap will fail. Errors in any
     of those SQL files will prevent the bootstrap phase from completing
     successfully.
+:::
 
 The following example runs a single SQL query as part of the `postInitSQL`
 stanza:
@@ -430,10 +485,11 @@ spec:
     size: 1Gi
 ```
 
-!!! Note
+:::note
     Within SQL scripts, each SQL statement is executed in a single exec on the
     server according to the [PostgreSQL semantics](https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-MULTI-STATEMENT).
     Comments can be included, but internal commands like `psql` cannot.
+:::
 
 ## Bootstrap from another cluster
 
@@ -446,13 +502,14 @@ physical *base backup* (`recovery`).
 The source cluster must be defined in the `externalClusters` section, identified
 by `name` (our recommendation is to use the same `name` of the origin cluster).
 
-!!! Important
+:::info[Important]
     By default the `recovery` method strictly uses the `name` of the
     cluster in the `externalClusters` section to locate the main folder
     of the backup data within the object store, which is normally reserved
     for the name of the server. Backup plugins provide ways to specify a
     different one. For example, the Barman Cloud Plugin provides the [`serverName` parameter](https://cloudnative-pg.io/plugin-barman-cloud/docs/parameters/)
     (by default assigned to the value of `name` in the external cluster definition).
+:::
 
 ### Bootstrap from a backup (`recovery`)
 
@@ -481,7 +538,7 @@ The primary use cases for this method include:
 - Physical migrations of CloudNativePG clusters to different namespaces or
   Kubernetes clusters
 
-!!! Important
+:::info[Important]
     Avoid using this method, based on physical replication, to migrate an
     existing PostgreSQL cluster outside of Kubernetes into CloudNativePG, unless you
     are completely certain that all [requirements](#requirements) are met and
@@ -489,13 +546,18 @@ The primary use cases for this method include:
     thoroughly tested. The CloudNativePG community does not endorse this approach
     for such use cases, and recommends using logical import instead. It is
     exceedingly rare that all requirements for physical replication are met in a
-    way that seamlessly works with CloudNativePG.
+    way that seamlessly works with CloudNativePG. If you still need to go down
+    this path, we strongly recommend relying on one of the
+    [professional support companies](https://cloudnative-pg.io/support/)
+    listed on the CloudNativePG website.
+:::
 
-!!! Warning
+:::warning
     In its current implementation, this method clones the source PostgreSQL
     instance, thereby creating a *snapshot*. Once the cloning process has finished,
     the new cluster is immediately started.
     Refer to ["Current limitations"](#current-limitations) for more details.
+:::
 
 Similar to the `recovery` bootstrap method, once the cloning operation is
 complete, the operator takes full ownership of the target cluster, starting
@@ -504,10 +566,11 @@ parameters as required by CloudNativePG, resetting the superuser password,
 creating the `streaming_replica` user, managing replicas, and more. The
 resulting cluster operates independently from the source instance.
 
-!!! Important
+:::info[Important]
     Configuring the network connection between the target and source instances
     lies outside the scope of CloudNativePG documentation, as it depends heavily on
     the specific context and environment.
+:::
 
 The streaming replication client on the target instance, managed transparently
 by `pg_basebackup`, can authenticate on the source instance using one of the
@@ -524,7 +587,10 @@ The following requirements apply to the `pg_basebackup` bootstrap method:
 
 - target and source must have the same hardware architecture
 - target and source must have the same major PostgreSQL version
-- target and source must have the same tablespaces
+- target and source must have the same tablespaces (same names), with the
+  locations in the source mapped through `tablespaceMapping` when they differ
+  from the CloudNativePG ones (see
+  [Mapping tablespaces from the source](#mapping-tablespaces-from-the-source))
 - source must be configured with enough `max_wal_senders` to grant
   access from the target for this one-off operation by providing at least
   one *walsender* for the backup plus one for WAL streaming
@@ -536,7 +602,7 @@ The following requirements apply to the `pg_basebackup` bootstrap method:
 - target must be able to successfully connect to the source PostgreSQL instance
   using a role with `REPLICATION LOGIN` privileges
 
-!!! Seealso
+:::note[Seealso]
     For further information, please refer to the
     ["Planning" section for Warm Standby](https://www.postgresql.org/docs/current/warm-standby.html#STANDBY-PLANNING),
     the
@@ -544,6 +610,7 @@ The following requirements apply to the `pg_basebackup` bootstrap method:
     and the
     ["High Availability, Load Balancing, and Replication" chapter](https://www.postgresql.org/docs/current/high-availability.html)
     in the PostgreSQL documentation.
+:::
 
 #### About the replication user
 
@@ -569,10 +636,11 @@ createuser -P --replication streaming_replica
 Enter the password at the prompt and save it for later, as you
 will need to add it to a secret in the target instance.
 
-!!! Note
+:::note
     Although the name is not important, we will use `streaming_replica`
     for the sake of simplicity. Feel free to change it as you like,
     provided you adapt the instructions in the following sections.
+:::
 
 #### Username/Password authentication
 
@@ -594,7 +662,7 @@ file on the source PostgreSQL instance:
 host replication streaming_replica all md5
 ```
 
-The following manifest creates a new PostgreSQL 18.1 cluster,
+The following manifest creates a new PostgreSQL 19.0 cluster,
 called `target-db`, using the `pg_basebackup` bootstrap method
 to clone an external PostgreSQL cluster defined as `source-db`
 (in the `externalClusters` array). As you can see, the `source-db`
@@ -609,7 +677,7 @@ metadata:
   name: target-db
 spec:
   instances: 3
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.1-system-trixie
+  imageName: ghcr.io/cloudnative-pg/postgresql:19.0-system-trixie
 
   bootstrap:
     pg_basebackup:
@@ -629,7 +697,7 @@ spec:
 ```
 
 All the requirements must be met for the clone operation to work, including
-the same PostgreSQL version (in our case 18.1).
+the same PostgreSQL version (in our case 19.0).
 
 #### TLS certificate authentication
 
@@ -640,11 +708,12 @@ This is the recommended approach from a security standpoint.
 The following example clones an existing PostgreSQL cluster (`cluster-example`)
 in the same Kubernetes cluster.
 
-!!! Note
+:::note
     This example can be easily adapted to cover an instance that resides
     outside the Kubernetes cluster.
+:::
 
-The manifest defines a new PostgreSQL 18.1 cluster called `cluster-clone-tls`,
+The manifest defines a new PostgreSQL 19.0 cluster called `cluster-clone-tls`,
 which is bootstrapped using the `pg_basebackup` method from the `cluster-example`
 external cluster. The host is identified by the read/write service
 in the same cluster, while the `streaming_replica` user is authenticated
@@ -659,7 +728,7 @@ metadata:
   name: cluster-clone-tls
 spec:
   instances: 3
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.1-system-trixie
+  imageName: ghcr.io/cloudnative-pg/postgresql:19.0-system-trixie
 
   bootstrap:
     pg_basebackup:
@@ -692,11 +761,12 @@ from a live cluster, just like the case of `initdb` and  `recovery` bootstrap me
 If the new cluster is created as a replica cluster (with replica mode enabled), application
 database configuration will be skipped.
 
-!!! Important
+:::info[Important]
     While the `Cluster` is in recovery mode, no changes to the database,
     including the catalog, are permitted. This restriction includes any role
     overrides, which are deferred until the `Cluster` transitions to primary.
     During the recovery phase, roles remain as defined in the source cluster.
+:::
 
 The example below configures the `app` database with the owner `app` and
 the password stored in the provided secret `app-secret`, following the
@@ -727,6 +797,105 @@ completed**:
    password for the application user (the `app` user in this case) will be
    updated to the `password` value in the secret.
 
+#### Passing additional options to `pg_basebackup`
+
+This is an advanced option. You can append custom options to the
+`pg_basebackup` command built by the operator with
+`.spec.bootstrap.pg_basebackup.additionalArgs`, for example to reduce the
+impact on the source server or to speed up the copy of a very large data
+directory:
+
+```yaml
+spec:
+  bootstrap:
+    pg_basebackup:
+      source: cluster-example
+      additionalArgs:
+        - --max-rate=50M
+        - --checkpoint=fast
+        - --sync-method=syncfs
+```
+
+In this example:
+
+- `--max-rate=50M` limits the transfer rate, reducing the load on the source
+- `--checkpoint=fast` avoids waiting for a spread checkpoint on the source
+- `--sync-method=syncfs` avoids a slow per-file `fsync` phase at the end of the
+  copy (PostgreSQL 17 and later only)
+
+:::warning
+The operator rejects the options it relies on: the target directory and output
+format (`-D`/`--pgdata`, `-F`/`--format`, `-R`/`--write-recovery-conf`,
+`-X`/`--wal-method`, `--waldir`, `-t`/`--target`), the connection parameters
+(`-d`/`--dbname`, `-h`/`--host`, `-p`/`--port`, `-U`/`--username`,
+`-w`/`--no-password`, `-W`/`--password`, taken from `externalClusters`), the
+tablespace relocation (`-T`/`--tablespace-mapping`), the creation of a
+permanent replication slot on the source (`-C`/`--create-slot`), which the new
+cluster would never use, and `--help` and `--version`. Abbreviated long options
+that match one of them are rejected too.
+
+All the other options are passed as they are, and some of them may still
+interfere with the operator. You are responsible for the arguments and for
+their compatibility with the PostgreSQL version in use. The project does not
+test combinations of `pg_basebackup` options.
+:::
+
+This setting only applies to the bootstrap of the cluster. It does not affect
+the `pg_basebackup` executions used to join new replicas.
+
+#### Mapping tablespaces from the source
+
+If the source instance uses tablespaces, declare each of them in
+`spec.tablespaces`, using the same name it has in the source instance.
+`pg_basebackup` relocates tablespaces by path and not by name, so if the source
+does not already use the CloudNativePG location for a tablespace, map it with
+`tablespaceMapping`, which associates the name of the tablespace with its
+location in the source instance:
+
+```yaml
+spec:
+  tablespaces:
+    - name: data_ts
+      storage:
+        size: 1Gi
+  bootstrap:
+    pg_basebackup:
+      source: external-postgres
+      tablespaceMapping:
+        - name: data_ts
+          sourceLocation: /data/pg/data_ts
+```
+
+:::warning
+Use `tablespaceMapping` with caution, as it is meant for sources that are not
+managed by CloudNativePG, such as an instance running outside Kubernetes. As
+explained in the [introduction of this method](#bootstrap-from-a-live-cluster-pg_basebackup),
+the CloudNativePG community does not endorse that kind of migration, and
+recommends logical import instead. If you still need it, we strongly
+recommend relying on one of the
+[professional support companies](https://cloudnative-pg.io/support/)
+listed on the CloudNativePG website. The operator does not validate that the
+resulting tablespace layout will work correctly.
+:::
+
+:::warning
+The operator does not check which tablespaces the source instance has. Make
+sure that every tablespace of the source instance is declared in
+`spec.tablespaces`, and mapped through `tablespaceMapping` unless the source
+already uses the CloudNativePG location. A tablespace that is not mapped is
+restored under the path it has in the source instance, inside the Pod. If that
+path is not writable, the bootstrap fails. If it is, the data ends up in an
+unexpected location.
+:::
+
+:::warning
+Do not run `CREATE TABLESPACE` on the source from the start of the base backup
+until the target stops following the source. For a standalone cluster, that is
+the end of the cloning operation; for a replica cluster, it is the promotion of
+the cluster. WAL replay carries the source path unmodified, so replaying such a
+record fails on the target.
+:::
+
 #### Current limitations
 
 ##### Snapshot copy
@@ -745,8 +914,9 @@ before migrating to the target database.
 Note that this limitation applies only if the target cluster is not defined as
 a replica cluster.
 
-!!! Important
+:::info[Important]
     Before you attempt a migration, you must test both the procedure
     and the applications. In particular, it is fundamental that you run the migration
     procedure as many times as needed to systematically measure the downtime of your
     applications in production.
+:::

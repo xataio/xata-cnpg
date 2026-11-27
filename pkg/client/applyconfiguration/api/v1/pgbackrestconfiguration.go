@@ -11,7 +11,7 @@ type PgBackRestConfigurationApplyConfiguration struct {
 	Options    *PgBackRestOptionsApplyConfiguration    `json:"options,omitempty"`
 	// StanzaName is the pgbackrest stanza this cluster archives to. It is the
 	// logical identity of the backup set in the repository (the repo layout is
-	// <repoPath>/{archive,backup}/<stanza>/). When unset it defaults to the
+	// `<repoPath>/{archive,backup}/<stanza>/`). When unset it defaults to the
 	// cluster name.
 	StanzaName *string `json:"stanzaName,omitempty"`
 }

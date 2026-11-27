@@ -36,7 +36,6 @@ import (
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/internal/cmd/plugin"
-	"github.com/xataio/xata-cnpg/pkg/management/postgres/webserver/client/remote"
 	"github.com/xataio/xata-cnpg/pkg/management/url"
 	"github.com/xataio/xata-cnpg/pkg/postgres"
 	"github.com/xataio/xata-cnpg/pkg/specs"
@@ -110,7 +109,7 @@ func getInstanceStatusFromPod(
 		CoreV1().
 		Pods(pod.Namespace).
 		ProxyGet(
-			remote.GetStatusSchemeFromPod(&pod).ToString(),
+			"https",
 			pod.Name,
 			strconv.Itoa(int(url.StatusPort)),
 			url.PathPgStatus,

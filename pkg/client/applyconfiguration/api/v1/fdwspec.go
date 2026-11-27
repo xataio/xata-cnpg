@@ -12,7 +12,7 @@ import (
 // FDWSpec configures an Foreign Data Wrapper in a database
 type FDWSpecApplyConfiguration struct {
 	// Common fields
-	DatabaseObjectSpecApplyConfiguration `json:",inline"`
+	DatabaseObjectSpecApplyConfiguration `json:""`
 	// Name of the handler function (e.g., "postgres_fdw_handler").
 	// This will be empty if no handler is specified. In that case,
 	// the default handler is registered when the FDW extension is created.

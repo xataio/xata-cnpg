@@ -3,8 +3,11 @@
 package v1
 
 import (
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	internal "github.com/xataio/xata-cnpg/pkg/client/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -16,7 +19,7 @@ import (
 // of the primary node and reset to zero by the operator to trigger
 // an update.
 type FailoverQuorumApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	// Most recently observed status of the failover quorum.
 	Status *FailoverQuorumStatusApplyConfiguration `json:"status,omitempty"`
@@ -31,6 +34,47 @@ func FailoverQuorum(name, namespace string) *FailoverQuorumApplyConfiguration {
 	b.WithKind("FailoverQuorum")
 	b.WithAPIVersion("postgresql.cnpg.io/v1")
 	return b
+}
+
+// ExtractFailoverQuorumFrom extracts the applied configuration owned by fieldManager from
+// failoverQuorum for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// failoverQuorum must be a unmodified FailoverQuorum API object that was retrieved from the Kubernetes API.
+// ExtractFailoverQuorumFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractFailoverQuorumFrom(failoverQuorum *apiv1.FailoverQuorum, fieldManager string, subresource string) (*FailoverQuorumApplyConfiguration, error) {
+	b := &FailoverQuorumApplyConfiguration{}
+	err := managedfields.ExtractInto(failoverQuorum, internal.Parser().Type("com.github.xataio.xata-cnpg.api.v1.FailoverQuorum"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(failoverQuorum.Name)
+	b.WithNamespace(failoverQuorum.Namespace)
+
+	b.WithKind("FailoverQuorum")
+	b.WithAPIVersion("postgresql.cnpg.io/v1")
+	return b, nil
+}
+
+// ExtractFailoverQuorum extracts the applied configuration owned by fieldManager from
+// failoverQuorum. If no managedFields are found in failoverQuorum for fieldManager, a
+// FailoverQuorumApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// failoverQuorum must be a unmodified FailoverQuorum API object that was retrieved from the Kubernetes API.
+// ExtractFailoverQuorum provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractFailoverQuorum(failoverQuorum *apiv1.FailoverQuorum, fieldManager string) (*FailoverQuorumApplyConfiguration, error) {
+	return ExtractFailoverQuorumFrom(failoverQuorum, fieldManager, "")
+}
+
+// ExtractFailoverQuorumStatus extracts the applied configuration owned by fieldManager from
+// failoverQuorum for the status subresource.
+func ExtractFailoverQuorumStatus(failoverQuorum *apiv1.FailoverQuorum, fieldManager string) (*FailoverQuorumApplyConfiguration, error) {
+	return ExtractFailoverQuorumFrom(failoverQuorum, fieldManager, "status")
 }
 
 func (b FailoverQuorumApplyConfiguration) IsApplyConfiguration() {}

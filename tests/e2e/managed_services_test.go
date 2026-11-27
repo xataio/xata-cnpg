@@ -30,6 +30,7 @@ import (
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/pkg/specs"
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
 	"github.com/xataio/xata-cnpg/tests/utils/timeouts"
 	"github.com/xataio/xata-cnpg/tests/utils/yaml"
@@ -63,7 +64,7 @@ var _ = Describe("Managed services tests", Label(tests.LabelSmoke, tests.LabelBa
 
 		clusterName, err := yaml.GetResourceNameFromYAML(env.Scheme, clusterManifest)
 		Expect(err).ToNot(HaveOccurred())
-		AssertCreateCluster(namespace, clusterName, clusterManifest, env)
+		clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, clusterManifest)
 
 		cluster, err := clusterutils.Get(env.Ctx, env.Client, namespace, clusterName)
 		Expect(err).ToNot(HaveOccurred())
@@ -89,7 +90,7 @@ var _ = Describe("Managed services tests", Label(tests.LabelSmoke, tests.LabelBa
 				return env.Client.Update(ctx, cluster)
 			}, RetryTimeout, PollingTime).Should(Succeed())
 
-			AssertClusterIsReady(namespace, clusterName, testTimeouts[timeouts.ManagedServices], env)
+			clusterasserts.AssertClusterIsReady(env, namespace, clusterName, testTimeouts[timeouts.ManagedServices])
 			Eventually(func(g Gomega) {
 				var serviceRW corev1.Service
 				err = env.Client.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: namespace}, &serviceRW)
@@ -106,7 +107,7 @@ var _ = Describe("Managed services tests", Label(tests.LabelSmoke, tests.LabelBa
 
 		clusterName, err := yaml.GetResourceNameFromYAML(env.Scheme, clusterManifest)
 		Expect(err).ToNot(HaveOccurred())
-		AssertCreateCluster(namespace, clusterName, clusterManifest, env)
+		clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, clusterManifest)
 
 		cluster, err := clusterutils.Get(env.Ctx, env.Client, namespace, clusterName)
 		Expect(err).ToNot(HaveOccurred())
@@ -135,7 +136,7 @@ var _ = Describe("Managed services tests", Label(tests.LabelSmoke, tests.LabelBa
 				return env.Client.Update(ctx, cluster)
 			}, RetryTimeout, PollingTime).Should(Succeed())
 
-			AssertClusterIsReady(namespace, clusterName, testTimeouts[timeouts.ManagedServices], env)
+			clusterasserts.AssertClusterIsReady(env, namespace, clusterName, testTimeouts[timeouts.ManagedServices])
 
 			Eventually(func(g Gomega) {
 				var service corev1.Service
@@ -165,7 +166,7 @@ var _ = Describe("Managed services tests", Label(tests.LabelSmoke, tests.LabelBa
 
 		clusterName, err := yaml.GetResourceNameFromYAML(env.Scheme, clusterManifest)
 		Expect(err).ToNot(HaveOccurred())
-		AssertCreateCluster(namespace, clusterName, clusterManifest, env)
+		clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, clusterManifest)
 
 		cluster, err := clusterutils.Get(env.Ctx, env.Client, namespace, clusterName)
 		Expect(err).ToNot(HaveOccurred())

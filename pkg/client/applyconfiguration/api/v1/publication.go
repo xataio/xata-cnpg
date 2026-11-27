@@ -3,8 +3,11 @@
 package v1
 
 import (
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	internal "github.com/xataio/xata-cnpg/pkg/client/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -13,7 +16,7 @@ import (
 //
 // Publication is the Schema for the publications API
 type PublicationApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                                 *PublicationSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                               *PublicationStatusApplyConfiguration `json:"status,omitempty"`
@@ -28,6 +31,47 @@ func Publication(name, namespace string) *PublicationApplyConfiguration {
 	b.WithKind("Publication")
 	b.WithAPIVersion("postgresql.cnpg.io/v1")
 	return b
+}
+
+// ExtractPublicationFrom extracts the applied configuration owned by fieldManager from
+// publication for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// publication must be a unmodified Publication API object that was retrieved from the Kubernetes API.
+// ExtractPublicationFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractPublicationFrom(publication *apiv1.Publication, fieldManager string, subresource string) (*PublicationApplyConfiguration, error) {
+	b := &PublicationApplyConfiguration{}
+	err := managedfields.ExtractInto(publication, internal.Parser().Type("com.github.xataio.xata-cnpg.api.v1.Publication"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(publication.Name)
+	b.WithNamespace(publication.Namespace)
+
+	b.WithKind("Publication")
+	b.WithAPIVersion("postgresql.cnpg.io/v1")
+	return b, nil
+}
+
+// ExtractPublication extracts the applied configuration owned by fieldManager from
+// publication. If no managedFields are found in publication for fieldManager, a
+// PublicationApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// publication must be a unmodified Publication API object that was retrieved from the Kubernetes API.
+// ExtractPublication provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractPublication(publication *apiv1.Publication, fieldManager string) (*PublicationApplyConfiguration, error) {
+	return ExtractPublicationFrom(publication, fieldManager, "")
+}
+
+// ExtractPublicationStatus extracts the applied configuration owned by fieldManager from
+// publication for the status subresource.
+func ExtractPublicationStatus(publication *apiv1.Publication, fieldManager string) (*PublicationApplyConfiguration, error) {
+	return ExtractPublicationFrom(publication, fieldManager, "status")
 }
 
 func (b PublicationApplyConfiguration) IsApplyConfiguration() {}

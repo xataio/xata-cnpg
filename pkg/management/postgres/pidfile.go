@@ -22,13 +22,13 @@ package postgres
 import (
 	"os"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/cloudnative-pg/machinery/pkg/fileutils"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/mitchellh/go-ps"
-	"k8s.io/utils/strings/slices"
 )
 
 // PostgresqlPidFile is the name of the file which contains
@@ -89,6 +89,26 @@ func (instance *Instance) CheckForExistingPostmaster(postgresExecutables ...stri
 	contextLog.Info("Detected alive postmaster from PID file")
 	contextLog.Debug("PID file", "contents", pidFileContents)
 	return os.FindProcess(pid)
+}
+
+// pidFileNamesForeignProcess reports whether the PID file points to a live
+// process that is not PostgreSQL. This happens when the file survives a
+// container restart and the PID is reused: pg_ctl only checks that the PID
+// is alive, so it would signal that process and wait for it.
+func (instance *Instance) pidFileNamesForeignProcess() bool {
+	_, pid, err := instance.GetPostmasterPidFromFile(path.Join(instance.PgData, PostgresqlPidFile))
+	if err != nil {
+		return false
+	}
+
+	process, err := ps.FindProcess(pid)
+	if err != nil || process == nil || process.Executable() == GetPostgresExecutableName() {
+		return false
+	}
+
+	log.Info("The PID file belongs to a process that is not PostgreSQL, the instance is not running",
+		"pid", pid, "executable", process.Executable())
+	return true
 }
 
 // CleanUpStalePid cleans up the files left around by a crashed PostgreSQL instance.

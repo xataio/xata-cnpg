@@ -3,8 +3,11 @@
 package v1
 
 import (
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	internal "github.com/xataio/xata-cnpg/pkg/client/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -13,7 +16,7 @@ import (
 //
 // Pooler is the Schema for the poolers API
 type PoolerApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	// Specification of the desired behavior of the Pooler.
 	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
@@ -33,6 +36,47 @@ func Pooler(name, namespace string) *PoolerApplyConfiguration {
 	b.WithKind("Pooler")
 	b.WithAPIVersion("postgresql.cnpg.io/v1")
 	return b
+}
+
+// ExtractPoolerFrom extracts the applied configuration owned by fieldManager from
+// pooler for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// pooler must be a unmodified Pooler API object that was retrieved from the Kubernetes API.
+// ExtractPoolerFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractPoolerFrom(pooler *apiv1.Pooler, fieldManager string, subresource string) (*PoolerApplyConfiguration, error) {
+	b := &PoolerApplyConfiguration{}
+	err := managedfields.ExtractInto(pooler, internal.Parser().Type("com.github.xataio.xata-cnpg.api.v1.Pooler"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(pooler.Name)
+	b.WithNamespace(pooler.Namespace)
+
+	b.WithKind("Pooler")
+	b.WithAPIVersion("postgresql.cnpg.io/v1")
+	return b, nil
+}
+
+// ExtractPooler extracts the applied configuration owned by fieldManager from
+// pooler. If no managedFields are found in pooler for fieldManager, a
+// PoolerApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// pooler must be a unmodified Pooler API object that was retrieved from the Kubernetes API.
+// ExtractPooler provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractPooler(pooler *apiv1.Pooler, fieldManager string) (*PoolerApplyConfiguration, error) {
+	return ExtractPoolerFrom(pooler, fieldManager, "")
+}
+
+// ExtractPoolerStatus extracts the applied configuration owned by fieldManager from
+// pooler for the status subresource.
+func ExtractPoolerStatus(pooler *apiv1.Pooler, fieldManager string) (*PoolerApplyConfiguration, error) {
+	return ExtractPoolerFrom(pooler, fieldManager, "status")
 }
 
 func (b PoolerApplyConfiguration) IsApplyConfiguration() {}

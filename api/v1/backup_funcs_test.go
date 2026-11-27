@@ -20,6 +20,7 @@ SPDX-License-Identifier: Apache-2.0
 package v1
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -35,6 +36,15 @@ import (
 )
 
 var _ = Describe("BackupStatus structure", func() {
+	It("can be set as pending", func() {
+		status := BackupStatus{}
+		status.SetAsPending()
+		Expect(status.Phase).To(BeEquivalentTo(BackupPhasePending))
+		Expect(status.IsInProgress()).To(BeTrue())
+		Expect(status.IsExecuting()).To(BeFalse())
+		Expect(status.IsDone()).To(BeFalse())
+	})
+
 	It("can be set as started", func() {
 		status := BackupStatus{}
 		pod := corev1.Pod{
@@ -50,13 +60,44 @@ var _ = Describe("BackupStatus structure", func() {
 			},
 		}
 
-		status.SetAsStarted(pod.Name, pod.Status.ContainerStatuses[0].ContainerID, BackupMethodBarmanObjectStore)
+		status.SetAsStarted(pod.Name, pod.Status.ContainerStatuses[0].ContainerID,
+			"test-session-id", BackupMethodBarmanObjectStore)
 		Expect(status.Phase).To(BeEquivalentTo(BackupPhaseStarted))
 		Expect(status.StartedAt).ToNot(BeNil())
 		Expect(status.InstanceID).ToNot(BeNil())
 		Expect(status.InstanceID.PodName).To(Equal("cluster-example-1"))
 		Expect(status.InstanceID.ContainerID).To(Equal("container-id"))
+		Expect(status.InstanceID.SessionID).To(Equal("test-session-id"))
 		Expect(status.IsDone()).To(BeFalse())
+		Expect(status.ReconciliationStartedAt).ToNot(BeNil())
+	})
+
+	It("can be set as completed", func() {
+		status := BackupStatus{}
+		status.SetAsCompleted()
+		Expect(status.Phase).To(BeEquivalentTo(BackupPhaseCompleted))
+		Expect(status.Error).To(BeEmpty())
+		Expect(status.ReconciliationTerminatedAt).ToNot(BeNil())
+		Expect(status.IsDone()).To(BeTrue())
+	})
+
+	It("can be set as failed with error", func() {
+		status := BackupStatus{}
+		testErr := errors.New("test error")
+		status.SetAsFailed(testErr, BackupFailureReasonOther)
+		Expect(status.Phase).To(BeEquivalentTo(BackupPhaseFailed))
+		Expect(status.Error).To(Equal("test error"))
+		Expect(status.ReconciliationTerminatedAt).ToNot(BeNil())
+		Expect(status.IsDone()).To(BeTrue())
+	})
+
+	It("can be set as failed without error", func() {
+		status := BackupStatus{}
+		status.SetAsFailed(nil, BackupFailureReasonOther)
+		Expect(status.Phase).To(BeEquivalentTo(BackupPhaseFailed))
+		Expect(status.Error).To(BeEmpty())
+		Expect(status.ReconciliationTerminatedAt).ToNot(BeNil())
+		Expect(status.IsDone()).To(BeTrue())
 	})
 
 	It("can be set to contain a snapshot list", func() {
@@ -93,6 +134,7 @@ var _ = Describe("BackupStatus structure", func() {
 					Phase: BackupPhaseRunning,
 				}
 				Expect(b.IsInProgress()).To(BeTrue())
+				Expect(b.IsExecuting()).To(BeTrue())
 				Expect(b.IsDone()).To(BeFalse())
 			})
 		})
@@ -103,6 +145,7 @@ var _ = Describe("BackupStatus structure", func() {
 					Phase: BackupPhasePending,
 				}
 				Expect(b.IsInProgress()).To(BeTrue())
+				Expect(b.IsExecuting()).To(BeFalse())
 				Expect(b.IsDone()).To(BeFalse())
 			})
 		})
@@ -113,6 +156,7 @@ var _ = Describe("BackupStatus structure", func() {
 					Phase: BackupPhaseCompleted,
 				}
 				Expect(b.IsInProgress()).To(BeFalse())
+				Expect(b.IsExecuting()).To(BeFalse())
 				Expect(b.IsDone()).To(BeTrue())
 			})
 		})
@@ -123,6 +167,7 @@ var _ = Describe("BackupStatus structure", func() {
 					Phase: BackupPhaseFailed,
 				}
 				Expect(b.IsInProgress()).To(BeFalse())
+				Expect(b.IsExecuting()).To(BeFalse())
 				Expect(b.IsDone()).To(BeTrue())
 			})
 		})
@@ -190,6 +235,70 @@ var _ = Describe("BackupList structure", func() {
 		Expect(backupList.Items[2].Name).To(Equal("backup-ten-minutes"))
 	})
 
+	It("can be sorted by creation time and name", func() {
+		now := time.Now()
+		backupList := BackupList{
+			Items: []Backup{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "backup-now",
+						CreationTimestamp: metav1.NewTime(now),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "backup-ten-minutes",
+						CreationTimestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "backup-five-minutes",
+						CreationTimestamp: metav1.NewTime(now.Add(-5 * time.Minute)),
+					},
+				},
+			},
+		}
+		backupList.SortByCreationTimeAndName()
+
+		Expect(backupList.Items).To(HaveLen(3))
+		Expect(backupList.Items[0].Name).To(Equal("backup-ten-minutes"))
+		Expect(backupList.Items[1].Name).To(Equal("backup-five-minutes"))
+		Expect(backupList.Items[2].Name).To(Equal("backup-now"))
+	})
+
+	It("breaks ties by name when creation times are equal", func() {
+		now := time.Now()
+		backupList := BackupList{
+			Items: []Backup{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "backup-c",
+						CreationTimestamp: metav1.NewTime(now),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "backup-a",
+						CreationTimestamp: metav1.NewTime(now),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "backup-b",
+						CreationTimestamp: metav1.NewTime(now),
+					},
+				},
+			},
+		}
+		backupList.SortByCreationTimeAndName()
+
+		Expect(backupList.Items).To(HaveLen(3))
+		Expect(backupList.Items[0].Name).To(Equal("backup-a"))
+		Expect(backupList.Items[1].Name).To(Equal("backup-b"))
+		Expect(backupList.Items[2].Name).To(Equal("backup-c"))
+	})
+
 	It("can isolate pending backups", func() {
 		backupList := BackupList{
 			Items: []Backup{
@@ -227,12 +336,20 @@ var _ = Describe("BackupList structure", func() {
 						Phase: BackupPhaseFailed,
 					},
 				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "backup-7",
+					},
+					Status: BackupStatus{
+						Phase: BackupPhasePending,
+					},
+				},
 			},
 		}
 		backupList.SortByName()
 
 		pendingBackups := backupList.GetPendingBackupNames()
-		Expect(pendingBackups).To(ConsistOf("backup-1", "backup-2"))
+		Expect(pendingBackups).To(ConsistOf("backup-1", "backup-2", "backup-7"))
 	})
 })
 
@@ -366,6 +483,71 @@ var _ = Describe("backup_controller volumeSnapshot unit tests", func() {
 			Expect(backupList.CanExecuteBackup("backup-3")).To(BeFalse())
 		})
 	})
+
+	When("a newer pending backup sorts alphabetically before an older started one", func() {
+		// Regression guard for the preemption bug fixed in this change:
+		// an alphabetically-earlier Pending backup must not preempt an
+		// older Started backup that has already acquired resources.
+		It("keeps the older started backup as the elected one", func() {
+			now := time.Now()
+			backupList := BackupList{
+				Items: []Backup{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:              "backup-a-newer",
+							CreationTimestamp: metav1.NewTime(now),
+						},
+						Status: BackupStatus{
+							Phase: BackupPhasePending,
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:              "backup-z-older",
+							CreationTimestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
+						},
+						Status: BackupStatus{
+							Phase: BackupPhaseStarted,
+						},
+					},
+				},
+			}
+
+			Expect(backupList.CanExecuteBackup("backup-z-older")).To(BeTrue())
+			Expect(backupList.CanExecuteBackup("backup-a-newer")).To(BeFalse())
+		})
+	})
+
+	When("the only pending backups have diverging name and creation order", func() {
+		It("elects the oldest pending backup regardless of name", func() {
+			now := time.Now()
+			backupList := BackupList{
+				Items: []Backup{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:              "backup-a-newer",
+							CreationTimestamp: metav1.NewTime(now),
+						},
+						Status: BackupStatus{
+							Phase: BackupPhasePending,
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:              "backup-z-older",
+							CreationTimestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
+						},
+						Status: BackupStatus{
+							Phase: BackupPhasePending,
+						},
+					},
+				},
+			}
+
+			Expect(backupList.CanExecuteBackup("backup-z-older")).To(BeTrue())
+			Expect(backupList.CanExecuteBackup("backup-a-newer")).To(BeFalse())
+		})
+	})
 })
 
 var _ = Describe("IsCompletedVolumeSnapshot", func() {
@@ -417,6 +599,39 @@ var _ = Describe("IsCompletedVolumeSnapshot", func() {
 
 	It("should return false for an incomplete volume snapshot", func() {
 		Expect(nonCompletedBackup.IsCompletedVolumeSnapshot()).To(BeFalse())
+	})
+})
+
+var _ = Describe("Backup admission error", func() {
+	It("records the error and the invalid phase", func() {
+		backup := &Backup{}
+		backup.SetAdmissionError("boom")
+		Expect(backup.Status.Phase).To(BeEquivalentTo(BackupPhaseDefinitionInvalid))
+		Expect(backup.Status.Error).To(Equal("boom"))
+		Expect(backup.GetAdmissionError()).To(Equal("boom"))
+	})
+
+	It("clears the error and resets the phase so the start gates fire again", func() {
+		backup := &Backup{}
+		backup.SetAdmissionError("boom")
+		backup.SetAdmissionError("")
+		Expect(backup.Status.Phase).To(BeEmpty())
+		Expect(backup.Status.Error).To(BeEmpty())
+		Expect(backup.GetAdmissionError()).To(BeEmpty())
+	})
+
+	It("does not report an error recorded by a non-admission phase", func() {
+		backup := &Backup{}
+		backup.Status.SetAsFailed(errors.New("backup failed"), BackupFailureReasonOther)
+		Expect(backup.GetAdmissionError()).To(BeEmpty())
+	})
+
+	It("leaves a non-admission failure untouched when clearing", func() {
+		backup := &Backup{}
+		backup.Status.SetAsFailed(errors.New("backup failed"), BackupFailureReasonOther)
+		backup.SetAdmissionError("")
+		Expect(backup.Status.Phase).To(BeEquivalentTo(BackupPhaseFailed))
+		Expect(backup.Status.Error).To(Equal("backup failed"))
 	})
 })
 

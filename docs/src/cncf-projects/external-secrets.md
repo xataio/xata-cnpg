@@ -48,9 +48,10 @@ Let’s walk through how to automatically rotate the password of the `app` user
 every 24 hours in the `cluster-example` Postgres cluster from the
 [quickstart guide](../quickstart.md#part-3-deploy-a-postgresql-cluster).
 
-!!! Important
+:::info[Important]
     Before proceeding, ensure that the `cluster-example` Postgres cluster is up
     and running in your environment.
+:::
 
 By default, CloudNativePG generates and manages a Kubernetes `Secret` named
 `cluster-example-app`, which contains the credentials for the `app` user in the
@@ -109,6 +110,7 @@ spec:
       metadata:
         labels:
           cnpg.io/reload: "true"
+      type: kubernetes.io/basic-auth
       data:
         password: "{{ .password }}"
         pgpass: "cluster-example-rw:5432:app:app:{{ .password }}"
@@ -144,12 +146,75 @@ kubectl get secret cluster-example-app \
 You should see the password change every 30 seconds, confirming that the
 rotation is working correctly.
 
-### There's More
+### Managing the Password of a `DatabaseRole`
 
-While the example above focuses on the default `cluster-example-app` secret
-created by CloudNativePG, the same approach can be extended to manage any
-custom secrets or PostgreSQL users you create to regularly rotate their
-password.
+The example above updates `cluster-example-app`, a secret CloudNativePG created
+itself. The same generator can instead own the password of a role you declare
+with a [`DatabaseRole`](../declarative_role_management.md), by pairing it with
+[`mode: secret`](../declarative_role_management.md#mode-secret): External
+Secrets generates and rotates the password, and CloudNativePG reads that secret
+and applies it to PostgreSQL.
+
+The secret must be of type `kubernetes.io/basic-auth` and hold a `username` key
+carrying the role name, alongside `password`. It must also carry the
+`cnpg.io/reload: "true"` label: the instance manager is deliberately not
+allowed to watch secrets, so the operator watches the labeled ones on its
+behalf and signals the change through the status of the role. Without that
+label a rotation is never noticed.
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: stevie-password
+spec:
+  refreshInterval: "24h"
+  target:
+    name: stevie-eso-password
+    creationPolicy: CreateOrMerge
+    template:
+      metadata:
+        labels:
+          cnpg.io/reload: "true"
+      type: kubernetes.io/basic-auth
+      data:
+        # Must match the role name in the DatabaseRole below
+        username: "stevie"
+        password: "{{ .password | toString }}"
+        pgpass: "cluster-example-rw:5432:app:stevie:{{ .password }}"
+        jdbc-uri: "jdbc:postgresql://cluster-example-rw.default:5432/app?password={{ .password }}&user=stevie"
+        uri: "postgresql://stevie:{{ .password }}@cluster-example-rw.default:5432/app"
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: pg-password-generator
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: stevie
+spec:
+  cluster:
+    name: cluster-example
+  name: stevie
+  login: true
+  password:
+    mode: secret
+    secret: stevie-eso-password
+```
+
+:::warning
+Do not reach for
+[`mode: external`](../declarative_role_management.md#mode-external) here. That
+mode tells the operator to stop managing the password altogether, so the
+generated secret would never be applied and the role would be left with no
+password at all.
+:::
+
+The same approach extends to any custom secret or PostgreSQL user you create
+and want to rotate regularly.
 
 
 ## Example: Integration with an External KMS
@@ -165,13 +230,14 @@ In this example, we'll demonstrate how to integrate CloudNativePG,
 External Secrets Operator, and HashiCorp Vault to automatically rotate
 a PostgreSQL password and securely store it in Vault.
 
-!!! Important
+:::info[Important]
     This example assumes that HashiCorp Vault is already installed and properly
     configured in your environment, and that your team has the necessary expertise
     to operate it. There are various ways to deploy Vault, and detailing them is
     outside the scope of CloudNativePG. While it's possible to run Vault inside
     Kubernetes, it is more commonly deployed externally. For detailed instructions,
     consult the [HashiCorp Vault documentation](https://www.vaultproject.io/docs).
+:::
 
 Continuing from the previous example, we will now create the necessary
 `SecretStore` and `PushSecret` resources to complete the integration with
@@ -214,18 +280,20 @@ data:
 
 This configuration creates a `SecretStore` resource named `vault-backend`.
 
-!!! Important
+:::info[Important]
     This example uses basic token-based authentication, which is suitable for
     testing API, and CLI use cases. While it is the default method enabled in
     Vault, it is not recommended for production environments. For production,
     consider using more secure authentication methods.
     Refer to the [External Secrets Operator documentation](https://external-secrets.io/latest/provider/hashicorp-vault/)
     for a full list of supported authentication mechanisms.
+:::
 
-!!! Info
+:::info
     HashiCorp Vault must have a KV secrets engine enabled at the `secrets` path
     with version `v2`. If your Vault instance uses a different path or
     version, be sure to update the `path` and `version` fields accordingly.
+:::
 
 ### Creating the `PushSecret`
 

@@ -13,7 +13,7 @@ import (
 // ProbeWithStrategy is the configuration of the startup probe
 type ProbeWithStrategyApplyConfiguration struct {
 	// Probe is the standard probe configuration
-	ProbeApplyConfiguration `json:",inline"`
+	ProbeApplyConfiguration `json:""`
 	// The probe strategy
 	Type *apiv1.ProbeStrategyType `json:"type,omitempty"`
 	// Lag limit. Used only for `streaming` strategy

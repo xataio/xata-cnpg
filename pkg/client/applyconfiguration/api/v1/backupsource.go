@@ -13,7 +13,7 @@ import (
 // BackupSource contains the backup we need to restore from, plus some
 // information that could be needed to correctly restore it.
 type BackupSourceApplyConfiguration struct {
-	corev1.LocalObjectReferenceApplyConfiguration `json:",inline"`
+	corev1.LocalObjectReferenceApplyConfiguration `json:""`
 	// EndpointCA store the CA bundle of the barman endpoint.
 	// Useful when using self-signed certificates to avoid
 	// errors with certificate issuer and barman-cloud-wal-archive.

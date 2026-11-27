@@ -44,13 +44,26 @@ type ClusterSpecApplyConfiguration struct {
 	// Minimum number of instances required in synchronous replication with the
 	// primary. Undefined or 0 allow writes to complete when no standby is
 	// available.
+	//
+	// Deprecated: this field will be removed in CloudNativePG 1.33.0.
+	// Use `.spec.postgresql.synchronous` instead.
+	//
 	MinSyncReplicas *int `json:"minSyncReplicas,omitempty"`
 	// The target value for the synchronous replication quorum, that can be
 	// decreased if the number of ready standbys is lower than this.
 	// Undefined or 0 disable synchronous replication.
+	//
+	// Deprecated: this field will be removed in CloudNativePG 1.33.0.
+	// Use `.spec.postgresql.synchronous` instead.
+	//
 	MaxSyncReplicas *int `json:"maxSyncReplicas,omitempty"`
 	// Configuration of the PostgreSQL server
 	PostgresConfiguration *PostgresConfigurationApplyConfiguration `json:"postgresql,omitempty"`
+	// PodSelectorRefs defines named pod label selectors that can be referenced
+	// in pg_hba rules using the ${podselector:NAME} syntax in the address field.
+	// The operator resolves matching pod IPs and the instance manager expands
+	// pg_hba lines accordingly. Only pods in the Cluster's own namespace are considered.
+	PodSelectorRefs []PodSelectorRefApplyConfiguration `json:"podSelectorRefs,omitempty"`
 	// Replication slots management configuration
 	ReplicationSlots *ReplicationSlotsConfigurationApplyConfiguration `json:"replicationSlots,omitempty"`
 	// Instructions to bootstrap this cluster
@@ -75,6 +88,13 @@ type ClusterSpecApplyConfiguration struct {
 	StorageConfiguration *StorageConfigurationApplyConfiguration `json:"storage,omitempty"`
 	// Configure the generation of the service account
 	ServiceAccountTemplate *ServiceAccountTemplateApplyConfiguration `json:"serviceAccountTemplate,omitempty"`
+	// Name of an existing ServiceAccount in the same namespace to use for the cluster.
+	// When specified, the operator will not create a new ServiceAccount
+	// but will use the provided one. This is useful for sharing a single
+	// ServiceAccount across multiple clusters (e.g., for cloud IAM configurations).
+	// If not specified, a ServiceAccount will be created with the cluster name.
+	// Mutually exclusive with ServiceAccountTemplate.
+	ServiceAccountName *string `json:"serviceAccountName,omitempty"`
 	// Configuration of the storage for PostgreSQL WAL (Write-Ahead Log)
 	WalStorage *StorageConfigurationApplyConfiguration `json:"walStorage,omitempty"`
 	// EphemeralVolumeSource allows the user to configure the source of ephemeral volumes.
@@ -89,12 +109,19 @@ type ClusterSpecApplyConfiguration struct {
 	MaxStopDelay *int32 `json:"stopDelay,omitempty"`
 	// The time in seconds that controls the window of time reserved for the smart shutdown of Postgres to complete.
 	// Make sure you reserve enough time for the operator to request a fast shutdown of Postgres
-	// (that is: `stopDelay` - `smartShutdownTimeout`). Default is 180 seconds.
+	// (that is: `stopDelay` - `smartShutdownTimeout`). Default is 0 seconds, which
+	// skips the smart shutdown and requests a fast shutdown right away.
 	SmartShutdownTimeout *int32 `json:"smartShutdownTimeout,omitempty"`
 	// The time in seconds that is allowed for a primary PostgreSQL instance
 	// to gracefully shutdown during a switchover.
 	// Default value is 3600 seconds (1 hour).
 	MaxSwitchoverDelay *int32 `json:"switchoverDelay,omitempty"`
+	// The time in seconds that is allowed for a PostgreSQL instance to stop
+	// after an immediate shutdown request (used, for example, when a primary
+	// must step down and cannot wait for a graceful shutdown). Once this time
+	// has passed with PostgreSQL still running, the instance is considered
+	// unresponsive. Default value is 30 seconds.
+	ImmediateShutdownTimeout *int32 `json:"immediateShutdownTimeout,omitempty"`
 	// The amount of time (in seconds) to wait before triggering a failover
 	// after the primary PostgreSQL instance in the cluster was detected
 	// to be unhealthy
@@ -114,6 +141,10 @@ type ClusterSpecApplyConfiguration struct {
 	// https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
 	// for more information.
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+	// How changes to `resources` reach running instances: `recreate`
+	// (default) rolls the Pods, `inPlace` resizes them when possible and
+	// rolls them otherwise. `inPlace` requires Kubernetes 1.33 or later.
+	ResourcesUpdateStrategy *apiv1.ResourcesUpdateStrategy `json:"resourcesUpdateStrategy,omitempty"`
 	// EphemeralVolumesSizeLimit allows the user to set the limits for the ephemeral
 	// volumes
 	EphemeralVolumesSizeLimit *EphemeralVolumesSizeLimitConfigurationApplyConfiguration `json:"ephemeralVolumesSizeLimit,omitempty"`
@@ -183,6 +214,11 @@ type ClusterSpecApplyConfiguration struct {
 	// The configuration of the probes to be injected
 	// in the PostgreSQL Pods.
 	Probes *ProbesConfigurationApplyConfiguration `json:"probes,omitempty"`
+	// Configuration of the Kubernetes `Lease` used to coordinate safe primary
+	// election within the cluster. When omitted, the operator applies built-in
+	// defaults; tune these values only if you understand the consequences for
+	// failover timing.
+	PrimaryLease *PrimaryLeaseConfigurationApplyConfiguration `json:"primaryLease,omitempty"`
 }
 
 // ClusterSpecApplyConfiguration constructs a declarative configuration of the ClusterSpec type for use with
@@ -287,6 +323,19 @@ func (b *ClusterSpecApplyConfiguration) WithPostgresConfiguration(value *Postgre
 	return b
 }
 
+// WithPodSelectorRefs adds the given value to the PodSelectorRefs field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the PodSelectorRefs field.
+func (b *ClusterSpecApplyConfiguration) WithPodSelectorRefs(values ...*PodSelectorRefApplyConfiguration) *ClusterSpecApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithPodSelectorRefs")
+		}
+		b.PodSelectorRefs = append(b.PodSelectorRefs, *values[i])
+	}
+	return b
+}
+
 // WithReplicationSlots sets the ReplicationSlots field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the ReplicationSlots field is set to the value of the last call.
@@ -364,6 +413,14 @@ func (b *ClusterSpecApplyConfiguration) WithServiceAccountTemplate(value *Servic
 	return b
 }
 
+// WithServiceAccountName sets the ServiceAccountName field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ServiceAccountName field is set to the value of the last call.
+func (b *ClusterSpecApplyConfiguration) WithServiceAccountName(value string) *ClusterSpecApplyConfiguration {
+	b.ServiceAccountName = &value
+	return b
+}
+
 // WithWalStorage sets the WalStorage field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the WalStorage field is set to the value of the last call.
@@ -412,6 +469,14 @@ func (b *ClusterSpecApplyConfiguration) WithMaxSwitchoverDelay(value int32) *Clu
 	return b
 }
 
+// WithImmediateShutdownTimeout sets the ImmediateShutdownTimeout field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ImmediateShutdownTimeout field is set to the value of the last call.
+func (b *ClusterSpecApplyConfiguration) WithImmediateShutdownTimeout(value int32) *ClusterSpecApplyConfiguration {
+	b.ImmediateShutdownTimeout = &value
+	return b
+}
+
 // WithFailoverDelay sets the FailoverDelay field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the FailoverDelay field is set to the value of the last call.
@@ -451,6 +516,14 @@ func (b *ClusterSpecApplyConfiguration) WithTopologySpreadConstraints(values ...
 // If called multiple times, the Resources field is set to the value of the last call.
 func (b *ClusterSpecApplyConfiguration) WithResources(value corev1.ResourceRequirements) *ClusterSpecApplyConfiguration {
 	b.Resources = &value
+	return b
+}
+
+// WithResourcesUpdateStrategy sets the ResourcesUpdateStrategy field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ResourcesUpdateStrategy field is set to the value of the last call.
+func (b *ClusterSpecApplyConfiguration) WithResourcesUpdateStrategy(value apiv1.ResourcesUpdateStrategy) *ClusterSpecApplyConfiguration {
+	b.ResourcesUpdateStrategy = &value
 	return b
 }
 
@@ -630,5 +703,13 @@ func (b *ClusterSpecApplyConfiguration) WithPlugins(values ...*PluginConfigurati
 // If called multiple times, the Probes field is set to the value of the last call.
 func (b *ClusterSpecApplyConfiguration) WithProbes(value *ProbesConfigurationApplyConfiguration) *ClusterSpecApplyConfiguration {
 	b.Probes = value
+	return b
+}
+
+// WithPrimaryLease sets the PrimaryLease field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PrimaryLease field is set to the value of the last call.
+func (b *ClusterSpecApplyConfiguration) WithPrimaryLease(value *PrimaryLeaseConfigurationApplyConfiguration) *ClusterSpecApplyConfiguration {
+	b.PrimaryLease = value
 	return b
 }

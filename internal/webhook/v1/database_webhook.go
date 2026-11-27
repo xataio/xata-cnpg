@@ -21,18 +21,18 @@ package v1
 
 import (
 	"context"
-	"fmt"
+	"strings"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/cloudnative-pg/machinery/pkg/stringset"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/webhook/guard"
 )
 
 // databaseLog is for logging in this package.
@@ -40,10 +40,18 @@ var databaseLog = log.WithName("database-resource").WithValues("version", "v1")
 
 // SetupDatabaseWebhookWithManager registers the webhook for Database in the manager.
 func SetupDatabaseWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).For(&apiv1.Database{}).
-		WithValidator(newBypassableValidator(&DatabaseCustomValidator{})).
+	return ctrl.NewWebhookManagedBy(mgr, &apiv1.Database{}).
+		WithValidator(newBypassableValidator[*apiv1.Database](&DatabaseCustomValidator{})).
 		WithDefaulter(&DatabaseCustomDefaulter{}).
 		Complete()
+}
+
+// NewDatabaseAdmissionGuard creates a guard to protect a reconciliation loop.
+func NewDatabaseAdmissionGuard() *guard.Admission[*apiv1.Database] {
+	return &guard.Admission[*apiv1.Database]{
+		Defaulter: &DatabaseCustomDefaulter{},
+		Validator: newBypassableValidator[*apiv1.Database](&DatabaseCustomValidator{}),
+	}
 }
 
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
@@ -57,15 +65,10 @@ func SetupDatabaseWebhookWithManager(mgr ctrl.Manager) error {
 type DatabaseCustomDefaulter struct{}
 
 // Default implements webhook.CustomDefaulter so a webhook will be registered for the Kind Database.
-func (d *DatabaseCustomDefaulter) Default(_ context.Context, obj runtime.Object) error {
-	database, ok := obj.(*apiv1.Database)
-	if !ok {
-		return fmt.Errorf("expected a database object but got %T", obj)
-	}
-	databaseLog.Info("Defaulting for database", "name", database.GetName(), "namespace", database.GetNamespace())
+func (d *DatabaseCustomDefaulter) Default(_ context.Context, database *apiv1.Database) error {
+	databaseLog.Debug("Defaulting for database", "name", database.GetName(), "namespace", database.GetNamespace())
 
-	// database.Default()
-
+	// The Database kind currently has no defaults to apply.
 	return nil
 }
 
@@ -74,11 +77,9 @@ func (d *DatabaseCustomDefaulter) Default(_ context.Context, obj runtime.Object)
 type DatabaseCustomValidator struct{}
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type Database .
-func (v *DatabaseCustomValidator) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
-	database, ok := obj.(*apiv1.Database)
-	if !ok {
-		return nil, fmt.Errorf("expected a Database object but got %T", obj)
-	}
+func (v *DatabaseCustomValidator) ValidateCreate(
+	_ context.Context, database *apiv1.Database,
+) (admission.Warnings, error) {
 	databaseLog.Info(
 		"Validation for Database upon creation",
 		"name", database.GetName(), "namespace", database.GetNamespace())
@@ -91,25 +92,15 @@ func (v *DatabaseCustomValidator) ValidateCreate(_ context.Context, obj runtime.
 	}
 
 	return allWarnings, apierrors.NewInvalid(
-		schema.GroupKind{Group: "postgresql.cnpg.io", Kind: "Database "},
+		schema.GroupKind{Group: apiv1.SchemeGroupVersion.Group, Kind: "Database "},
 		database.Name, allErrs)
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type Database .
 func (v *DatabaseCustomValidator) ValidateUpdate(
 	_ context.Context,
-	oldObj, newObj runtime.Object,
+	oldDatabase *apiv1.Database, database *apiv1.Database,
 ) (admission.Warnings, error) {
-	database, ok := newObj.(*apiv1.Database)
-	if !ok {
-		return nil, fmt.Errorf("expected a Database object for the newObj but got %T", newObj)
-	}
-
-	oldDatabase, ok := oldObj.(*apiv1.Database)
-	if !ok {
-		return nil, fmt.Errorf("expected a Database object for the oldObj but got %T", oldObj)
-	}
-
 	databaseLog.Info(
 		"Validation for Database upon update",
 		"name", database.GetName(), "namespace", database.GetNamespace())
@@ -134,11 +125,9 @@ func (v *DatabaseCustomValidator) validateDatabaseChanges(_ *apiv1.Database, _ *
 }
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type Database .
-func (v *DatabaseCustomValidator) ValidateDelete(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
-	database, ok := obj.(*apiv1.Database)
-	if !ok {
-		return nil, fmt.Errorf("expected a Database object but got %T", obj)
-	}
+func (v *DatabaseCustomValidator) ValidateDelete(
+	_ context.Context, database *apiv1.Database,
+) (admission.Warnings, error) {
 	databaseLog.Info(
 		"Validation for Database upon deletion",
 		"name", database.GetName(), "namespace", database.GetNamespace())
@@ -156,6 +145,7 @@ func (v *DatabaseCustomValidator) validate(d *apiv1.Database) (allErrs field.Err
 		v.validateSchemas,
 		v.validateFDWs,
 		v.validateForeignServers,
+		v.validatePermissions,
 	}
 
 	for _, validate := range validations {
@@ -198,18 +188,80 @@ func (v *DatabaseCustomValidator) validateSchemas(d *apiv1.Database) field.Error
 
 	schemaNames := stringset.New()
 	for i, schemaSpec := range d.Spec.Schemas {
+		itemPath := field.NewPath("spec", "schemas").Index(i)
+
 		name := schemaSpec.Name
 		if schemaNames.Has(name) {
-			result = append(
-				result,
-				field.Duplicate(
-					field.NewPath("spec", "schemas").Index(i).Child("name"),
-					name,
-				),
-			)
+			result = append(result, field.Duplicate(itemPath.Child("name"), name))
 		}
 
 		schemaNames.Put(name)
+
+		if schemaSpec.Permissions != nil {
+			permissionsPath := itemPath.Child("permissions")
+			result = append(result, validateUsageNames(permissionsPath.Child("usage"), schemaSpec.Permissions.Usage)...)
+			result = append(result, validateUsageNames(permissionsPath.Child("create"), schemaSpec.Permissions.Create)...)
+		}
+	}
+
+	return result
+}
+
+// validatePermissions validates the database-level permissions.
+//
+// The `all` list is a shortcut for the three individual privileges, so it is
+// expanded before checking: for each privilege, a role can appear only once,
+// either granted or revoked. Repeating the same entry is most likely a mistake
+// in the specification, so it is rejected too.
+func (v *DatabaseCustomValidator) validatePermissions(d *apiv1.Database) field.ErrorList {
+	if d.Spec.Permissions == nil {
+		return nil
+	}
+
+	permissions := d.Spec.Permissions
+	basePath := field.NewPath("spec", "permissions")
+
+	privileges := []struct {
+		field   string
+		entries []apiv1.UsageSpec
+	}{
+		{"connect", permissions.Connect},
+		{"create", permissions.Create},
+		{"temporary", permissions.Temporary},
+	}
+
+	var result field.ErrorList
+	for _, privilege := range privileges {
+		// the type requested for each role, once `all` has been expanded
+		requested := make(map[string]apiv1.UsageSpecType)
+		check := func(entryPath *field.Path, entry apiv1.UsageSpec) {
+			entryType := entry.Type
+			if entryType == "" {
+				entryType = apiv1.GrantUsageSpecType
+			}
+
+			key := granteeKey(entry.Name)
+			previous, found := requested[key]
+			switch {
+			case !found:
+				requested[key] = entryType
+			case previous != entryType:
+				result = append(result, field.Invalid(
+					entryPath.Child("name"),
+					entry.Name,
+					"the role is both granted and revoked the "+strings.ToUpper(privilege.field)+" privilege",
+				))
+			default:
+				result = append(result, field.Duplicate(entryPath.Child("name"), entry.Name))
+			}
+		}
+
+		for i, entry := range privilege.entries {
+			check(basePath.Child(privilege.field).Index(i), entry)
+		}
+		for i, entry := range permissions.All {
+			check(basePath.Child("all").Index(i), entry)
+		}
 	}
 
 	return result
@@ -293,13 +345,43 @@ func validateNameOptionsUsages(
 		optionNames.Put(option.Name)
 	}
 
+	errs = append(errs, validateUsageNames(itemPath.Child("usages"), usages)...)
+
+	return errs
+}
+
+// validateUsageNames validates that no role name appears more than once within a usage list.
+//
+// Role names are emitted as quoted identifiers and are therefore
+// case-sensitive, with one exception: every spelling of `public` resolves to
+// the same PostgreSQL PUBLIC pseudo-role. Those are folded together, so a list
+// naming both `public` and `PUBLIC` is reported as a duplicate instead of
+// silently emitting two statements against the same grantee.
+func validateUsageNames(usagesPath *field.Path, usages []apiv1.UsageSpec) field.ErrorList {
+	var errs field.ErrorList
+
 	usageNames := stringset.New()
 	for i, usage := range usages {
-		if usageNames.Has(usage.Name) {
-			errs = append(errs, field.Duplicate(itemPath.Child("usages").Index(i).Child("name"), usage.Name))
+		name := granteeKey(usage.Name)
+
+		if usageNames.Has(name) {
+			errs = append(errs, field.Duplicate(usagesPath.Index(i).Child("name"), usage.Name))
 		}
-		usageNames.Put(usage.Name)
+		usageNames.Put(name)
 	}
 
 	return errs
 }
+
+// granteeKey returns the key that identifies a grantee: every spelling of
+// `public` resolves to the same PostgreSQL PUBLIC pseudo-role
+func granteeKey(name string) string {
+	if strings.EqualFold(name, publicRole) {
+		return publicRole
+	}
+	return name
+}
+
+// publicRole is the PostgreSQL PUBLIC pseudo-role, which the instance manager
+// emits verbatim rather than as a quoted identifier when applying grants.
+const publicRole = "PUBLIC"

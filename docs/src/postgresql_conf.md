@@ -22,13 +22,14 @@ via the `parameters`, the `pg_hba`, and the `pg_ident` keys.
 
 These settings are the same across all instances.
 
-!!! Warning
+:::warning
     Please don't use the `ALTER SYSTEM` query to change the configuration of
     the PostgreSQL instances in an imperative way. Changing some of the options
     that are normally controlled by the operator might indeed lead to an
     unpredictable/unrecoverable state of the cluster.
     Moreover, `ALTER SYSTEM` changes are not replicated across the cluster.
     See ["Enabling ALTER SYSTEM"](#enabling-alter-system) below for details.
+:::
 
 A reference for custom settings usage is included in the samples, see
 [`cluster-example-custom.yaml`](samples/cluster-example-custom.yaml).
@@ -54,11 +55,12 @@ The `custom.conf` file will contain the user-defined settings in the
   # ...
 ```
 
-!!! Seealso "PostgreSQL GUCs: Grand Unified Configuration"
+:::note[PostgreSQL GUCs: Grand Unified Configuration]
     Refer to the PostgreSQL documentation for
     [more information on the available parameters](https://www.postgresql.org/docs/current/runtime-config.html),
     also known as GUC (Grand Unified Configuration).
     Please note that CloudNativePG accepts only strings for the PostgreSQL parameters.
+:::
 
 The content of `custom.conf` is automatically generated and maintained by the
 operator by applying the following sections in this order:
@@ -95,7 +97,7 @@ wal_sender_timeout = '5s'
 wal_receiver_timeout = '5s'
 ```
 
-!!! Warning
+:::warning
     It is your duty to plan for WAL segments retention in your PostgreSQL
     cluster and properly configure either `wal_keep_size` or `wal_keep_segments`,
     depending on the server version, based on the expected and observed workloads.
@@ -116,6 +118,7 @@ wal_receiver_timeout = '5s'
     This will require you to dedicate a part of your `PGDATA`, or the volume
     dedicated to storing WAL files, to keep older WAL segments for streaming
     replication purposes.
+:::
 
 The following parameters are **fixed** and exclusively controlled by the operator:
 
@@ -172,7 +175,7 @@ primary_conninfo = 'host=<PRIMARY> user=postgres dbname=postgres tcp_user_timeou
 recovery_target_timeline = 'latest'
 ```
 
-!!! Important
+:::info[Important]
     By default, every standby sets `tcp_user_timeout` to **5 seconds**, as shown
     above. This parameter defines how long transmitted data may remain
     unacknowledged before the TCP connection is forcibly closed. Adjusting it lets
@@ -182,6 +185,7 @@ recovery_target_timeline = 'latest'
     [`STANDBY_TCP_USER_TIMEOUT` operator configuration option](operator_conf.md#available-options).
     For additional details on `tcp_user_timeout`, refer to the
     [PostgreSQL documentation](https://www.postgresql.org/docs/current/runtime-config-connection.html#GUC-TCP-USER-TIMEOUT).
+:::
 
 ### Log control settings
 
@@ -204,12 +208,13 @@ In CloudNativePG the `shared_preload_libraries` option is empty by
 default. Although you can override the content of `shared_preload_libraries`,
 we recommend that only expert Postgres users take advantage of this option.
 
-!!! Important
+:::info[Important]
     In case a specified library is not found, the server fails to start,
     preventing CloudNativePG from any self-healing attempt and requiring
     manual intervention. Please make sure you always test both the extensions and
     the settings of `shared_preload_libraries` if you plan to directly manage its
     content.
+:::
 
 CloudNativePG is able to automatically manage the content of the
 `shared_preload_libraries` option for some of the most used PostgreSQL
@@ -221,10 +226,11 @@ requires one of the managed libraries, it will automatically add the needed
 library. The operator will also remove the library as soon as no actual parameter
 requires it.
 
-!!! Important
+:::info[Important]
     Please always keep in mind that removing libraries from
     `shared_preload_libraries` requires a restart of all instances in the cluster
     in order to be effective.
+:::
 
 You can provide additional `shared_preload_libraries` via
 `.spec.postgresql.shared_preload_libraries` as a list of strings: the operator
@@ -254,14 +260,16 @@ cluster, identified by the following query:
 SELECT datname FROM pg_database WHERE datallowconn
 ```
 
-!!! Note
+:::note
     The above query also includes template databases like `template1`.
+:::
 
-!!! Important
+:::info[Important]
     With the introduction of [declarative extensions](declarative_database_management.md#managing-extensions-in-a-database)
     in the `Database` CRD, you can now manage extensions directly. As a result,
     the managed extensions feature may undergo significant changes in future
     versions of CloudNativePG, and some functionalities might be deprecated.
+:::
 
 #### Enabling `auto_explain`
 
@@ -283,9 +291,9 @@ to complete):
   # ...
 ```
 
-!!! Note
+:::note
     Enabling auto_explain can lead to performance issues. Please refer to [`the auto explain documentation`](https://www.postgresql.org/docs/current/auto-explain.html)
-
+:::
 
 #### Enabling `pg_stat_statements`
 
@@ -363,9 +371,10 @@ you need to add this entry in the `pg_hba` section:
 `pg_hba` is a list of PostgreSQL Host Based Authentication rules
 used to create the `pg_hba.conf` used by the pods.
 
-!!! Important
+:::info[Important]
     See the PostgreSQL documentation for
     [more information on `pg_hba.conf`](https://www.postgresql.org/docs/current/auth-pg-hba-conf.html).
+:::
 
 Since the first matching rule is used for authentication, the `pg_hba.conf` file
 generated by the operator can be seen as composed of four sections:
@@ -427,6 +436,82 @@ In the above example we are enabling access for the `app` user to the `app`
 database using MD5 password authentication (you can use `scram-sha-256`
 if you prefer) via a secure channel (`hostssl`).
 
+### Dynamic address resolution with `podSelectorRefs`
+
+In Kubernetes, pod IPs are ephemeral. Manually updating `pg_hba` rules every
+time a client pod restarts is unsustainable. The `.spec.podSelectorRefs` option
+automates this by allowing you to define **named label selectors** that the
+operator resolves into up-to-date IP addresses.
+
+#### How it Works
+
+1. **Define Selectors:** Map a friendly name to a standard Kubernetes
+   `labelSelector` for pods.
+2. **Reference Selectors:** Use the `${podselector:NAME}` placeholder in your
+   `pg_hba` rules.
+3. **Automatic Expansion:** The operator resolves matching pod IPs and the
+   instance manager expands each reference into individual CIDR entries
+   (`/32` for IPv4, `/128` for IPv6) within `pg_hba.conf`.
+
+#### Configuration Example
+
+The following snippet defines selectors for application and monitoring pods,
+then applies them to the PostgreSQL access rules:
+
+```yaml
+podSelectorRefs:
+  - name: app-pods
+    selector:
+      matchLabels:
+        app: myapp
+  - name: monitoring
+    selector:
+      matchLabels:
+        role: monitoring
+postgresql:
+  pg_hba:
+    - "hostssl mydb myuser ${podselector:app-pods} scram-sha-256"
+    - "hostssl postgres monitor ${podselector:monitoring} scram-sha-256"
+```
+
+#### IP Expansion Mapping
+
+If the operator detects pods with IPs `10.0.0.5`, `10.0.0.12` (App), and
+`10.0.1.3` (Monitoring), the instance manager transforms the template as
+follows:
+
+```text
+# Expanded from: hostssl mydb myuser ${podselector:app-pods} scram-sha-256
+hostssl mydb myuser 10.0.0.5/32 scram-sha-256
+hostssl mydb myuser 10.0.0.12/32 scram-sha-256
+# Expanded from: hostssl postgres monitor ${podselector:monitoring} scram-sha-256
+hostssl postgres monitor 10.0.1.3/32 scram-sha-256
+```
+
+#### Key Constraints & Behavior
+
+- **Scope:** Selectors are restricted to the **same namespace** as the Cluster
+  for security. Cross-namespace lookups are not supported.
+- **Placement:** The `${podselector:NAME}` syntax is valid **only in the
+  address field** of host-type entries (`host`, `hostssl`, `hostnossl`,
+  `hostgssenc`, `hostnogssenc`).
+- **Reactivity:** The operator watches for pod lifecycle events (creation,
+  deletion, or IP updates). Updates trigger an automatic configuration
+  regeneration and a PostgreSQL `reload`.
+- **Validation:** Selector names must follow the pattern
+  `^[a-z]([a-z0-9_-]*[a-z0-9])?$` and each `${podselector:NAME}` reference
+  in a `pg_hba` rule must correspond to a defined entry in `podSelectorRefs`.
+  The webhook validates both constraints.
+
+:::warning
+When a selector matches zero pods, the corresponding `pg_hba` lines referencing
+it are omitted from `pg_hba.conf`. Ensure that your default rules provide
+appropriate fallback access.
+:::
+
+For a complete example, see
+[`cluster-example-pod-selector-refs.yaml`](samples/cluster-example-pod-selector-refs.yaml).
+
 ### LDAP Configuration
 
 Under the `postgres` section of the cluster spec there is an optional `ldap` section available to define an LDAP
@@ -461,9 +546,10 @@ postgresql:
 generate and maintain the ident map file (known as `pg_ident.conf`) inside the
 data directory.
 
-!!! Important
+:::info[Important]
     See the PostgreSQL documentation for
     [more information on `pg_ident.conf`](https://www.postgresql.org/docs/current/auth-username-maps.html).
+:::
 
 The `pg_ident.conf` file written by the operator is made up of the following
 two sections:
@@ -528,11 +614,12 @@ on new Postgres clusters. This decision is rooted in the recognition of
 potential risks associated with this command. To enable the use of `ALTER SYSTEM`,
 you can explicitly set `.spec.postgresql.enableAlterSystem` to `true`.
 
-!!! Warning
+:::warning
     Proceed with caution when utilizing `ALTER SYSTEM`. This command operates
     directly on the connected instance and does not undergo replication.
     CloudNativePG assumes responsibility for certain fixed parameters and complete
     control over others, emphasizing the need for careful consideration.
+:::
 
 Starting from PostgreSQL 17, the `.spec.postgresql.enableAlterSystem` setting
 directly controls the [`allow_alter_system` GUC in PostgreSQL](https://www.postgresql.org/docs/17/runtime-config-compatible.html#GUC-ALLOW-ALTER-SYSTEM)
@@ -680,7 +767,6 @@ Users are not allowed to set the following configuration parameters in the
 - `ssl_cert_file`
 - `ssl_crl_file`
 - `ssl_dh_params_file`
-- `ssl_ecdh_curve`
 - `ssl_key_file`
 - `ssl_passphrase_command`
 - `ssl_passphrase_command_supports_reload`

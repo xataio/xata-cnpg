@@ -2073,7 +2073,7 @@ _Appears in:_
 | `account` _string_ | The Azure storage account name | True |  |  |
 | `container` _string_ | The Azure Blob Storage container name | True |  |  |
 | `keyType` _string_ | KeyType selects the authentication method. "auto" requests a<br />managed-identity token from instance metadata (the AKS path,<br />pgbackrest >= 2.58). "shared" reads the storage account shared key<br />from KeyRef. "sas" reads a shared access signature token from KeyRef. |  | auto | Enum: [auto shared sas] <br /> |
-| `endpoint` _string_ | The Azure Blob Storage endpoint, overriding the default<br /><account>.blob.core.windows.net. Rarely needed, mostly for testing<br />against Azurite. |  |  |  |
+| `endpoint` _string_ | The Azure Blob Storage endpoint, overriding the default<br />`<account>.blob.core.windows.net`. Rarely needed, mostly for testing<br />against Azurite. |  |  |  |
 | `keyRef` _[SecretKeySelector](https://pkg.go.dev/github.com/cloudnative-pg/machinery/pkg/api#SecretKeySelector)_ | The reference to a Secret holding the storage account shared key when<br />keyType is "shared", or a SAS token when keyType is "sas". Required<br />for those key types, must be unset for "auto". |  |  |  |
 
 
@@ -2131,7 +2131,7 @@ _Appears in:_
 | --- | --- | --- | --- | --- |
 | `repository` _[PgBackRestRepository](#pgbackrestrepository)_ |  | True |  |  |
 | `options` _[PgBackRestOptions](#pgbackrestoptions)_ |  | True |  |  |
-| `stanzaName` _string_ | StanzaName is the pgbackrest stanza this cluster archives to. It is the<br />logical identity of the backup set in the repository (the repo layout is<br /><repoPath>/\{archive,backup\}/<stanza>/). When unset it defaults to the<br />cluster name. |  |  |  |
+| `stanzaName` _string_ | StanzaName is the pgbackrest stanza this cluster archives to. It is the<br />logical identity of the backup set in the repository (the repo layout is<br />`<repoPath>/\{archive,backup\}/<stanza>/`). When unset it defaults to the<br />cluster name. |  |  |  |
 
 
 #### PgBackRestExternalCluster
@@ -2204,7 +2204,7 @@ _Appears in:_
 | `backupStandby` _boolean_ | Take backups from a standby instance instead of the primary,<br />reducing load on the primary. |  |  |  |
 | `priority` _integer_ | Allow for deprioritization when taking CPU (nice value), making sure we are<br />not impacting postgres TPS. If not set defaults to 0 - which means no<br />deprioritization. Do not go below 0 because that would make it more important than postgres |  |  | Maximum: 19 <br />Minimum: 0 <br /> |
 | `retention` _[PgBackRestRetention](#pgbackrestretention)_ | Backup retention policy. |  |  |  |
-| `repoPath` _string_ | RepoPath is the pgbackrest repo1-path — the prefix in the storage<br />backend where backups and WAL archives are stored. When unset, it<br />defaults to /<clusterName>. Configure this to isolate a new cluster<br />incarnation from existing data under the default path, or to restore<br />from a custom path. |  |  |  |
+| `repoPath` _string_ | RepoPath is the pgbackrest repo1-path — the prefix in the storage<br />backend where backups and WAL archives are stored. When unset, it<br />defaults to `/<clusterName>`. Configure this to isolate a new cluster<br />incarnation from existing data under the default path, or to restore<br />from a custom path. |  |  |  |
 
 
 

@@ -176,7 +176,7 @@ type PgBackRestConfiguration struct {
 
 	// StanzaName is the pgbackrest stanza this cluster archives to. It is the
 	// logical identity of the backup set in the repository (the repo layout is
-	// <repoPath>/{archive,backup}/<stanza>/). When unset it defaults to the
+	// `<repoPath>/{archive,backup}/<stanza>/`). When unset it defaults to the
 	// cluster name.
 	// +optional
 	StanzaName string `json:"stanzaName,omitempty"`
@@ -340,7 +340,7 @@ type PgBackRestOptions struct {
 	Retention *PgBackRestRetention `json:"retention,omitempty"`
 	// RepoPath is the pgbackrest repo1-path — the prefix in the storage
 	// backend where backups and WAL archives are stored. When unset, it
-	// defaults to /<clusterName>. Configure this to isolate a new cluster
+	// defaults to `/<clusterName>`. Configure this to isolate a new cluster
 	// incarnation from existing data under the default path, or to restore
 	// from a custom path.
 	// +optional
@@ -394,7 +394,7 @@ type PgBackRestAzure struct {
 	// +kubebuilder:default:=auto
 	KeyType string `json:"keyType,omitempty"`
 	// The Azure Blob Storage endpoint, overriding the default
-	// <account>.blob.core.windows.net. Rarely needed, mostly for testing
+	// `<account>.blob.core.windows.net`. Rarely needed, mostly for testing
 	// against Azurite.
 	// +optional
 	Endpoint string `json:"endpoint,omitempty"`

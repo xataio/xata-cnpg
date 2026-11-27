@@ -376,7 +376,7 @@ func assertPgBouncerAuthQueryIsRepaired(namespace, clusterName, poolerYamlFilePa
 	const breakingQuery = "DROP SCHEMA public CASCADE; CREATE SCHEMA public"
 
 	By("connecting through the pooler before breaking the auth_query lookup", func() {
-		assertReadWriteConnectionUsingPgBouncerService(namespace, clusterName, poolerYamlFilePath, true)
+		pgbouncerasserts.AssertReadWriteConnectionUsingPgBouncerService(env, namespace, clusterName, poolerYamlFilePath, true)
 	})
 
 	primaryPod, err := clusterutils.GetPrimary(env.Ctx, env.Client, namespace, clusterName)
@@ -445,6 +445,6 @@ func assertPgBouncerAuthQueryIsRepaired(namespace, clusterName, poolerYamlFilePa
 	})
 
 	By("connecting through the pooler after the repair", func() {
-		assertReadWriteConnectionUsingPgBouncerService(namespace, clusterName, poolerYamlFilePath, true)
+		pgbouncerasserts.AssertReadWriteConnectionUsingPgBouncerService(env, namespace, clusterName, poolerYamlFilePath, true)
 	})
 }

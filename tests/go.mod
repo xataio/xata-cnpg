@@ -1,16 +1,15 @@
-module github.com/cloudnative-pg/cloudnative-pg/tests
+module github.com/xataio/xata-cnpg/tests
 
 go 1.27.2
 
 toolchain go1.27.4
 
-replace github.com/cloudnative-pg/cloudnative-pg => ../
+replace github.com/xataio/xata-cnpg => ../
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/avast/retry-go/v5 v5.1.1
 	github.com/cheynewallace/tabby v1.1.1
-	github.com/cloudnative-pg/cloudnative-pg v0.0.0-00010101000000-000000000000
 	github.com/cloudnative-pg/machinery v0.7.0
 	github.com/go-logr/logr v1.4.4
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
@@ -21,6 +20,7 @@ require (
 	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.95.2
 	github.com/stern/stern v1.35.0
 	github.com/thoas/go-funk v0.9.3
+	github.com/xataio/xata-cnpg v0.0.0-00010101000000-000000000000
 	k8s.io/api v0.37.2
 	k8s.io/apiextensions-apiserver v0.37.2
 	k8s.io/apimachinery v0.37.2

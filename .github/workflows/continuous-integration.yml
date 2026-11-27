@@ -50,7 +50,8 @@ env:
   REGISTRY_USER: ${{ github.actor }}
   REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
   SIGN_IMAGES: "true"
-  OPERATOR_MANIFEST_PATH: "dist/operator-manifest.yaml"
+  # Absolute: the Makefile recipe changes directory before writing it
+  OPERATOR_MANIFEST_PATH: "${{ github.workspace }}/dist/operator-manifest.yaml"
 
 defaults:
   run:

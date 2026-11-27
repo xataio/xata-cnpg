@@ -564,7 +564,7 @@ var _ = Describe("pgbackrest secrets", func() {
 							S3: &apiv1.PgBackRestS3{
 								Bucket:             "test-bucket",
 								Region:             "us-east-1",
-								InheritFromIAMRole: true,
+								InheritFromIAMRole: true, //nolint:staticcheck // exercises the deprecated field
 							},
 						},
 					},
@@ -613,7 +613,7 @@ var _ = Describe("pgbackrest secrets", func() {
 								S3: &apiv1.PgBackRestS3{
 									Bucket:             "test-bucket",
 									Region:             "us-east-1",
-									InheritFromIAMRole: true,
+									InheritFromIAMRole: true, //nolint:staticcheck // exercises the deprecated field
 								},
 								Cipher: &apiv1.PgBackRestCipher{
 									Type: "aes-256-cbc",

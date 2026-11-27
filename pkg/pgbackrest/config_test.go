@@ -456,7 +456,7 @@ func TestGenerateBaseConfig_TLSAndPaths(t *testing.T) {
 		S3: &apiv1.PgBackRestS3{
 			Bucket:             "test-bucket",
 			Region:             "us-east-1",
-			InheritFromIAMRole: true,
+			InheritFromIAMRole: true, //nolint:staticcheck // exercises the deprecated field
 		},
 	}
 
@@ -518,7 +518,7 @@ func TestEffectiveS3KeyType(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s3 := &apiv1.PgBackRestS3{
 				KeyType:            tt.keyType,
-				InheritFromIAMRole: tt.inheritFromIAMRole,
+				InheritFromIAMRole: tt.inheritFromIAMRole, //nolint:staticcheck // exercises the deprecated field
 			}
 			if tt.staticCredentials {
 				s3.AccessKeyID = &apiv1.SecretKeySelector{}
@@ -821,7 +821,7 @@ func TestGenerateConfigFromRepository_RepoPath(t *testing.T) {
 		S3: &apiv1.PgBackRestS3{
 			Bucket:             "test-bucket",
 			Region:             "us-east-1",
-			InheritFromIAMRole: true,
+			InheritFromIAMRole: true, //nolint:staticcheck // exercises the deprecated field
 		},
 	}
 	tests := []struct {
@@ -866,7 +866,7 @@ func TestGenerateBaseConfig_RepositoryCipher(t *testing.T) {
 		S3: &apiv1.PgBackRestS3{
 			Bucket:             "test-bucket",
 			Region:             "us-east-1",
-			InheritFromIAMRole: true,
+			InheritFromIAMRole: true, //nolint:staticcheck // exercises the deprecated field
 		},
 		Cipher: &apiv1.PgBackRestCipher{
 			Type: "aes-256-cbc",
@@ -949,7 +949,7 @@ func TestGenerateConfig_StanzaName(t *testing.T) {
 							S3: &apiv1.PgBackRestS3{
 								Bucket:             "test-bucket",
 								Region:             "us-east-1",
-								InheritFromIAMRole: true,
+								InheritFromIAMRole: true, //nolint:staticcheck // exercises the deprecated field
 							},
 						},
 					},
@@ -1028,7 +1028,7 @@ func TestGenerateConfig_ReplicaStanzaUsesLiveClusterHost(t *testing.T) {
 						S3: &apiv1.PgBackRestS3{
 							Bucket:             "test-bucket",
 							Region:             "us-east-1",
-							InheritFromIAMRole: true,
+							InheritFromIAMRole: true, //nolint:staticcheck // exercises the deprecated field
 						},
 					},
 				},
@@ -1066,7 +1066,7 @@ func TestGenerateConfig_ReplicaKeepsPg1Local(t *testing.T) {
 						S3: &apiv1.PgBackRestS3{
 							Bucket:             "test-bucket",
 							Region:             "us-east-1",
-							InheritFromIAMRole: true,
+							InheritFromIAMRole: true, //nolint:staticcheck // exercises the deprecated field
 						},
 					},
 				},

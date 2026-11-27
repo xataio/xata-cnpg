@@ -3,8 +3,11 @@
 package v1
 
 import (
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	internal "github.com/xataio/xata-cnpg/pkg/client/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -13,7 +16,7 @@ import (
 //
 // Subscription is the Schema for the subscriptions API
 type SubscriptionApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                                 *SubscriptionSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                               *SubscriptionStatusApplyConfiguration `json:"status,omitempty"`
@@ -28,6 +31,47 @@ func Subscription(name, namespace string) *SubscriptionApplyConfiguration {
 	b.WithKind("Subscription")
 	b.WithAPIVersion("postgresql.cnpg.io/v1")
 	return b
+}
+
+// ExtractSubscriptionFrom extracts the applied configuration owned by fieldManager from
+// subscription for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// subscription must be a unmodified Subscription API object that was retrieved from the Kubernetes API.
+// ExtractSubscriptionFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractSubscriptionFrom(subscription *apiv1.Subscription, fieldManager string, subresource string) (*SubscriptionApplyConfiguration, error) {
+	b := &SubscriptionApplyConfiguration{}
+	err := managedfields.ExtractInto(subscription, internal.Parser().Type("com.github.xataio.xata-cnpg.api.v1.Subscription"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(subscription.Name)
+	b.WithNamespace(subscription.Namespace)
+
+	b.WithKind("Subscription")
+	b.WithAPIVersion("postgresql.cnpg.io/v1")
+	return b, nil
+}
+
+// ExtractSubscription extracts the applied configuration owned by fieldManager from
+// subscription. If no managedFields are found in subscription for fieldManager, a
+// SubscriptionApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// subscription must be a unmodified Subscription API object that was retrieved from the Kubernetes API.
+// ExtractSubscription provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractSubscription(subscription *apiv1.Subscription, fieldManager string) (*SubscriptionApplyConfiguration, error) {
+	return ExtractSubscriptionFrom(subscription, fieldManager, "")
+}
+
+// ExtractSubscriptionStatus extracts the applied configuration owned by fieldManager from
+// subscription for the status subresource.
+func ExtractSubscriptionStatus(subscription *apiv1.Subscription, fieldManager string) (*SubscriptionApplyConfiguration, error) {
+	return ExtractSubscriptionFrom(subscription, fieldManager, "status")
 }
 
 func (b SubscriptionApplyConfiguration) IsApplyConfiguration() {}

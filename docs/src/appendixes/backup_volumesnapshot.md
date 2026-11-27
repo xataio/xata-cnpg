@@ -6,10 +6,11 @@ title: Appendix A - Backup on volume snapshots
 # Appendix A - Backup on volume snapshots
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-!!! Important
+:::info[Important]
     Please refer to the official Kubernetes documentation for a list of all
     the supported [Container Storage Interface (CSI) drivers](https://kubernetes-csi.github.io/docs/drivers.html)
     that provide snapshotting capabilities.
+:::
 
 CloudNativePG is one of the first known cases of database operators that
 directly leverages the Kubernetes native Volume Snapshot API for both
@@ -53,20 +54,22 @@ that is responsible to ensure that snapshots can be taken from persistent
 volumes of a given storage class, and managed as `VolumeSnapshot` and
 `VolumeSnapshotContent` resources.
 
-!!! Important
+:::info[Important]
     It is your responsibility to verify with the third party vendor
     that volume snapshots are supported. CloudNativePG only interacts
     with the Kubernetes API on this matter, and we cannot support issues
     at the storage level for each specific CSI driver.
+:::
 
 ## How to configure Volume Snapshot backups
 
 CloudNativePG allows you to configure a given Postgres cluster for Volume
 Snapshot backups through the `backup.volumeSnapshot` stanza.
 
-!!! Info
-    Please refer to [`VolumeSnapshotConfiguration`](../cloudnative-pg.v1.md#postgresql-cnpg-io-v1-VolumeSnapshotConfiguration)
+:::info
+    Please refer to [`VolumeSnapshotConfiguration`](../cloudnative-pg.v1.md#volumesnapshotconfiguration)
     in the API reference for a full list of options.
+:::
 
 A generic example with volume snapshots (assuming that PGDATA and WALs share
 the same storage class) is the following:
@@ -102,32 +105,35 @@ As you can see, the `backup` section contains both the `volumeSnapshot` stanza
 (controlling physical base backups on volume snapshots) and the
 `plugins` one (controlling the [WAL archive](../wal_archiving.md)).
 
-!!! Info
+:::info
     Once you have defined the `plugin`, you can decide to use
     both volume snapshot and plugin backup strategies simultaneously
     to take physical backups.
+:::
 
 The `volumeSnapshot.className` option allows you to reference the default
 `VolumeSnapshotClass` object used for all the storage volumes you have
 defined in your PostgreSQL cluster.
 
-!!! Info
+:::info
     In case you are using a different storage class for `PGDATA` and
     WAL files, you can specify a separate `VolumeSnapshotClass` for
     that volume through the `walClassName` option (which defaults to
     the same value as `className`).
+:::
 
 Once a cluster is defined for volume snapshot backups, you need to define
 a `ScheduledBackup` resource that requests such backups on a periodic basis.
 
 ## Hot and cold backups
 
-!!! Warning
+:::warning
     As noted in the [backup document](../backup.md), a cold snapshot explicitly
     set to target the primary will result in the primary being fenced for
     the duration of the backup, making the cluster read-only during this
     period. For safety, in a cluster already containing fenced instances, a cold
     snapshot is rejected.
+:::
 
 By default, CloudNativePG requests an online/hot backup on volume snapshots, using the
 [PostgreSQL defaults of the low-level API for base backups](https://www.postgresql.org/docs/current/continuous-archiving.html#BACKUP-LOWLEVEL-BASE-BACKUP):
@@ -136,12 +142,13 @@ By default, CloudNativePG requests an online/hot backup on volume snapshots, usi
 - it waits for the WAL archiver to archive the last segment of the backup when
   terminating the backup procedure
 
-!!! Important
+:::info[Important]
     The default values are suitable for most production environments. Hot
     backups are consistent and can be used to perform snapshot recovery, as we
     ensure WAL retention from the start of the backup through a temporary
     replication slot. However, our recommendation is to rely on cold backups for
     that purpose.
+:::
 
 You can explicitly change the default behavior through the following options in
 the `.spec.backup.volumeSnapshot` stanza of the `Cluster` resource:
@@ -182,6 +189,44 @@ you can add this section:
          immediateCheckpoint: true
        # ...
 ```
+
+### Online backups and the WAL volume
+
+When a cluster has a separate volume for WAL files (`.spec.walStorage`), an
+online volume snapshot backup never snapshots it: only `PGDATA` (and the
+tablespaces, if any) are snapshotted. The snapshots are cut before
+`pg_backup_stop`, so recovering the backup requires the WAL archive anyway, and
+keeping the WAL files twice would waste storage space and increase costs.
+
+The `onlineConfiguration.waitForArchive` option is only passed to
+`pg_backup_stop`: making sure the WAL archive is complete is up to you. Keep in
+mind that `pg_backup_stop` doesn't wait for the archiver when:
+
+- the backup is taken on a standby of a cluster that is not a
+  [replica cluster](../replica_cluster.md): set the backup `target` to `primary`
+- `archive_mode` is `off`, which CloudNativePG sets while the
+  `cnpg.io/skipWalArchiving` annotation is present, and until the primary is
+  restarted after you remove it
+- a plugin streams the WAL files without `archive_command`, and is not set as
+  the WAL archiver (`isWALArchiver: true`)
+
+The `.status.snapshotBackupStatus.elements` list of an online `Backup` has no
+`PG_WAL` entry.
+When restoring it, CloudNativePG creates an empty WAL volume, and PostgreSQL
+fetches the WAL files from the archive: the recovery requires a `source`
+pointing to the WAL archive, as described in
+["Recovery from VolumeSnapshot objects"](../recovery.md#recovery-from-volumesnapshot-objects).
+Replicas created from an online backup fetch their WAL files from the archive of
+the cluster.
+
+:::warning
+    Recovering an online volume snapshot backup always requires a working WAL
+    archive, whether or not the WAL volume is snapshotted: nothing guarantees
+    that the WAL volume holds every WAL file needed to reach the consistent
+    point of the backup. Keep this in mind when you copy the volume snapshots
+    to another region or account, and when you define the retention policy of
+    the WAL archive. A cold backup always includes the WAL volume.
+:::
 
 ### Overriding the default behavior
 
@@ -241,13 +286,14 @@ In case a `VolumeSnapshot` is deleted, the `deletionPolicy` specified in the
 - if set to `Retain`, the `VolumeSnapshotContent` object is kept
 - if set to `Delete`, the `VolumeSnapshotContent` object is removed as well
 
-!!! Warning
+:::warning
     `VolumeSnapshotContent` objects do not keep all the information regarding the
     backup and the cluster they refer to (like the annotations and labels that
     are contained in the `VolumeSnapshot` object). Although possible, restoring
     from just this kind of object might not be straightforward. For this reason,
     our recommendation is to always backup the `VolumeSnapshot` definitions,
     even using a Kubernetes level data protection solution.
+:::
 
 The value in `VolumeSnapshotContent` is determined by the `deletionPolicy` set
 in the corresponding `VolumeSnapshotClass` definition, which is
@@ -258,12 +304,12 @@ for details on this standard behavior.
 
 ## Backup Volume Snapshot Deadlines
 
-CloudNativePG supports backups using the volume snapshot method. In some
-environments, volume snapshots may encounter temporary issues that can be
-retried.
+CloudNativePG supports backups using the volume snapshot method. Volume
+snapshot operations may encounter errors, which CloudNativePG retries for a
+configurable amount of time before giving up.
 
 The `backup.cnpg.io/volumeSnapshotDeadline` annotation defines how long
-CloudNativePG should continue retrying recoverable errors before marking the
+CloudNativePG should continue retrying these errors before marking the
 backup as failed.
 
 You can add the `backup.cnpg.io/volumeSnapshotDeadline` annotation to both
@@ -275,22 +321,20 @@ If not specified, the default retry deadline is **10 minutes**.
 
 ### Error Handling
 
-When a retryable error occurs during a volume snapshot operation:
+When an error occurs during a volume snapshot operation:
 
 1. CloudNativePG records the time of the first error.
 2. The system retries the operation every **10 seconds**.
 3. If the error persists beyond the specified deadline (or the default 10
    minutes), the backup is marked as **failed**.
 
-### Retryable Errors
-
-CloudNativePG treats the following types of errors as retryable:
-
-- **Server timeout errors** (HTTP 408, 429, 500, 502, 503, 504)
-- **Conflicts** (optimistic locking errors)
-- **Internal errors**
-- **Context deadline exceeded errors**
-- **Timeout errors from the CSI snapshot controller**
+The CSI driver reports snapshot errors as free text, with no reliable way to
+tell a permanent condition (for example, a missing `VolumeSnapshotClass` or
+invalid credentials) from a transient one, and a condition that looks
+permanent can become resolvable at any point, for example if someone creates
+the missing class or fixes the credentials while CloudNativePG is retrying.
+For this reason, CloudNativePG retries every volume snapshot error the same
+way, until the deadline is reached.
 
 ### Examples
 
@@ -314,7 +358,7 @@ When you define a `ScheduledBackup` with the annotation, any `Backup` resources
 created from this schedule automatically inherit the specified timeout value.
 
 In the following example, all backups created from the schedule will have a
-30-minute timeout for retrying recoverable snapshot errors.
+30-minute timeout for retrying snapshot errors.
 
 ```yaml
 apiVersion: postgresql.cnpg.io/v1
@@ -350,11 +394,11 @@ The following example shows how to configure volume snapshot base backups on an
 EKS cluster on AWS using the `ebs-sc` storage class and the `csi-aws-vsc`
 volume snapshot class.
 
-!!! Important
+:::info[Important]
     If you are interested in testing the example, please read
     ["Volume Snapshots" for the Amazon Elastic Block Store (EBS) CSI driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/tree/master/examples/kubernetes/snapshot) <!-- wokeignore:rule=master -->
     for detailed instructions on the installation process for the storage class and the snapshot class.
-
+:::
 
 The following manifest creates a `Cluster` that is ready to be used for volume
 snapshots and that stores the WAL archive in a S3 bucket via IAM role for the

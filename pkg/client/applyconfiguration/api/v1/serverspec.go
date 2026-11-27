@@ -12,7 +12,7 @@ import (
 // ServerSpec configures a server of a foreign data wrapper
 type ServerSpecApplyConfiguration struct {
 	// Common fields
-	DatabaseObjectSpecApplyConfiguration `json:",inline"`
+	DatabaseObjectSpecApplyConfiguration `json:""`
 	// The name of the Foreign Data Wrapper (FDW)
 	FdwName *string `json:"fdw,omitempty"`
 	// Options specifies the configuration options for the server

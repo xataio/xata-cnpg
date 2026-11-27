@@ -11,6 +11,8 @@ type CatalogImageApplyConfiguration struct {
 	Image *string `json:"image,omitempty"`
 	// The PostgreSQL major version of the image. Must be unique within the catalog.
 	Major *int `json:"major,omitempty"`
+	// The configuration of the extensions to be added
+	Extensions []ExtensionConfigurationApplyConfiguration `json:"extensions,omitempty"`
 }
 
 // CatalogImageApplyConfiguration constructs a declarative configuration of the CatalogImage type for use with
@@ -32,5 +34,18 @@ func (b *CatalogImageApplyConfiguration) WithImage(value string) *CatalogImageAp
 // If called multiple times, the Major field is set to the value of the last call.
 func (b *CatalogImageApplyConfiguration) WithMajor(value int) *CatalogImageApplyConfiguration {
 	b.Major = &value
+	return b
+}
+
+// WithExtensions adds the given value to the Extensions field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Extensions field.
+func (b *CatalogImageApplyConfiguration) WithExtensions(values ...*ExtensionConfigurationApplyConfiguration) *CatalogImageApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithExtensions")
+		}
+		b.Extensions = append(b.Extensions, *values[i])
+	}
 	return b
 }

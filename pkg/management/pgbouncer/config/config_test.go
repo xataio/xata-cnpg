@@ -1,0 +1,207 @@
+/*
+Copyright © contributors to CloudNativePG, established as
+CloudNativePG a Series of LF Projects, LLC.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
+package config
+
+import (
+	"path/filepath"
+	"strings"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+var _ = Describe("BuildConfigurationFiles", func() {
+	iniPath := filepath.Join(ConfigsDir, PgBouncerIniFileName)
+	userListPath := filepath.Join(ConfigsDir, PgBouncerUserListFileName)
+
+	// newSecrets returns a Secrets value backed by a basic-auth auth query
+	// secret. BuildConfigurationFiles dereferences the crypto-material secrets
+	// unconditionally, so they are populated with placeholder, non-nil content.
+	newSecrets := func() *Secrets {
+		return &Secrets{
+			AuthQuery: &corev1.Secret{
+				Type: corev1.SecretTypeBasicAuth,
+				Data: map[string][]byte{
+					corev1.BasicAuthUsernameKey: []byte("test-username"),
+					corev1.BasicAuthPasswordKey: []byte("test-password"),
+				},
+			},
+			ServerCA:  &corev1.Secret{Data: map[string][]byte{}},
+			ClientCA:  &corev1.Secret{Data: map[string][]byte{}},
+			ClientTLS: &corev1.Secret{Data: map[string][]byte{}},
+		}
+	}
+
+	// newPooler returns a minimal Pooler carrying the given generic parameters.
+	newPooler := func(parameters map[string]string) *apiv1.Pooler {
+		return &apiv1.Pooler{
+			ObjectMeta: metav1.ObjectMeta{Name: "pooler-example"},
+			Spec: apiv1.PoolerSpec{
+				Cluster: apiv1.LocalObjectReference{Name: "cluster-example"},
+				Type:    apiv1.PoolerTypeRW,
+				PgBouncer: &apiv1.PgBouncerSpec{
+					PoolMode:   apiv1.PgBouncerPoolModeSession,
+					Parameters: parameters,
+				},
+			},
+		}
+	}
+
+	It("derives auth_user from the auth query secret when no override is set", func() {
+		files, err := BuildConfigurationFiles(newPooler(nil), newSecrets())
+		Expect(err).ToNot(HaveOccurred())
+
+		ini := string(files[iniPath])
+		Expect(ini).To(ContainSubstring("auth_user = test-username"))
+		Expect(strings.Count(ini, "auth_user")).To(Equal(1))
+		Expect(string(files[userListPath])).To(ContainSubstring(`"test-username" "test-password"`))
+	})
+
+	It("applies the auth_user override without emitting the key twice", func() {
+		files, err := BuildConfigurationFiles(
+			newPooler(map[string]string{"auth_user": "pgbouncer"}),
+			newSecrets(),
+		)
+		Expect(err).ToNot(HaveOccurred())
+
+		ini := string(files[iniPath])
+		Expect(ini).To(ContainSubstring("auth_user = pgbouncer"))
+		// auth_user has a dedicated template line, so it must appear exactly
+		// once and never leak through the generic parameters block.
+		Expect(strings.Count(ini, "auth_user")).To(Equal(1))
+		// The password is still taken from the auth query secret.
+		Expect(string(files[userListPath])).To(ContainSubstring(`"pgbouncer" "test-password"`))
+	})
+
+	It("ignores an empty auth_user override and keeps the derived user", func() {
+		files, err := BuildConfigurationFiles(
+			newPooler(map[string]string{"auth_user": ""}),
+			newSecrets(),
+		)
+		Expect(err).ToNot(HaveOccurred())
+
+		ini := string(files[iniPath])
+		Expect(ini).To(ContainSubstring("auth_user = test-username"))
+		Expect(strings.Count(ini, "auth_user")).To(Equal(1))
+		Expect(ini).ToNot(ContainSubstring("auth_user = \n"))
+	})
+
+	It("keeps an auth_user parameter containing newlines on the auth_user line", func() {
+		files, err := BuildConfigurationFiles(
+			newPooler(map[string]string{"auth_user": "pg-user\nlogfile = /tmp/injected"}),
+			newSecrets(),
+		)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(string(files[iniPath])).To(ContainSubstring(
+			"\nauth_user = pg-userlogfile = /tmp/injected\nauth_query = "))
+		Expect(string(files[userListPath])).To(ContainSubstring(
+			`"pg-userlogfile = /tmp/injected" "test-password"`))
+	})
+
+	It("escapes double quotes in the auth_user override for userlist.txt", func() {
+		files, err := BuildConfigurationFiles(
+			newPooler(map[string]string{"auth_user": `pg"bouncer`}),
+			newSecrets(),
+		)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(string(files[userListPath])).To(ContainSubstring(`"pg""bouncer" "test-password"`))
+		// pgbouncer.ini takes the raw value: no quoting rules apply there
+		Expect(string(files[iniPath])).To(ContainSubstring("\nauth_user = pg\"bouncer\n"))
+	})
+
+	It("keeps an authQuery containing newlines on the auth_query line", func() {
+		pooler := newPooler(nil)
+		pooler.Spec.PgBouncer.AuthQuery = "SELECT 1\n[databases]\r\ninjected = host=example"
+
+		files, err := BuildConfigurationFiles(pooler, newSecrets())
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(string(files[iniPath])).To(ContainSubstring(
+			"\nauth_query = SELECT 1 [databases] injected = host=example\nauth_dbname = "))
+	})
+
+	It("keeps an auth query secret username containing newlines on the auth_user line", func() {
+		secrets := newSecrets()
+		secrets.AuthQuery.Data[corev1.BasicAuthUsernameKey] = []byte("test-username\nlogfile = /tmp/injected")
+
+		files, err := BuildConfigurationFiles(newPooler(nil), secrets)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(string(files[iniPath])).To(ContainSubstring(
+			"\nauth_user = test-usernamelogfile = /tmp/injected\nauth_query = "))
+		// userlist.txt must carry the same user name pgbouncer.ini refers to.
+		Expect(string(files[userListPath])).To(ContainSubstring(
+			`"test-usernamelogfile = /tmp/injected" "test-password"`))
+	})
+
+	It("keeps a parameter name containing newlines on a single line", func() {
+		files, err := BuildConfigurationFiles(
+			newPooler(map[string]string{"max_client_conn\nstats_period": "83"}),
+			newSecrets(),
+		)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(string(files[iniPath])).To(ContainSubstring("\nmax_client_connstats_period = 83\n"))
+	})
+
+	It("removes NUL bytes from the names and values rendered into pgbouncer.ini", func() {
+		pooler := newPooler(map[string]string{"max_client_conn\x00": "100\x00"})
+		pooler.Spec.PgBouncer.AuthQuery = "SELECT 1\x00"
+		secrets := newSecrets()
+		secrets.AuthQuery.Data[corev1.BasicAuthUsernameKey] = []byte("test-username\x00")
+
+		files, err := BuildConfigurationFiles(pooler, secrets)
+		Expect(err).ToNot(HaveOccurred())
+
+		ini := string(files[iniPath])
+		Expect(ini).ToNot(ContainSubstring("\x00"))
+		// Nothing is dropped nor emptied: every field keeps its line
+		Expect(ini).To(ContainSubstring("\nauth_user = test-username\nauth_query = SELECT 1\nauth_dbname = "))
+		Expect(ini).To(ContainSubstring("\nmax_client_conn = 100\n"))
+		Expect(string(files[userListPath])).To(ContainSubstring(`"test-username" "test-password"`))
+	})
+
+	It("does not let a parameter name with trailing whitespace override a forced parameter", func() {
+		files, err := BuildConfigurationFiles(
+			newPooler(map[string]string{"listen_port ": "6543"}),
+			newSecrets(),
+		)
+		Expect(err).ToNot(HaveOccurred())
+
+		ini := string(files[iniPath])
+		Expect(ini).To(ContainSubstring("\nlisten_port = 5432\n"))
+		Expect(ini).ToNot(ContainSubstring("6543"))
+	})
+
+	It("fails when a parameter name cannot be rendered safely", func() {
+		_, err := BuildConfigurationFiles(
+			newPooler(map[string]string{"max_client_conn = 100\nstats_period": "83"}),
+			newSecrets(),
+		)
+		Expect(err).To(HaveOccurred())
+	})
+})

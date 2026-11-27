@@ -39,7 +39,6 @@ type connectionProfilePostgresql profile
 
 func (connectionProfilePostgresql) Enrich(config *pgx.ConnConfig) {
 	fillDefaultParameters(config)
-	pinSearchPath(config)
 
 	// We don't want to be stuck on queries if synchronous replicas
 	// are still not alive and kicking. The next reconciliation loop
@@ -51,11 +50,10 @@ type connectionProfilePostgresqlPhysicalReplication profile
 
 func (connectionProfilePostgresqlPhysicalReplication) Enrich(config *pgx.ConnConfig) {
 	fillDefaultParameters(config)
-	pinSearchPath(config)
 
-	// The simple query protocol is needed since we're going to use
-	// this function to connect to the PgBouncer administrative
-	// interface, which doesn't support the extended one.
+	// The simple query protocol is needed since this connection issues
+	// physical replication commands (such as IDENTIFY_SYSTEM), which are
+	// not supported over the extended query protocol.
 	config.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 
 	// To initiate streaming replication, the frontend sends the replication parameter
@@ -75,6 +73,13 @@ func (connectionProfilePgbouncer) Enrich(config *pgx.ConnConfig) {
 	// this function to connect to the PgBouncer administrative
 	// interface, which doesn't support the extended one.
 	config.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+
+	// The PgBouncer admin console does not execute catalog SQL and
+	// only accepts the startup parameters listed in
+	// ignore_startup_parameters (extra_float_digits,options by default).
+	// The pinned search_path is therefore unnecessary here and would
+	// cause the admin connection to be rejected.
+	delete(config.RuntimeParams, "search_path")
 }
 
 func fillDefaultParameters(config *pgx.ConnConfig) {
@@ -86,10 +91,22 @@ func fillDefaultParameters(config *pgx.ConnConfig) {
 	// a standard date format for the operator to manage the dates
 	// when it's needed
 	config.RuntimeParams["datestyle"] = "ISO"
-}
 
-// pinSearchPath pins search_path via the startup packet so it cannot be overridden by
-// database- or role-level defaults.
-func pinSearchPath(config *pgx.ConnConfig) {
-	config.RuntimeParams["search_path"] = `"$user", public`
+	// Pin search_path so a tenant-controlled ALTER DATABASE / ALTER ROLE
+	// setting cannot influence operator-issued queries. pg_catalog is
+	// first so any built-in overload defeats an operator/function shadow
+	// planted in public.
+	//
+	// public is kept in the path so that the common case keeps working
+	// for queries that legitimately reference unqualified objects there;
+	// the CREATE EXTENSION paths (initdb post-init and the Database
+	// controller) do not rely on this default — they SET search_path on
+	// their own connection before issuing CREATE EXTENSION so a
+	// relocatable extension lands in the user-data schema.
+	//
+	// pg_temp is listed last so the session temp schema is searched after
+	// pg_catalog and public for relation and data-type names; by default
+	// (when pg_temp is not listed) it is searched first, even before
+	// pg_catalog.
+	config.RuntimeParams["search_path"] = "pg_catalog, public, pg_temp"
 }

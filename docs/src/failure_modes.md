@@ -7,11 +7,12 @@ title: Failure Modes
 # Failure Modes
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-!!! Note
+:::note
     In previous versions of CloudNativePG, this page included specific failure
     scenarios. Since these largely follow standard Kubernetes behavior, we have
     streamlined the content to avoid duplication of information that belongs to the
     underlying Kubernetes stack and is not specific to CloudNativePG.
+:::
 
 CloudNativePG adheres to standard Kubernetes principles for self-healing and
 high availability. We assume familiarity with core Kubernetes concepts such as
@@ -20,9 +21,10 @@ refer to the ["Postgres Instance Manager" section](instance_manager.md), which
 covers startup, liveness, and readiness probes, as well as the
 [self-healing](#self-healing) section below.
 
-!!! Important
+:::info[Important]
     If you are running CloudNativePG in production, we strongly recommend
     seeking [professional support](https://cloudnative-pg.io/support/).
+:::
 
 ## Self-Healing
 
@@ -52,13 +54,56 @@ If a standby Pod fails:
 For failure scenarios not covered by automated recovery, manual intervention
 may be required.
 
-!!! Important
+:::info[Important]
     Do not perform manual operations without [professional support](https://cloudnative-pg.io/support/).
+:::
+
+### Rebuilding a Diverged Replica
+
+In rare cases, after a failover, a replica may have replayed more WAL than the
+replica that was promoted. Such a replica cannot follow the new primary.
+CloudNativePG detects it and contains it: it removes the replica from the `-r`
+and `-ro` services, excludes it from promotion, and fences it. It also sets the
+`ReplicasHealthy` condition of the `Cluster` to `False` and raises a
+`ReplicaDiverged` event. The primary keeps running.
+
+To bring the replica back, rebuild it from the current primary with the
+[`cnpg` plugin](kubectl-plugin.md#destroy):
+
+```sh
+kubectl cnpg destroy CLUSTER INSTANCE
+```
+
+The operator keeps the replica fenced until it is rebuilt or removed. If you
+lift the fence, the operator applies it again on the next reconciliation.
+A fence on the whole cluster (`*`) is left untouched by the operator and stays
+in place while you rebuild the replica.
+
+In a replica cluster, a diverged instance is also removed from the `-r` and
+`-ro` services, but the operator does not report or fence it.
 
 ### Disabling Reconciliation
 
-To temporarily disable the reconciliation loop for a PostgreSQL cluster, use
-the `cnpg.io/reconciliationLoop` annotation:
+The `cnpg.io/reconciliationLoop` annotation allows you to temporarily disable
+the reconciliation loop for CloudNativePG resources. When set to `"disabled"`,
+the operator will stop processing updates for the annotated resource, preventing
+any automated changes or self-healing actions.
+
+Use this annotation **with extreme caution** and only during emergency
+operations.
+
+:::warning
+    This annotation should be removed as soon as the issue is resolved. Leaving
+    it in place prevents the operator from managing the annotated resource. On a
+    Cluster, this includes self-healing actions and failover.
+:::
+
+The following resources support this annotation:
+
+- **Cluster**: Disables reconciliation of the PostgreSQL cluster
+- **Backup**: Disables reconciliation of backup operations
+
+Example usage:
 
 ```yaml
 metadata:
@@ -68,11 +113,3 @@ metadata:
 spec:
   # ...
 ```
-
-Use this annotation **with extreme caution** and only during emergency
-operations.
-
-!!! Warning
-    This annotation should be removed as soon as the issue is resolved. Leaving
-    it in place prevents the operator from executing self-healing actions,
-    including failover.

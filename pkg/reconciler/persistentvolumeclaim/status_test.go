@@ -89,6 +89,172 @@ var _ = Describe("PVC detection", func() {
 	})
 })
 
+var _ = Describe("PVC classification with a bootstrap init container", func() {
+	clusterName := "myCluster"
+
+	podWithBootstrapInitContainer := func(serial string, terminatedExitCode *int32) corev1.Pod {
+		pod := makePod(clusterName, serial, specs.ClusterRoleLabelPrimary)
+		pod.Spec.InitContainers = []corev1.Container{{Name: specs.BootstrapWorkContainerName}}
+		containerStatus := corev1.ContainerStatus{Name: specs.BootstrapWorkContainerName}
+		if terminatedExitCode != nil {
+			containerStatus.State = corev1.ContainerState{
+				Terminated: &corev1.ContainerStateTerminated{ExitCode: *terminatedExitCode},
+			}
+		}
+		pod.Status.InitContainerStatuses = []corev1.ContainerStatus{containerStatus}
+		return pod
+	}
+
+	// a new instance: its PGDATA PVC is initializing until the bootstrap completes
+	initializingPgDataPVC := func() corev1.PersistentVolumeClaim {
+		pvc := makePVC(clusterName, "1", "1", NewPgDataCalculator(), false)
+		pvc.Annotations[utils.PVCStatusAnnotationName] = StatusInitializing
+		return pvc
+	}
+
+	// the WAL PVC is created ready, see pgWalCalculator.GetInitialStatus
+	walPVC := func() corev1.PersistentVolumeClaim {
+		return makePVC(clusterName, "1-wal", "1", NewPgWalCalculator(), false)
+	}
+
+	withWalVolume := func(pod corev1.Pod) corev1.Pod {
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: clusterName + "-1-wal"},
+			},
+		})
+		return pod
+	}
+
+	clusterWithWalStorage := func() *apiv1.Cluster {
+		return &apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: clusterName},
+			Spec:       apiv1.ClusterSpec{WalStorage: &apiv1.StorageConfiguration{Size: "1Gi"}},
+		}
+	}
+
+	It("classifies the PVCs as initializing while their Pod's init container has not completed", func(ctx SpecContext) {
+		pvcs := []corev1.PersistentVolumeClaim{initializingPgDataPVC(), walPVC()}
+		cluster := clusterWithWalStorage()
+
+		EnrichStatus(
+			ctx,
+			cluster,
+			[]corev1.Pod{withWalVolume(podWithBootstrapInitContainer("1", nil))},
+			nil,
+			pvcs,
+		)
+
+		Expect(cluster.Status.InitializingPVC).Should(Equal([]string{clusterName + "-1", clusterName + "-1-wal"}))
+		Expect(cluster.Status.HealthyPVC).Should(BeEmpty())
+	})
+
+	It("classifies a PVC as initializing before the kubelet reports its Pod's bootstrap init container",
+		func(ctx SpecContext) {
+			pvcs := []corev1.PersistentVolumeClaim{
+				initializingPgDataPVC(),
+			}
+			cluster := &apiv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: clusterName}}
+			pod := podWithBootstrapInitContainer("1", nil)
+			pod.Status.InitContainerStatuses = nil
+
+			EnrichStatus(ctx, cluster, []corev1.Pod{pod}, nil, pvcs)
+
+			Expect(cluster.Status.InitializingPVC).Should(Equal([]string{clusterName + "-1"}))
+			Expect(cluster.Status.HealthyPVC).Should(BeEmpty())
+		})
+
+	It("keeps the PVCs of a ready instance healthy while its Pod reruns the bootstrap init container",
+		func(ctx SpecContext) {
+			pvcs := []corev1.PersistentVolumeClaim{
+				makePVC(clusterName, "1", "1", NewPgDataCalculator(), false),
+				walPVC(),
+			}
+			cluster := clusterWithWalStorage()
+
+			EnrichStatus(
+				ctx,
+				cluster,
+				[]corev1.Pod{withWalVolume(podWithBootstrapInitContainer("1", nil))},
+				nil,
+				pvcs,
+			)
+
+			Expect(cluster.Status.HealthyPVC).Should(Equal([]string{clusterName + "-1", clusterName + "-1-wal"}))
+			Expect(cluster.Status.InitializingPVC).Should(BeEmpty())
+		})
+
+	It("classifies a PVC as initializing while its Pod's bootstrap init container failed", func(ctx SpecContext) {
+		pvcs := []corev1.PersistentVolumeClaim{
+			initializingPgDataPVC(),
+		}
+		cluster := &apiv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: clusterName}}
+
+		EnrichStatus(
+			ctx,
+			cluster,
+			[]corev1.Pod{podWithBootstrapInitContainer("1", ptr.To(int32(1)))},
+			nil,
+			pvcs,
+		)
+
+		Expect(cluster.Status.InitializingPVC).Should(Equal([]string{clusterName + "-1"}))
+		Expect(cluster.Status.HealthyPVC).Should(BeEmpty())
+	})
+
+	It("classifies a PVC as healthy once its Pod's bootstrap init container succeeded", func(ctx SpecContext) {
+		pvcs := []corev1.PersistentVolumeClaim{
+			initializingPgDataPVC(),
+		}
+		cluster := &apiv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: clusterName}}
+
+		EnrichStatus(
+			ctx,
+			cluster,
+			[]corev1.Pod{podWithBootstrapInitContainer("1", ptr.To(int32(0)))},
+			nil,
+			pvcs,
+		)
+
+		Expect(cluster.Status.HealthyPVC).Should(Equal([]string{clusterName + "-1"}))
+		Expect(cluster.Status.InitializingPVC).Should(BeEmpty())
+	})
+
+	It("classifies a PVC as initializing while its Pod's init container has no status yet", func(ctx SpecContext) {
+		pvcs := []corev1.PersistentVolumeClaim{
+			initializingPgDataPVC(),
+		}
+		pod := makePod(clusterName, "1", specs.ClusterRoleLabelPrimary)
+		pod.Spec.InitContainers = []corev1.Container{{Name: specs.BootstrapWorkContainerName}}
+		cluster := &apiv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: clusterName}}
+
+		EnrichStatus(ctx, cluster, []corev1.Pod{pod}, nil, pvcs)
+
+		Expect(cluster.Status.InitializingPVC).Should(Equal([]string{clusterName + "-1"}))
+		Expect(cluster.Status.HealthyPVC).Should(BeEmpty())
+		Expect(cluster.Status.DanglingPVC).Should(BeEmpty())
+	})
+
+	It("classifies a PVC as healthy when its Pod has no bootstrap init container at all "+
+		"(reattaching an already-ready PVC)", func(ctx SpecContext) {
+		pvcs := []corev1.PersistentVolumeClaim{
+			makePVC(clusterName, "1", "1", NewPgDataCalculator(), false),
+		}
+		cluster := &apiv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: clusterName}}
+
+		EnrichStatus(
+			ctx,
+			cluster,
+			[]corev1.Pod{makePod(clusterName, "1", specs.ClusterRoleLabelPrimary)},
+			nil,
+			pvcs,
+		)
+
+		Expect(cluster.Status.HealthyPVC).Should(Equal([]string{clusterName + "-1"}))
+		Expect(cluster.Status.InitializingPVC).Should(BeEmpty())
+	})
+})
+
 var _ = Describe("PVC classification with resizing PVCs", func() {
 	clusterName := "myCluster"
 	makeCluster := func() *apiv1.Cluster {

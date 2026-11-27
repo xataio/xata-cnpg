@@ -13,13 +13,14 @@ and guarantee consistency and durability. The same expectations and
 requirements that apply to traditional environments, such as virtual machines
 and bare metal, are also valid in container contexts managed by Kubernetes.
 
-!!! Important
+:::info[Important]
     When it comes to dynamically provisioned storage,
     Kubernetes has its own specifics. These include *storage classes*, *persistent
     volumes*, and *Persistent Volume Claims (PVCs)*. You need to own these
     concepts, on top of all the valuable knowledge you've built over
     the years in terms of storage for database workloads on VMs and
     physical servers.
+:::
 
 There are two primary methods of access to storage:
 
@@ -38,18 +39,20 @@ Local storage enables shared-nothing architectures, which is more suitable
 for high transactional and very large database (VLDB) workloads, as it
 guarantees higher and more predictable performance.
 
-!!! Warning
+:::warning
     Before you deploy a PostgreSQL cluster with CloudNativePG,
     ensure that the storage you're using is recommended for database
     workloads. We recommend clearly setting performance expectations by
     first benchmarking the storage using tools such as [fio](https://fio.readthedocs.io/en/latest/fio_doc.html)
     and then the database using [pgbench](https://www.postgresql.org/docs/current/pgbench.html).
+:::
 
-!!! Info
+:::info
     CloudNativePG doesn't use `StatefulSet` for managing data persistence.
     Rather, it manages PVCs directly. If you want
     to know more, see
     [Custom pod controller](controller.md).
+:::
 
 ## Backup and recovery
 
@@ -57,10 +60,11 @@ Since CloudNativePG supports volume snapshots for both backup and recovery,
 we recommend that you also consider this aspect when you choose your storage
 solution, especially if you manage very large databases.
 
-!!! Important
+:::info[Important]
     See the Kubernetes documentation for a list of all
     the supported [container storage interface (CSI) drivers](https://kubernetes-csi.github.io/docs/drivers.html)
     that provide snapshot capabilities.
+:::
 
 ## Benchmarking CloudNativePG
 
@@ -76,7 +80,7 @@ Briefly, we recommend operating at two levels:
 - Measuring the performance of the database using pgbench, the default benchmarking tool
   distributed with PostgreSQL
 
-!!! Important
+:::info[Important]
     You must measure both the storage and database performance before putting
     the database into production. These results are extremely valuable not just in
     the planning phase (for example, capacity planning). They are also valuable in
@@ -88,6 +92,7 @@ Briefly, we recommend operating at two levels:
     where results don't vary due to the influence of external workloads.
 
     Know your system: benchmark it.
+:::
 
 ## Encryption at rest
 
@@ -112,10 +117,11 @@ defined as a *PVC group*.
 
 ## Configuration via a storage class
 
-!!! Important
+:::info[Important]
     CloudNativePG was designed to work interchangeably with all storage classes.
     As usual, we recommend properly benchmarking the storage class in a
     controlled environment before deploying to production.
+:::
 
 The easiest way to configure the storage for a PostgreSQL class is to request
 storage of a certain size, like in the following example:
@@ -180,11 +186,12 @@ contains the log of transactional changes that occurred in the database, in the
 form of segment files. (`pg_wal` is historically known as `pg_xlog` in
 PostgreSQL.)
 
-!!! Info
+:::info
     Normally, each segment is 16MB in size, but you can configure the size
     using the `walSegmentSize` option. This option is applied at cluster
     initialization time, as described in
     [Bootstrap an empty cluster](bootstrap.md#bootstrap-an-empty-cluster-initdb).
+:::
 
 In most cases, having `pg_wal` on the same volume where `PGDATA`
 resides is fine. However, having WALs stored in a separate
@@ -209,9 +216,10 @@ volume has a few benefits:
   on both `PGDATA` and `pg_wal`. You can also set alerts that notify you in case,
   for example, `PGDATA` requires resizing.
 
-!!! Seealso "Write-Ahead Log (WAL)"
+:::note[Write-Ahead Log (WAL)]
     See [Reliability and the Write-Ahead Log](https://www.postgresql.org/docs/current/wal.html)
     in the PostgreSQL documentation for more information.
+:::
 
 You can add a separate volume for WAL using the `.spec.walStorage` option.
 It follows the same rules described for the `storage` field and provisions a
@@ -230,9 +238,10 @@ spec:
     size: 1Gi
 ```
 
-!!! Important
+:::info[Important]
     Removing `walStorage` isn't supported. Once added, a separate volume for
     WALs can't be removed from an existing Postgres cluster.
+:::
 
 ## Volumes for tablespaces
 
@@ -311,11 +320,12 @@ For example, re-create the storage for `cluster-example-3`:
 $ kubectl delete pvc/cluster-example-3 pod/cluster-example-3
 ```
 
-!!! Important
+:::info[Important]
     If you created a dedicated WAL volume, both PVCs must be deleted during
     this process. The same procedure applies if you want to regenerate the WAL
     volume PVC. You can do this by also disabling `resizeInUseVolumes` for the
     `.spec.walStorage` section.
+:::
 
 For example, if a PVC dedicated to WAL storage is present:
 
@@ -331,9 +341,69 @@ $ kubectl get pods
 NAME                           READY   STATUS      RESTARTS   AGE
 cluster-example-1              1/1     Running     0          5m58s
 cluster-example-2              1/1     Running     0          5m43s
-cluster-example-4-join-v2      0/1     Completed   0          17s
-cluster-example-4              1/1     Running     0          10s
+cluster-example-3-join-v2      0/1     Completed   0          17s
+cluster-example-3              1/1     Running     0          10s
 ```
+
+## Volume reduction
+
+Kubernetes does not provide an API to shrink a PVC, and CloudNativePG's
+validating webhook rejects any attempt to decrease `.spec.storage.size`,
+`.spec.walStorage.size` or any tablespace storage size in `.spec.tablespaces`.
+You can still reduce the storage of a cluster, but only by recreating
+each instance with a smaller volume, as described below.
+
+:::warning
+CloudNativePG does not support automated volume shrinking, as it is a
+delicate operation that can lead to data loss if performed incorrectly. For
+the time being, it can only be achieved manually, through the supervised
+procedure described below.
+This procedure requires you to temporarily disable the validating webhook.
+While validation is disabled, the operator accepts spec changes that would
+normally be rejected, including unsafe or destructive ones. Proceed with
+caution and at your own risk, and re-enable validation as soon as possible.
+
+Before you start, make sure the cluster's current data, WAL, and any tablespace
+data comfortably fit within the new, smaller sizes. If they don't, the instances
+recreated on smaller volumes can fail to rejoin or quickly run out of space.
+:::
+
+To reduce the size of the persistent volumes:
+
+1. Disable the validating webhook by setting the `cnpg.io/validation: disabled`
+   annotation on the `Cluster`, set `.spec.storage.size` (and, if present,
+   `.spec.walStorage.size` or tablespace storage size in `.spec.tablespaces`)
+   to the new, smaller value, and increase `.spec.instances` by 1 to provide a
+   spare instance during the rollout.
+2. Re-enable validation by removing the `cnpg.io/validation` annotation (or
+   setting it to `enabled`). The new, smaller size is now stored in the spec
+   and is applied to every instance the operator recreates from this point on.
+   Existing instances keep their current volumes; for each one, the operator
+   logs an informational `cannot decrease storage requirement` message until
+   that instance is recreated. This is expected and harmless.
+3. Destroy one standby that still has a volume of the old size. The operator
+   provisions a replacement instance — reusing the name of the one you
+   destroyed, since instance serials are recycled — on the new, smaller volume:
+
+   ```sh
+   kubectl-cnpg destroy CLUSTER INSTANCE
+   ```
+
+4. Wait for the operator to create the replacement instance and for it to
+   become healthy.
+5. Repeat steps 3 and 4 for every remaining standby that still has an
+   old-size volume.
+6. Promote one of the newly created standbys so that the current primary —
+   which still has an old-size volume — is demoted to a standby:
+
+   ```sh
+   kubectl-cnpg promote CLUSTER INSTANCE
+   ```
+
+7. Destroy the former primary (now a standby with an old-size volume) so the
+   operator provisions its replacement on the new, smaller volume, and wait
+   until all instances are healthy.
+8. Decrease `.spec.instances` back to its original value.
 
 ## Static provisioning of persistent volumes
 
@@ -347,11 +417,12 @@ storage volumes and then create the related `PersistentVolume` objects for
 their representation inside the Kubernetes cluster. This is also known as
 *pre-provisioning* of volumes.
 
-!!! Important
+:::info[Important]
     We recommend that you avoid pre-provisioning volumes, as it has an effect
     on the high availability and self-healing capabilities of the operator. It
     breaks the fully declarative model on which CloudNativePG was built.
-    
+:::
+
 To use a pre-provisioned volume in CloudNativePG:
 
 1. Manually create the volume outside Kubernetes.
@@ -363,12 +434,13 @@ To use a pre-provisioned volume in CloudNativePG:
    section that can help Kubernetes match the `PersistentVolume`
    and enable CloudNativePG to create the needed `PersistentVolumeClaim`.
 
-!!! Warning
+:::warning
     With static provisioning, it's your responsibility to ensure that Postgres
     pods can be correctly scheduled by Kubernetes where a pre-provisioned volume
     exists. (The scheduling configuration is based on the affinity rules of your
     cluster.) Make sure you check for any pods stuck in `Pending` after you deploy
     the cluster. If the condition persists, investigate why it's happening.
+:::
 
 ## Block storage considerations (Ceph/Longhorn)
 

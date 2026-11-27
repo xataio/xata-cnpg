@@ -38,17 +38,17 @@ const (
 	DatabaseReclaimRetain DatabaseReclaimPolicy = "retain"
 )
 
-// UsageSpecType describes the type of usage specified in the `usage` field of the
-// `Database` object.
+// UsageSpecType describes whether a privilege is granted to or revoked from a
+// role in the `Database` object.
 // +enum
 type UsageSpecType string
 
 const (
-	// GrantUsageSpecType indicates a grant usage permission.
-	// The default usage permission is grant.
+	// GrantUsageSpecType indicates a grant of the privilege.
+	// The default is grant.
 	GrantUsageSpecType UsageSpecType = "grant"
 
-	// RevokeUsageSpecType indicates a revoke usage permission.
+	// RevokeUsageSpecType indicates a revoke of the privilege.
 	RevokeUsageSpecType UsageSpecType = "revoke"
 )
 
@@ -60,6 +60,7 @@ const (
 // +kubebuilder:validation:XValidation:rule="!has(self.icuRules) || self.localeProvider == 'icu'",message="icuRules is only available when localeProvider is set to `icu`"
 type DatabaseSpec struct {
 	// The name of the PostgreSQL cluster hosting the database.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="cluster reference is immutable after creation"
 	ClusterRef corev1.LocalObjectReference `json:"cluster"`
 
 	// Ensure the PostgreSQL database is `present` or `absent` - defaults to "present".
@@ -195,6 +196,47 @@ type DatabaseSpec struct {
 	// The list of foreign servers to be managed in the database
 	// +optional
 	Servers []ServerSpec `json:"servers,omitempty"`
+
+	// Permissions defines the privileges to grant or revoke on the database
+	// itself, keyed by privilege. Each entry carries a role name and a type of
+	// `grant` (default) or `revoke`, mirroring the existing usage model.
+	// +optional
+	Permissions *DatabasePermissionsSpec `json:"permissions,omitempty"`
+}
+
+// DatabasePermissionsSpec groups the privileges that can be granted or revoked
+// on a database, keyed by privilege. Each entry reuses the `grant`/`revoke`
+// model already used for foreign data wrapper and server usage.
+//
+// The role name `public` refers to the `PUBLIC` pseudo-role, meaning every
+// role.
+//
+// A `revoke` only removes the privilege granted to the named role itself:
+// it has no effect on privileges the role holds through `PUBLIC` or through
+// membership of another role. Removing an entry from the specification does
+// not undo a previous grant or revoke.
+type DatabasePermissionsSpec struct {
+	// List of roles for which the `CONNECT` privilege on the database is granted or revoked.
+	// Maps to `GRANT CONNECT ON DATABASE ... TO ...` / `REVOKE CONNECT ON DATABASE ... FROM ...`.
+	// +optional
+	Connect []UsageSpec `json:"connect,omitempty"`
+
+	// List of roles for which the `CREATE` privilege on the database is granted or revoked.
+	// Maps to `GRANT CREATE ON DATABASE ... TO ...` / `REVOKE CREATE ON DATABASE ... FROM ...`.
+	// +optional
+	Create []UsageSpec `json:"create,omitempty"`
+
+	// List of roles for which the `TEMPORARY` privilege on the database is granted or revoked.
+	// Maps to `GRANT TEMPORARY ON DATABASE ... TO ...` / `REVOKE TEMPORARY ON DATABASE ... FROM ...`.
+	// +optional
+	Temporary []UsageSpec `json:"temporary,omitempty"`
+
+	// List of roles for which every database privilege (`CONNECT`, `CREATE`
+	// and `TEMPORARY`) is granted or revoked. This is only a shortcut: it is
+	// expanded into the three individual privileges before reconciliation, and
+	// the status reports the expanded entries.
+	// +optional
+	All []UsageSpec `json:"all,omitempty"`
 }
 
 // DatabaseObjectSpec contains the fields which are common to every
@@ -220,8 +262,31 @@ type SchemaSpec struct {
 
 	// The role name of the user who owns the schema inside PostgreSQL.
 	// It maps to the `AUTHORIZATION` parameter of `CREATE SCHEMA` and the
-	// `OWNER TO` command of `ALTER SCHEMA`.
+	// `OWNER TO` command of `ALTER SCHEMA`. If left empty, the schema is
+	// owned by `postgres`, the role CloudNativePG uses to connect to the
+	// database.
 	Owner string `json:"owner,omitempty"`
+
+	// Permissions defines the privileges to grant or revoke on the schema,
+	// keyed by privilege. Each entry carries a role name and a type of
+	// `grant` (default) or `revoke`, mirroring the existing usage model.
+	// +optional
+	Permissions *SchemaPermissionsSpec `json:"permissions,omitempty"`
+}
+
+// SchemaPermissionsSpec groups the privileges that can be granted or revoked
+// on a schema, keyed by privilege. Each entry reuses the `grant`/`revoke`
+// model already used for foreign data wrapper and server usage.
+type SchemaPermissionsSpec struct {
+	// List of roles for which the `USAGE` privilege on the schema is granted or revoked.
+	// Maps to `GRANT USAGE ON SCHEMA ... TO ...` / `REVOKE USAGE ON SCHEMA ... FROM ...`.
+	// +optional
+	Usage []UsageSpec `json:"usage,omitempty"`
+
+	// List of roles for which the `CREATE` privilege on the schema is granted or revoked.
+	// Maps to `GRANT CREATE ON SCHEMA ... TO ...` / `REVOKE CREATE ON SCHEMA ... FROM ...`.
+	// +optional
+	Create []UsageSpec `json:"create,omitempty"`
 }
 
 // ExtensionSpec configures an extension in a database
@@ -310,13 +375,13 @@ type OptionSpec struct {
 	Ensure EnsureOption `json:"ensure,omitempty"`
 }
 
-// UsageSpec configures a usage for a foreign data wrapper
+// UsageSpec grants or revokes a privilege for a role, or for `public`
 type UsageSpec struct {
-	// Name of the usage
+	// Name of the role, or `public` to target all roles
 	// +kubebuilder:validation:XValidation:rule="self != ''",message="name is required"
 	Name string `json:"name"`
 
-	// The type of usage
+	// Whether the privilege is granted to or revoked from the role
 	// +kubebuilder:default:="grant"
 	// +kubebuilder:validation:Enum=grant;revoke
 	// +optional
@@ -353,6 +418,32 @@ type DatabaseStatus struct {
 	// Servers is the status of the managed servers
 	// +optional
 	Servers []DatabaseObjectStatus `json:"servers,omitempty"`
+
+	// Permissions is the status of the managed database permissions, with
+	// one entry per privilege and role (`all` is reported expanded)
+	// +optional
+	Permissions []DatabasePermissionStatus `json:"permissions,omitempty"`
+}
+
+// DatabasePermissionStatus is the status of a single privilege granted to
+// or revoked from a role on the database
+type DatabasePermissionStatus struct {
+	// The privilege: `CONNECT`, `CREATE` or `TEMPORARY`
+	Privilege string `json:"privilege"`
+
+	// The name of the role
+	Name string `json:"name"`
+
+	// The requested change
+	Type UsageSpecType `json:"type"`
+
+	// True if the privilege granted by the database owner to the role
+	// matches the requested change
+	Applied bool `json:"applied"`
+
+	// Message is the reconciliation message of this entry
+	// +optional
+	Message string `json:"message,omitempty"`
 }
 
 // DatabaseObjectStatus is the status of the managed database objects
@@ -401,8 +492,4 @@ type DatabaseList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Database `json:"items"`
-}
-
-func init() {
-	SchemeBuilder.Register(&Database{}, &DatabaseList{})
 }

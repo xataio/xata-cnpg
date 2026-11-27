@@ -16,11 +16,23 @@ import (
 // part for now.
 type PoolerMonitoringConfigurationApplyConfiguration struct {
 	// Enable or disable the `PodMonitor`
+	//
+	// Deprecated: This feature will be removed in an upcoming release. If
+	// you need this functionality, you can create a PodMonitor manually.
 	EnablePodMonitor *bool `json:"enablePodMonitor,omitempty"`
 	// The list of metric relabelings for the `PodMonitor`. Applied to samples before ingestion.
+	//
+	// Deprecated: This feature will be removed in an upcoming release. If
+	// you need this functionality, you can create a PodMonitor manually.
 	PodMonitorMetricRelabelConfigs []monitoringv1.RelabelConfig `json:"podMonitorMetricRelabelings,omitempty"`
 	// The list of relabelings for the `PodMonitor`. Applied to samples before scraping.
+	//
+	// Deprecated: This feature will be removed in an upcoming release. If
+	// you need this functionality, you can create a PodMonitor manually.
 	PodMonitorRelabelConfigs []monitoringv1.RelabelConfig `json:"podMonitorRelabelings,omitempty"`
+	// Configure TLS communication for the metrics endpoint.
+	// Changing tls.enabled option will force a rollout of all instances.
+	TLSConfig *PoolerMonitoringTLSConfigurationApplyConfiguration `json:"tls,omitempty"`
 }
 
 // PoolerMonitoringConfigurationApplyConfiguration constructs a declarative configuration of the PoolerMonitoringConfiguration type for use with
@@ -54,5 +66,13 @@ func (b *PoolerMonitoringConfigurationApplyConfiguration) WithPodMonitorRelabelC
 	for i := range values {
 		b.PodMonitorRelabelConfigs = append(b.PodMonitorRelabelConfigs, values[i])
 	}
+	return b
+}
+
+// WithTLSConfig sets the TLSConfig field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the TLSConfig field is set to the value of the last call.
+func (b *PoolerMonitoringConfigurationApplyConfiguration) WithTLSConfig(value *PoolerMonitoringTLSConfigurationApplyConfiguration) *PoolerMonitoringConfigurationApplyConfiguration {
+	b.TLSConfig = value
 	return b
 }

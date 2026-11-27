@@ -100,6 +100,16 @@ recovery. There are three main options:
 3. **Hybrid Approach**: Combine both streaming replication and WAL archive
    methods. PostgreSQL can manage and switch between these two approaches as
    needed to ensure data consistency and availability.
+   See [Continuous backup integration](replication.md#continuous-backup-integration) for when a replica goes back to streaming.
+
+:::warning[Cascading standbys and restore from WAL archive]
+A PostgreSQL bug present since version 9.3 could permanently prevent a
+*cascading* standby from resuming WAL shipping replication
+(via `restore_command`), failing with an error such as
+`requested starting point ... is ahead of the WAL flush position of this server`
+and never retrying on its own.
+The bug is fixed in PostgreSQL 19.0, 17.11, 16.15, 15.19, and 14.24.
+:::
 
 ### Defining an External Cluster
 
@@ -120,7 +130,8 @@ When configuring the external cluster, you have the following options:
       designated primary instance, initiating a WAL receiver process to connect
       to the source cluster and receive data.
 
-You still have access to the **`barmanObjectStore` section**, although deprecated:
+You still have access to the **`barmanObjectStore` section**, although
+deprecated and removed starting from CloudNativePG 1.32.0:
 
 - Enables use of the WAL archive, with CloudNativePG automatically setting
   the `restore_command` in the designated primary instance.
@@ -268,10 +279,11 @@ involving:
 
 These processes are described in the next sections.
 
-!!! Important
+:::info[Important]
     Before you proceed, ensure you review the ["About PostgreSQL Roles" section](#about-postgresql-roles)
     above and use identical role definitions, including secrets, in all
     `Cluster` objects participating in the distributed topology.
+:::
 
 ### Demoting a Primary to a Replica Cluster
 
@@ -324,9 +336,10 @@ kubectl get cluster cluster-eu-south \
 You can obtain the `demotionToken` using the `cnpg` plugin by checking the
 cluster's status. The token is listed under the `Demotion token` section.
 
-!!! Note
+:::note
     The `demotionToken` obtained from `cluster-eu-south` will serve as the
     `promotionToken` for `cluster-eu-central`.
+:::
 
 You can verify the role change using the `cnpg` plugin, checking the status of
 the cluster:
@@ -356,10 +369,11 @@ replica:
   source: cluster-eu-south
 ```
 
-!!! Warning
+:::warning
     It is crucial to apply the changes to the `primary` and `promotionToken`
     fields simultaneously. If the promotion token is omitted, a failover will be
     triggered, necessitating a rebuild of the former primary.
+:::
 
 After making these adjustments, CloudNativePG will initiate the promotion of
 the replica cluster to a primary cluster. Initially, CloudNativePG will wait
@@ -386,10 +400,11 @@ clusters.
 
 ## Standalone Replica Clusters
 
-!!! Important
+:::info[Important]
     Standalone Replica Clusters were previously known as Replica Clusters
     before the introduction of the Distributed Topology strategy in CloudNativePG
     1.24.
+:::
 
 In CloudNativePG, a Standalone Replica Cluster is a PostgreSQL cluster in
 continuous recovery with the following configurations:
@@ -402,15 +417,18 @@ When `.spec.replica.enabled` is set to `false`, the replica cluster exits
 continuous recovery mode and becomes a primary cluster, completely detached
 from the original source.
 
-!!! Warning
-    Disabling replication is an **irreversible** operation. Once replication is
-    disabled and the designated primary is promoted to primary, the replica cluster
-    and the source cluster become two independent clusters definitively.
+:::warning
+Disabling replication is an **irreversible** operation. Once replication is
+disabled and the designated primary instance in the replica cluster is promoted
+to primary, the replica cluster and the source cluster become two independent
+clusters definitively.
+:::
 
-!!! Important
+:::info[Important]
     Standalone replica clusters are suitable for several use cases, primarily
     involving read-only workloads. If you are planning to setup a disaster
     recovery solution, look into "Distributed Topology" above.
+:::
 
 ### Main Differences with Distributed Topology
 
@@ -536,11 +554,12 @@ a backup of the source cluster has been created already.
       key: password
 ```
 
-!!! Note
+:::note
     To use streaming replication between the source cluster and the replica
     cluster, we need to make sure there is network connectivity between the two
     clusters, and that all the necessary secrets which hold passwords or
     certificates are properly created in advance.
+:::
 
 ### Example using a Volume Snapshot
 
@@ -568,7 +587,7 @@ See ["About PostgreSQL Roles"](#about-postgresql-roles) for more details.
 ## Delayed replicas
 
 CloudNativePG supports the creation of **delayed replicas** through the
-[`.spec.replica.minApplyDelay` option](cloudnative-pg.v1.md#postgresql-cnpg-io-v1-ReplicaClusterConfiguration),
+[`.spec.replica.minApplyDelay` option](cloudnative-pg.v1.md#replicaclusterconfiguration),
 leveraging PostgreSQL's
 [`recovery_min_apply_delay`](https://www.postgresql.org/docs/current/runtime-config-replication.html#GUC-RECOVERY-MIN-APPLY-DELAY).
 
@@ -616,17 +635,19 @@ The main use cases of delayed replicas can be summarized into:
    buffer that provides an opportunity to intervene and prevent the propagation of
    undesirable changes.
 
-!!! Warning
+:::warning
     The `minApplyDelay` option of delayed replicas cannot be used in
     conjunction with `promotionToken`.
+:::
 
 By integrating delayed replicas into your replication strategy, you can enhance
 the resilience and data protection capabilities of your PostgreSQL environment.
 Adjust the delay duration based on your specific needs and the criticality of
 your data.
 
-!!! Important
+:::info[Important]
     Always measure your goals. Depending on your environment, it might be more
     efficient to rely on volume snapshot-based recovery for faster outcomes.
     Evaluate and choose the approach that best aligns with your unique requirements
     and infrastructure.
+:::

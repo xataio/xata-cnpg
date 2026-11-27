@@ -52,7 +52,7 @@ now = timestamp()
 distros = {
   distroless = {
     # renovate: datasource=docker
-    baseImage = "gcr.io/distroless/static-debian12:nonroot@sha256:e8a4044e0b4ae4257efa45fc026c0bc30ad320d43bd4c1a7d5271bd241e386d0",
+    baseImage = "gcr.io/distroless/static-debian13:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5",
     tag = ""
   }
 }
@@ -80,7 +80,7 @@ target "default" {
   }
 
   output = [
-    "type=image,registry.insecure=${insecure}",
+    "type=image,registry.insecure=${insecure},oci-mediatypes=true,oci-artifact=true",
   ]
 
   attest = [

@@ -8,7 +8,7 @@ package v1
 // CertificatesStatus contains configuration certificates and related expiration dates.
 type CertificatesStatusApplyConfiguration struct {
 	// Needed configurations to handle server certificates, initialized with default values, if needed.
-	CertificatesConfigurationApplyConfiguration `json:",inline"`
+	CertificatesConfigurationApplyConfiguration `json:""`
 	// Expiration dates for all certificates.
 	Expirations map[string]string `json:"expirations,omitempty"`
 }

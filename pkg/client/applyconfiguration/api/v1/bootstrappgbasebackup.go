@@ -23,6 +23,19 @@ type BootstrapPgBaseBackupApplyConfiguration struct {
 	// owner of the user database. If empty a new secret will be
 	// created from scratch
 	Secret *corev1.LocalObjectReferenceApplyConfiguration `json:"secret,omitempty"`
+	// List of custom options to pass to the `pg_basebackup` command.
+	//
+	// IMPORTANT: Use with caution. The operator rejects the options it relies on,
+	// as listed in the bootstrap documentation, but it does not validate the
+	// others, and some of them may still interfere with its intended
+	// functionality or design.
+	// You are responsible for ensuring that the provided options are compatible
+	// with your environment and PostgreSQL version.
+	//
+	AdditionalArgs []string `json:"additionalArgs,omitempty"`
+	// Maps each tablespace declared in `spec.tablespaces` to its location
+	// in the source instance.
+	TablespaceMapping []TablespaceMappingEntryApplyConfiguration `json:"tablespaceMapping,omitempty"`
 }
 
 // BootstrapPgBaseBackupApplyConfiguration constructs a declarative configuration of the BootstrapPgBaseBackup type for use with
@@ -60,5 +73,28 @@ func (b *BootstrapPgBaseBackupApplyConfiguration) WithOwner(value string) *Boots
 // If called multiple times, the Secret field is set to the value of the last call.
 func (b *BootstrapPgBaseBackupApplyConfiguration) WithSecret(value *corev1.LocalObjectReferenceApplyConfiguration) *BootstrapPgBaseBackupApplyConfiguration {
 	b.Secret = value
+	return b
+}
+
+// WithAdditionalArgs adds the given value to the AdditionalArgs field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the AdditionalArgs field.
+func (b *BootstrapPgBaseBackupApplyConfiguration) WithAdditionalArgs(values ...string) *BootstrapPgBaseBackupApplyConfiguration {
+	for i := range values {
+		b.AdditionalArgs = append(b.AdditionalArgs, values[i])
+	}
+	return b
+}
+
+// WithTablespaceMapping adds the given value to the TablespaceMapping field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the TablespaceMapping field.
+func (b *BootstrapPgBaseBackupApplyConfiguration) WithTablespaceMapping(values ...*TablespaceMappingEntryApplyConfiguration) *BootstrapPgBaseBackupApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithTablespaceMapping")
+		}
+		b.TablespaceMapping = append(b.TablespaceMapping, *values[i])
+	}
 	return b
 }

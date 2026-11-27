@@ -24,20 +24,28 @@ type RoleConfigurationApplyConfiguration struct {
 	Comment *string `json:"comment,omitempty"`
 	// Ensure the role is `present` or `absent` - defaults to "present"
 	Ensure *apiv1.EnsureOption `json:"ensure,omitempty"`
-	// Secret containing the password of the role (if present)
-	// If null, the password will be ignored unless DisablePassword is set
+	// Secret containing the password of the role (if present).
+	// If null, the password will be ignored unless DisablePassword is set.
+	// When set, the secret must follow the `kubernetes.io/basic-auth` format
+	// and contain both a `username` and a `password` field.
 	PasswordSecret *corev1.LocalObjectReferenceApplyConfiguration `json:"passwordSecret,omitempty"`
 	// If the role can log in, this specifies how many concurrent
 	// connections the role can make. `-1` (the default) means no limit.
 	ConnectionLimit *int64 `json:"connectionLimit,omitempty"`
 	// Date and time after which the role's password is no longer valid.
 	// When omitted, the password will never expire (default).
+	// On a `DatabaseRole` whose password the operator generates with a
+	// `password.duration`, this is controlled by the operator instead: the role
+	// is valid until the generated password expires, and setting `validUntil`
+	// explicitly is rejected.
 	ValidUntil *metav1.Time `json:"validUntil,omitempty"`
 	// List of one or more existing roles to which this role will be
 	// immediately added as a new member. Default empty.
+	// Changes to the list are applied to an existing role through
+	// `GRANT` and `REVOKE` statements, not only at role creation.
 	InRoles []string `json:"inRoles,omitempty"`
 	// Whether a role "inherits" the privileges of roles it is a member of.
-	// Defaults is `true`.
+	// Default is `true`.
 	Inherit *bool `json:"inherit,omitempty"`
 	// DisablePassword indicates that a role's password should be set to NULL in Postgres
 	DisablePassword *bool `json:"disablePassword,omitempty"`

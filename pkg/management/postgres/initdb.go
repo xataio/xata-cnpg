@@ -31,6 +31,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/cloudnative-pg/cnpg-i/pkg/postgres"
@@ -50,6 +51,7 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/constants"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/logicalimport"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres/pool"
+	"github.com/xataio/xata-cnpg/pkg/specs"
 	"github.com/xataio/xata-cnpg/pkg/system"
 )
 
@@ -125,6 +127,34 @@ type InitInfo struct {
 
 	// TablespaceMapFile holds the content returned by pg_stop_backup. Needed for a hot backup restore
 	TablespaceMapFile []byte
+
+	// AllowPublicConnectToPostgres, when true, doesn't revoke the CONNECT
+	// privilege from PUBLIC on the `postgres` database
+	AllowPublicConnectToPostgres bool
+}
+
+// IsBootstrapCompleted reports whether the bootstrap already completed, that
+// is, whether the pending marker is missing or false. The operator attaches
+// the bootstrap init container only to a Pod whose PGDATA PVC is not ready,
+// marking the Pod as pending, and removes the mark once it succeeds, but
+// Kubernetes runs the container again whenever the Pod is recreated as it was,
+// as a backup tool does when it restores the Pod together with its PVCs: the
+// volumes then already hold the instance and must be left untouched.
+//
+// It returns an error when the pending marker holds an unexpected value,
+// as we cannot safely decide whether bootstrapping is needed.
+func IsBootstrapCompleted() (bool, error) {
+	rawValue := os.Getenv(specs.BootstrapPendingEnvName)
+	if rawValue == "" {
+		return true, nil
+	}
+
+	pending, err := strconv.ParseBool(rawValue)
+	if err != nil {
+		return false, fmt.Errorf("invalid %s value %q: %w", specs.BootstrapPendingEnvName, rawValue, err)
+	}
+
+	return !pending, nil
 }
 
 // EnsureTargetDirectoriesDoNotExist ensures that the target data and WAL directories do not exist.
@@ -299,7 +329,7 @@ func (info InitInfo) GetInstance(cluster *apiv1.Cluster) *Instance {
 	postgresInstance := NewInstance()
 	postgresInstance.PgData = info.PgData
 	postgresInstance.StartupOptions = []string{"listen_addresses='127.0.0.1'"}
-	postgresInstance.Cluster = cluster
+	postgresInstance.SetCluster(cluster)
 	return postgresInstance
 }
 
@@ -373,11 +403,20 @@ func (info InitInfo) ConfigureNewInstance(instance connectionProvider) error {
 	if existsDB {
 		return nil
 	}
+
+	// The metrics exporter role is missing after a recovery or a
+	// pg_basebackup from a source that doesn't have it
+	if err = EnsureMetricsExporterRole(context.Background(), dbSuperUser); err != nil {
+		return fmt.Errorf("while setting up the metrics exporter role: %w", err)
+	}
 	_, err = dbSuperUser.Exec(fmt.Sprintf("CREATE DATABASE %v OWNER %v",
 		pgx.Identifier{info.ApplicationDatabase}.Sanitize(),
 		pgx.Identifier{info.ApplicationUser}.Sanitize()))
 	if err != nil {
 		return fmt.Errorf("could not create ApplicationDatabase: %w", err)
+	}
+	if err = SetupNewDatabase(context.Background(), dbSuperUser, info.ApplicationDatabase); err != nil {
+		return err
 	}
 	appDB, err := instance.ConnectionPool().Connection(info.ApplicationDatabase)
 	if err != nil {
@@ -394,6 +433,54 @@ func (info InitInfo) ConfigureNewInstance(instance connectionProvider) error {
 	}
 
 	return nil
+}
+
+// restrictInstanceInitialDatabases restricts the databases created by initdb
+// in the given instance
+func restrictInstanceInitialDatabases(
+	ctx context.Context,
+	instance *Instance,
+	allowPublicConnectToPostgres bool,
+) error {
+	dbSuperUser, err := instance.GetSuperUserDB()
+	if err != nil {
+		return fmt.Errorf("while getting superuser database: %w", err)
+	}
+
+	return restrictInitialDatabases(ctx, dbSuperUser, allowPublicConnectToPostgres)
+}
+
+// restrictInitialDatabases creates the metrics exporter role and revokes
+// CONNECT on the `postgres` and `template1` databases from PUBLIC. The
+// `postgres` database is left alone when allowPublicConnectToPostgres is true.
+//
+// There is no explicit grant to the exporter here: SetupMetricsExporterRole
+// grants it on these databases when it creates the role, which always
+// happens on a new data directory. Creating the role and revoking PUBLIC in
+// the same transaction means that the exporter is never left without access.
+func restrictInitialDatabases(ctx context.Context, db *sql.DB, allowPublicConnectToPostgres bool) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("while starting a transaction to restrict the initial databases: %w", err)
+	}
+	defer func() {
+		// This is a no-op when the transaction is committed
+		_ = tx.Rollback()
+	}()
+
+	if err := SetupMetricsExporterRole(ctx, tx); err != nil {
+		return fmt.Errorf("while setting up the metrics exporter role: %w", err)
+	}
+	for _, database := range metricsExporterDefaultDatabases {
+		if allowPublicConnectToPostgres && database == "postgres" {
+			continue
+		}
+		if err := RestrictDatabaseConnect(ctx, tx, database); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (info InitInfo) executeSQLRefs(sqlUser *sql.DB, directory string) error {
@@ -436,29 +523,34 @@ func (info InitInfo) executeQueries(sqlUser *sql.DB, queries []string) error {
 		return nil
 	}
 
-	// User init scripts expect the standard "$user", public search_path; the
-	// connection pool pins search_path to pg_catalog at startup (CWE-426), so
-	// we bracket each query. The dedicated *sql.Conn keeps SET and the query
-	// on the same physical connection.
+	// The pool pins search_path to pg_catalog. User-authored init scripts
+	// expect the standard `"$user", public` resolution, so we set that
+	// once at the start of the batch on a dedicated *sql.Conn and reset
+	// at the end. Any user SET inside the script persists across
+	// statements within the same batch, matching PostgreSQL's default
+	// session semantics.
 	ctx := context.Background()
 	conn, err := sqlUser.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("acquiring dedicated connection for init queries: %w", err)
 	}
 	defer func() {
+		// Reset in a defer so the pin is restored even if a query fails;
+		// pooled pgx connections keep session GUCs across reuse.
+		if _, resetErr := conn.ExecContext(ctx, `RESET search_path`); resetErr != nil {
+			log.Error(resetErr, "while resetting search_path after init queries")
+		}
 		_ = conn.Close()
 	}()
 
+	if _, err := conn.ExecContext(ctx, `SET search_path TO "$user", public`); err != nil {
+		return fmt.Errorf("setting search_path before init queries: %w", err)
+	}
+
 	for _, sqlQuery := range queries {
 		log.Debug("Executing query", "sqlQuery", sqlQuery)
-		if _, err := conn.ExecContext(ctx, `SET search_path TO "$user", public`); err != nil {
-			return fmt.Errorf("setting search_path before init query: %w", err)
-		}
 		if _, err := conn.ExecContext(ctx, sqlQuery); err != nil {
 			return err
-		}
-		if _, err := conn.ExecContext(ctx, `RESET search_path`); err != nil {
-			return fmt.Errorf("resetting search_path after init query: %w", err)
 		}
 	}
 
@@ -531,7 +623,13 @@ func (info InitInfo) Bootstrap(ctx context.Context) error {
 
 	// Configure the instance and run the logical import process
 	if err := instance.WithActiveInstance(func() error {
-		err = info.ConfigureNewInstance(instance)
+		// Restrict the databases created by initdb before running any user's
+		// SQL, which is then able to change it.
+		if err := restrictInstanceInitialDatabases(ctx, instance, info.AllowPublicConnectToPostgres); err != nil {
+			return err
+		}
+
+		err := info.ConfigureNewInstance(instance)
 		if err != nil {
 			return fmt.Errorf("while configuring new instance: %w", err)
 		}

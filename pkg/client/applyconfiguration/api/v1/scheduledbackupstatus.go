@@ -17,6 +17,8 @@ type ScheduledBackupStatusApplyConfiguration struct {
 	LastScheduleTime *metav1.Time `json:"lastScheduleTime,omitempty"`
 	// Next time we will run a backup
 	NextScheduleTime *metav1.Time `json:"nextScheduleTime,omitempty"`
+	// Error is the latest admission validation error
+	Error *string `json:"error,omitempty"`
 }
 
 // ScheduledBackupStatusApplyConfiguration constructs a declarative configuration of the ScheduledBackupStatus type for use with
@@ -46,5 +48,13 @@ func (b *ScheduledBackupStatusApplyConfiguration) WithLastScheduleTime(value met
 // If called multiple times, the NextScheduleTime field is set to the value of the last call.
 func (b *ScheduledBackupStatusApplyConfiguration) WithNextScheduleTime(value metav1.Time) *ScheduledBackupStatusApplyConfiguration {
 	b.NextScheduleTime = &value
+	return b
+}
+
+// WithError sets the Error field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Error field is set to the value of the last call.
+func (b *ScheduledBackupStatusApplyConfiguration) WithError(value string) *ScheduledBackupStatusApplyConfiguration {
+	b.Error = &value
 	return b
 }

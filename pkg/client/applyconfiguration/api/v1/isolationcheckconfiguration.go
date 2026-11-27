@@ -5,10 +5,12 @@ package v1
 // IsolationCheckConfigurationApplyConfiguration represents a declarative configuration of the IsolationCheckConfiguration type for use
 // with apply.
 //
-// IsolationCheckConfiguration contains the configuration for the isolation check
-// functionality in the liveness probe
+// IsolationCheckConfiguration contains the configuration for the primary
+// isolation check
 type IsolationCheckConfigurationApplyConfiguration struct {
-	// Whether primary isolation checking is enabled for the liveness probe
+	// Whether primary isolation checking is enabled. When disabled, an
+	// isolated primary is not stopped, but a primary that reaches a peer
+	// reporting a different target primary still is.
 	Enabled *bool `json:"enabled,omitempty"`
 	// Timeout in milliseconds for requests during the primary isolation check
 	RequestTimeout *int `json:"requestTimeout,omitempty"`

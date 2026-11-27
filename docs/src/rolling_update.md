@@ -47,8 +47,8 @@ updated.
 
 When `primaryUpdateStrategy` is set to `unsupervised`, the rolling update
 process is managed by Kubernetes and is entirely automated. Once the replicas
-have been upgraded, the selected `primaryUpdateMethod` operation will initiate
-on the primary. This is the default behavior.
+have been upgraded, the selected `primaryUpdateMethod` operation will be executed
+on the primary. Unsupervised update is the default behavior.
 
 The `primaryUpdateMethod` option accepts one of the following values:
 
@@ -60,7 +60,7 @@ The `primaryUpdateMethod` option accepts one of the following values:
   most aligned replica as the new target primary, and shutting down the former
   primary pod.
 
-!!! Warning
+:::warning
     When `primaryUpdateMethod` is set to `switchover`, you cannot change the
     image name and PostgreSQL configuration parameters at the same time. The
     operator will reject such updates with a validation error. If you need to
@@ -70,14 +70,15 @@ The `primaryUpdateMethod` option accepts one of the following values:
     exists because configuration changes tied to a new image version could cause
     PostgreSQL to fail if applied to pods still running the old image during the
     switchover process.
+:::
 
 There's no one-size-fits-all configuration for the update method, as that
 depends on several factors like the actual workload of your database, the
-requirements in terms of [RPO](before_you_start.md#rpo) and
-[RTO](before_you_start.md#rto), whether your PostgreSQL architecture is shared
+requirements in terms of [RPO](before_you_start.md#postgresql-terminology) and
+[RTO](before_you_start.md#postgresql-terminology), whether your PostgreSQL architecture is shared
 or shared nothing, and so on.
 
-Indeed, being PostgreSQL a primary/standby architecture database management
+Indeed, since PostgreSQL is a primary/standby architecture database management
 system, the update process inevitably generates a downtime for your
 applications. One important aspect to consider for your context is the time it
 takes for your pod to download the new PostgreSQL container image, as that

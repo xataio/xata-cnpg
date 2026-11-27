@@ -8,12 +8,14 @@ package v1
 // LivenessProbe is the configuration of the liveness probe
 type LivenessProbeApplyConfiguration struct {
 	// Probe is the standard probe configuration
-	ProbeApplyConfiguration `json:",inline"`
-	// Configure the feature that extends the liveness probe for a primary
-	// instance. In addition to the basic checks, this verifies whether the
-	// primary is isolated from the Kubernetes API server and from its
-	// replicas, ensuring that it can be safely shut down if network
-	// partition or API unavailability is detected. Enabled by default.
+	ProbeApplyConfiguration `json:""`
+	// Configure the primary isolation check, which stops a primary whose
+	// primary lease has gone past its renew deadline without a successful
+	// renewal, when at least one other instance is unreachable or names a
+	// different target primary, so that it stops accepting writes it can no
+	// longer safely serve. Its reaction time is set by the `primaryLease`
+	// timings and by `requestTimeout`, not by the liveness probe settings this
+	// stanza lives under. Enabled by default.
 	IsolationCheck *IsolationCheckConfigurationApplyConfiguration `json:"isolationCheck,omitempty"`
 }
 

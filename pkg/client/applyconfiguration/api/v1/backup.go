@@ -3,8 +3,11 @@
 package v1
 
 import (
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	internal "github.com/xataio/xata-cnpg/pkg/client/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -13,7 +16,7 @@ import (
 //
 // A Backup resource is a request for a PostgreSQL backup by the user.
 type BackupApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	// Specification of the desired behavior of the backup.
 	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
@@ -33,6 +36,47 @@ func Backup(name, namespace string) *BackupApplyConfiguration {
 	b.WithKind("Backup")
 	b.WithAPIVersion("postgresql.cnpg.io/v1")
 	return b
+}
+
+// ExtractBackupFrom extracts the applied configuration owned by fieldManager from
+// backup for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// backup must be a unmodified Backup API object that was retrieved from the Kubernetes API.
+// ExtractBackupFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractBackupFrom(backup *apiv1.Backup, fieldManager string, subresource string) (*BackupApplyConfiguration, error) {
+	b := &BackupApplyConfiguration{}
+	err := managedfields.ExtractInto(backup, internal.Parser().Type("com.github.xataio.xata-cnpg.api.v1.Backup"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(backup.Name)
+	b.WithNamespace(backup.Namespace)
+
+	b.WithKind("Backup")
+	b.WithAPIVersion("postgresql.cnpg.io/v1")
+	return b, nil
+}
+
+// ExtractBackup extracts the applied configuration owned by fieldManager from
+// backup. If no managedFields are found in backup for fieldManager, a
+// BackupApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// backup must be a unmodified Backup API object that was retrieved from the Kubernetes API.
+// ExtractBackup provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractBackup(backup *apiv1.Backup, fieldManager string) (*BackupApplyConfiguration, error) {
+	return ExtractBackupFrom(backup, fieldManager, "")
+}
+
+// ExtractBackupStatus extracts the applied configuration owned by fieldManager from
+// backup for the status subresource.
+func ExtractBackupStatus(backup *apiv1.Backup, fieldManager string) (*BackupApplyConfiguration, error) {
+	return ExtractBackupFrom(backup, fieldManager, "status")
 }
 
 func (b BackupApplyConfiguration) IsApplyConfiguration() {}

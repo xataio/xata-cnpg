@@ -3,8 +3,11 @@
 package v1
 
 import (
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	internal "github.com/xataio/xata-cnpg/pkg/client/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -13,7 +16,7 @@ import (
 //
 // ImageCatalog is the Schema for the imagecatalogs API
 type ImageCatalogApplyConfiguration struct {
-	metav1.TypeMetaApplyConfiguration    `json:",inline"`
+	metav1.TypeMetaApplyConfiguration    `json:""`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	// Specification of the desired behavior of the ImageCatalog.
 	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
@@ -29,6 +32,41 @@ func ImageCatalog(name, namespace string) *ImageCatalogApplyConfiguration {
 	b.WithKind("ImageCatalog")
 	b.WithAPIVersion("postgresql.cnpg.io/v1")
 	return b
+}
+
+// ExtractImageCatalogFrom extracts the applied configuration owned by fieldManager from
+// imageCatalog for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// imageCatalog must be a unmodified ImageCatalog API object that was retrieved from the Kubernetes API.
+// ExtractImageCatalogFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractImageCatalogFrom(imageCatalog *apiv1.ImageCatalog, fieldManager string, subresource string) (*ImageCatalogApplyConfiguration, error) {
+	b := &ImageCatalogApplyConfiguration{}
+	err := managedfields.ExtractInto(imageCatalog, internal.Parser().Type("com.github.xataio.xata-cnpg.api.v1.ImageCatalog"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(imageCatalog.Name)
+	b.WithNamespace(imageCatalog.Namespace)
+
+	b.WithKind("ImageCatalog")
+	b.WithAPIVersion("postgresql.cnpg.io/v1")
+	return b, nil
+}
+
+// ExtractImageCatalog extracts the applied configuration owned by fieldManager from
+// imageCatalog. If no managedFields are found in imageCatalog for fieldManager, a
+// ImageCatalogApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// imageCatalog must be a unmodified ImageCatalog API object that was retrieved from the Kubernetes API.
+// ExtractImageCatalog provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractImageCatalog(imageCatalog *apiv1.ImageCatalog, fieldManager string) (*ImageCatalogApplyConfiguration, error) {
+	return ExtractImageCatalogFrom(imageCatalog, fieldManager, "")
 }
 
 func (b ImageCatalogApplyConfiguration) IsApplyConfiguration() {}

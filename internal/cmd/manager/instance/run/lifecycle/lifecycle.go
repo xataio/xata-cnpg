@@ -98,14 +98,8 @@ func (i *PostgresLifecycle) Start(ctx context.Context) error {
 
 	i.instance.SetWaitingForPGData(false)
 
-	// Pre-checks that need PGDATA
-	contextLogger.Info("Checking for free disk space for WALs before starting PostgreSQL")
-	hasDiskSpace, err := i.instance.CheckHasDiskSpaceForWAL(ctx)
-	if err != nil {
-		contextLogger.Warning("Error while checking if there is enough disk space for WALs, skipping", "err", err)
-	} else if !hasDiskSpace {
-		return postgres.ErrNoFreeWALSpace
-	}
+	// The WAL disk space is checked by runPostgresAndWait, after the fencing
+	// check, so that a fenced instance can start even when the WAL disk is full.
 
 	if err := instancestorage.ReconcileWalDirectory(ctx); err != nil {
 		contextLogger.Error(err, "unable to move `pg_wal` directory to the attached volume")
@@ -179,8 +173,15 @@ func (i *PostgresLifecycle) Start(ctx context.Context) error {
 				// resulting in a data corruption.
 				contextLogger.Info("Received termination signal",
 					"signal", sig,
-					"smartShutdownTimeout", i.instance.SmartStopDelay,
+					"smartShutdownTimeout", i.instance.GetClusterOrDefault().GetSmartShutdownTimeout(),
 				)
+				// Another attempt would wait out the same wedged postmaster:
+				// leave it to the kubelet.
+				if i.instance.IsImmediateShutdownUnresponsive() {
+					contextLogger.Info(
+						"PostgreSQL was already found unresponsive to an immediate shutdown, exiting without retrying")
+					return nil
+				}
 				if err := i.instance.TryShuttingDownSmartFast(ctx); err != nil {
 					contextLogger.Error(err, "error while shutting down instance, proceeding")
 				}

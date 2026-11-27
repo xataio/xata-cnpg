@@ -32,6 +32,7 @@ type ReplicationSlotsHAConfigurationApplyConfiguration struct {
 	// Requires one of the following conditions:
 	// - PostgreSQL version 17 or later
 	// - PostgreSQL version < 17 with pg_failover_slots extension enabled
+	//
 	SynchronizeLogicalDecoding *bool `json:"synchronizeLogicalDecoding,omitempty"`
 }
 

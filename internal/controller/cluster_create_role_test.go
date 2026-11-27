@@ -57,6 +57,7 @@ var _ = Describe("createOrPatchRole", func() {
 			WithScheme(schemeBuilder.BuildWithAllKnownScheme()).
 			WithObjects(objects...).
 			WithStatusSubresource(&apiv1.Backup{}).
+			WithIndex(&apiv1.DatabaseRole{}, databaseRoleClusterKey, databaseRoleClusterIndexFunc).
 			WithIndex(&apiv1.Backup{}, clusterNameField, func(obj client.Object) []string {
 				return []string{obj.(*apiv1.Backup).Spec.Cluster.Name}
 			}).

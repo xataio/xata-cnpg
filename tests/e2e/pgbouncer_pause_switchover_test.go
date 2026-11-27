@@ -28,6 +28,8 @@ import (
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	pgbouncerasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/pgbouncer"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
 	"github.com/xataio/xata-cnpg/tests/utils/yaml"
 
@@ -56,7 +58,7 @@ var _ = Describe("PGBouncer Pause During Switchover", Label(tests.LabelServiceCo
 			Expect(err).ToNot(HaveOccurred())
 			clusterName, err = yaml.GetResourceNameFromYAML(env.Scheme, clusterSampleFile)
 			Expect(err).ToNot(HaveOccurred())
-			AssertCreateCluster(namespace, clusterName, clusterSampleFile, env)
+			clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, clusterSampleFile)
 		})
 
 		It("pauses pooler during switchover and resumes after", func() {
@@ -64,11 +66,11 @@ var _ = Describe("PGBouncer Pause During Switchover", Label(tests.LabelServiceCo
 			Expect(err).ToNot(HaveOccurred())
 
 			By("creating a pooler with pauseDuringSwitchover enabled", func() {
-				createAndAssertPgBouncerPoolerIsSetUp(namespace, poolerSampleFile, 1)
+				pgbouncerasserts.AssertPgBouncerPoolerIsSetUp(env, namespace, poolerSampleFile, 1)
 			})
 
 			By("triggering a switchover", func() {
-				AssertSwitchover(namespace, clusterName, env)
+				clusterasserts.AssertSwitchover(env, testTimeouts, namespace, clusterName)
 			})
 
 			By("verifying the pooler resumes after switchover completion", func() {

@@ -28,5 +28,5 @@ import (
 
 func TestArchiver(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "WAL Archiver Suite")
+	RunSpecs(t, "Postgres Archiver test suite")
 }

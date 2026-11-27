@@ -11,10 +11,24 @@ on:
 permissions: read-all
 
 jobs:
+  # Expose whether a Snyk token is configured so the security job can gate
+  # on it. The secrets context is not available in a job-level 'if', so it
+  # is checked here and surfaced as a job output.
+  check-secret:
+    name: Check for Snyk token
+    runs-on: ubuntu-26.04
+    outputs:
+      has_token: ${{ steps.check.outputs.has_token }}
+    steps:
+      - id: check
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: echo "has_token=${{ env.SNYK_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
   security:
     if: ${{ github.repository_owner == 'xataio' }}
     name: Security scan
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       security-events: write
     steps:
@@ -40,6 +54,9 @@ jobs:
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          # snyk/snyk:golang bundles a fixed Go toolchain that can lag behind
+          # go.mod's toolchain requirement; let 'go list' fetch a newer one.
+          GOTOOLCHAIN: auto
         with:
           args: --sarif-file-output=snyk-test.sarif
 

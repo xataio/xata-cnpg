@@ -29,6 +29,8 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	metricsasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/metrics"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
 	"github.com/xataio/xata-cnpg/tests/utils/operator"
 	"github.com/xataio/xata-cnpg/tests/utils/run"
@@ -165,7 +167,7 @@ var _ = Describe("Config support", Serial, Ordered, Label(tests.LabelDisruptive,
 		namespace, err = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
 
-		AssertCreateCluster(namespace, clusterName, clusterWithInheritedLabelsFile, env)
+		clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, clusterWithInheritedLabelsFile)
 	})
 
 	It("verify label's and annotation's inheritance when global config-map changed", func() {
@@ -222,6 +224,13 @@ var _ = Describe("Config support", Serial, Ordered, Label(tests.LabelDisruptive,
 		cluster, err := clusterutils.Get(env.Ctx, env.Client, namespace, clusterName)
 		Expect(err).NotTo(HaveOccurred())
 
-		collectAndAssertDefaultMetricsPresentOnEachPod(namespace, clusterName, cluster.IsMetricsTLSEnabled(), false)
+		metricsasserts.CollectAndAssertDefaultMetricsPresentOnEachPod(
+			env,
+			testTimeouts,
+			namespace,
+			clusterName,
+			cluster.IsMetricsTLSEnabled(),
+			false,
+		)
 	})
 })

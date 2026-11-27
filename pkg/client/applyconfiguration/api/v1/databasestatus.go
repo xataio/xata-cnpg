@@ -22,6 +22,9 @@ type DatabaseStatusApplyConfiguration struct {
 	FDWs []DatabaseObjectStatusApplyConfiguration `json:"fdws,omitempty"`
 	// Servers is the status of the managed servers
 	Servers []DatabaseObjectStatusApplyConfiguration `json:"servers,omitempty"`
+	// Permissions is the status of the managed database permissions, with
+	// one entry per privilege and role (`all` is reported expanded)
+	Permissions []DatabasePermissionStatusApplyConfiguration `json:"permissions,omitempty"`
 }
 
 // DatabaseStatusApplyConfiguration constructs a declarative configuration of the DatabaseStatus type for use with
@@ -102,6 +105,19 @@ func (b *DatabaseStatusApplyConfiguration) WithServers(values ...*DatabaseObject
 			panic("nil value passed to WithServers")
 		}
 		b.Servers = append(b.Servers, *values[i])
+	}
+	return b
+}
+
+// WithPermissions adds the given value to the Permissions field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Permissions field.
+func (b *DatabaseStatusApplyConfiguration) WithPermissions(values ...*DatabasePermissionStatusApplyConfiguration) *DatabaseStatusApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithPermissions")
+		}
+		b.Permissions = append(b.Permissions, *values[i])
 	}
 	return b
 }

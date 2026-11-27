@@ -15,7 +15,7 @@ import (
 // BackupStatus defines the observed state of Backup
 type BackupStatusApplyConfiguration struct {
 	// The potential credentials for each cloud provider
-	api.BarmanCredentials `json:",inline"`
+	api.BarmanCredentials `json:""`
 	// The PostgreSQL major version that was running when the
 	// backup was taken.
 	MajorVersion *int `json:"majorVersion,omitempty"`
@@ -41,10 +41,14 @@ type BackupStatusApplyConfiguration struct {
 	BackupName *string `json:"backupName,omitempty"`
 	// The last backup status
 	Phase *apiv1.BackupPhase `json:"phase,omitempty"`
-	// When the backup was started
+	// When the backup execution was started by the backup tool
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
-	// When the backup was terminated
+	// When the backup execution was terminated by the backup tool
 	StoppedAt *metav1.Time `json:"stoppedAt,omitempty"`
+	// When the backup process was started by the operator
+	ReconciliationStartedAt *metav1.Time `json:"reconciliationStartedAt,omitempty"`
+	// When the reconciliation was terminated by the operator (either successfully or not)
+	ReconciliationTerminatedAt *metav1.Time `json:"reconciliationTerminatedAt,omitempty"`
 	// The starting WAL
 	BeginWal *string `json:"beginWal,omitempty"`
 	// The ending WAL
@@ -195,6 +199,22 @@ func (b *BackupStatusApplyConfiguration) WithStartedAt(value metav1.Time) *Backu
 // If called multiple times, the StoppedAt field is set to the value of the last call.
 func (b *BackupStatusApplyConfiguration) WithStoppedAt(value metav1.Time) *BackupStatusApplyConfiguration {
 	b.StoppedAt = &value
+	return b
+}
+
+// WithReconciliationStartedAt sets the ReconciliationStartedAt field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ReconciliationStartedAt field is set to the value of the last call.
+func (b *BackupStatusApplyConfiguration) WithReconciliationStartedAt(value metav1.Time) *BackupStatusApplyConfiguration {
+	b.ReconciliationStartedAt = &value
+	return b
+}
+
+// WithReconciliationTerminatedAt sets the ReconciliationTerminatedAt field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ReconciliationTerminatedAt field is set to the value of the last call.
+func (b *BackupStatusApplyConfiguration) WithReconciliationTerminatedAt(value metav1.Time) *BackupStatusApplyConfiguration {
+	b.ReconciliationTerminatedAt = &value
 	return b
 }
 

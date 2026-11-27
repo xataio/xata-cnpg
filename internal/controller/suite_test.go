@@ -42,6 +42,7 @@ import (
 
 	// +kubebuilder:scaffold:imports
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/configuration"
 	schemeBuilder "github.com/xataio/xata-cnpg/internal/scheme"
 	"github.com/xataio/xata-cnpg/pkg/certs"
 	"github.com/xataio/xata-cnpg/pkg/reconciler/persistentvolumeclaim"
@@ -78,6 +79,13 @@ func buildTestEnvironment() *testingEnvironment {
 		WithStatusSubresource(&apiv1.Cluster{}, &apiv1.Backup{}, &apiv1.Pooler{}, &corev1.Service{},
 			&corev1.ConfigMap{}, &corev1.Secret{}).
 		WithIndex(&batchv1.Job{}, jobOwnerKey, jobOwnerIndexFunc).
+		WithIndex(&apiv1.DatabaseRole{}, databaseRoleClusterKey, databaseRoleClusterIndexFunc).
+		WithIndex(&apiv1.Backup{}, ".spec.cluster.name", func(rawObj client.Object) []string {
+			return []string{rawObj.(*apiv1.Backup).Spec.Cluster.Name}
+		}).
+		WithIndex(&apiv1.Backup{}, backupPhase, func(rawObj client.Object) []string {
+			return []string{string(rawObj.(*apiv1.Backup).Status.Phase)}
+		}).
 		Build()
 	Expect(err).ToNot(HaveOccurred())
 
@@ -146,6 +154,12 @@ func newFakePooler(k8sClient client.Client, cluster *apiv1.Cluster) *apiv1.Poole
 			PgBouncer: &apiv1.PgBouncerSpec{
 				PoolMode: apiv1.PgBouncerPoolModeSession,
 			},
+		},
+		Status: apiv1.PoolerStatus{
+			// Pre-populate the resolved image so unit tests that call
+			// updateDeployment directly (bypassing updatePoolerStatus) start from
+			// the same precondition as a fully reconciled Pooler.
+			Image: configuration.Current.PgbouncerImageName,
 		},
 	}
 
@@ -317,7 +331,7 @@ func generateFakeClusterPods(
 	var pods []corev1.Pod
 	for idx < cluster.Spec.Instances {
 		idx++
-		pod, _ := specs.NewInstance(context.TODO(), *cluster, idx, true)
+		pod, _ := specs.NewInstance(context.TODO(), *cluster, idx)
 		cluster.SetInheritedDataAndOwnership(&pod.ObjectMeta)
 
 		err := c.Create(context.Background(), pod)
@@ -330,7 +344,7 @@ func generateFakeClusterPods(
 				Phase: corev1.PodRunning,
 				Conditions: []corev1.PodCondition{
 					{
-						Type:   corev1.ContainersReady,
+						Type:   corev1.PodReady,
 						Status: corev1.ConditionTrue,
 					},
 				},
@@ -354,7 +368,8 @@ func generateFakeInitDBJobs(c client.Client, cluster *apiv1.Cluster) []batchv1.J
 	var jobs []batchv1.Job
 	for idx < cluster.Spec.Instances {
 		idx++
-		job := specs.CreatePrimaryJobViaInitdb(*cluster, idx)
+		cmd := specs.BuildPrimaryBootstrapCommandViaInitdb(*cluster)
+		job := specs.CreatePrimaryJob(*cluster, idx, cmd.Role, cmd.Command, nil)
 		cluster.SetInheritedDataAndOwnership(&job.ObjectMeta)
 
 		err := c.Create(context.Background(), job)

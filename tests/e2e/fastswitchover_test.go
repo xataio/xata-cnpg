@@ -31,10 +31,14 @@ import (
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	replicationasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/replication"
+	"github.com/xataio/xata-cnpg/tests/internal/resources"
 	"github.com/xataio/xata-cnpg/tests/utils"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
 	"github.com/xataio/xata-cnpg/tests/utils/deployments"
 	"github.com/xataio/xata-cnpg/tests/utils/exec"
+	"github.com/xataio/xata-cnpg/tests/utils/objects"
 	"github.com/xataio/xata-cnpg/tests/utils/postgres"
 	"github.com/xataio/xata-cnpg/tests/utils/run"
 	"github.com/xataio/xata-cnpg/tests/utils/timeouts"
@@ -84,7 +88,7 @@ var _ = Describe("Fast switchover", Serial, Label(tests.LabelPerformance, tests.
 			namespace, err = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 			assertFastSwitchover(namespace, sampleFileWithReplicationSlots, clusterName, webTestFile, webTestJob)
-			AssertClusterHAReplicationSlots(namespace, clusterName)
+			replicationasserts.AssertClusterHAReplicationSlots(env, namespace, clusterName)
 		})
 	})
 })
@@ -107,10 +111,10 @@ func assertFastSwitchover(namespace, sampleFile, clusterName, webTestFile, webTe
 		}, timeout).Should(BeEquivalentTo(namespace))
 	})
 	By(fmt.Sprintf("creating a Cluster in the %v namespace", namespace), func() {
-		CreateResourceFromFile(namespace, sampleFile)
+		resources.CreateResourceFromFile(env, namespace, sampleFile)
 	})
 	By("having a Cluster with three instances ready", func() {
-		AssertClusterIsReady(namespace, clusterName, testTimeouts[timeouts.ClusterIsReady], env)
+		clusterasserts.AssertClusterIsReady(env, namespace, clusterName, testTimeouts[timeouts.ClusterIsReady])
 	})
 	// Node 1 should be the primary, so the -rw service should
 	// point there. We verify this.
@@ -186,7 +190,7 @@ func assertFastSwitchover(namespace, sampleFile, clusterName, webTestFile, webTe
 
 	By("setting the TargetPrimary to node2 to trigger a switchover", func() {
 		targetPrimary = clusterName + "-2"
-		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		err := retry.OnError(retry.DefaultBackoff, objects.IsRetryableConflictOrTransientError, func() error {
 			cluster, err := clusterutils.Get(env.Ctx, env.Client, namespace, clusterName)
 			Expect(err).ToNot(HaveOccurred())
 			cluster.Status.TargetPrimary = targetPrimary
@@ -195,10 +199,10 @@ func assertFastSwitchover(namespace, sampleFile, clusterName, webTestFile, webTe
 		Expect(err).ToNot(HaveOccurred())
 	})
 
-	var maxReattachTime int32 = 60
-	var maxSwitchoverTime int32 = 20
+	maxReattachTime := 60
+	maxSwitchoverTime := 20
 
-	AssertStandbysFollowPromotion(namespace, clusterName, maxReattachTime)
+	replicationasserts.AssertStandbysFollowPromotion(env, testTimeouts, namespace, clusterName, maxReattachTime)
 
-	AssertWritesResumedBeforeTimeout(namespace, clusterName, maxSwitchoverTime)
+	replicationasserts.AssertWritesResumedBeforeTimeout(env, namespace, clusterName, maxSwitchoverTime)
 }

@@ -46,38 +46,17 @@ func PatchConditionsWithOptimisticLock(
 		return nil
 	}
 
-	applyConditions := func(cluster *apiv1.Cluster) bool {
-		changed := false
-		for _, c := range conditions {
-			changed = changed || meta.SetStatusCondition(&cluster.Status.Conditions, c)
-		}
-		return changed
-	}
-
-	var currentCluster apiv1.Cluster
-	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		if err := c.Get(ctx, client.ObjectKeyFromObject(cluster), &currentCluster); err != nil {
-			return err
-		}
-
-		updatedCluster := currentCluster.DeepCopy()
-		if changed := applyConditions(updatedCluster); !changed {
-			return nil
-		}
-
-		if err := c.Status().Patch(
-			ctx,
-			updatedCluster,
-			client.MergeFromWithOptions(&currentCluster, client.MergeFromWithOptimisticLock{}),
-		); err != nil {
-			return err
-		}
-
-		cluster.Status.Conditions = updatedCluster.Status.Conditions
-
-		return nil
-	}); err != nil {
+	updatedCluster, err := PatchObjectWithOptimisticLock(ctx, c, cluster,
+		func(cluster *apiv1.Cluster) {
+			for _, condition := range conditions {
+				meta.SetStatusCondition(&cluster.Status.Conditions, condition)
+			}
+		})
+	if err != nil {
 		return fmt.Errorf("while patching conditions: %w", err)
+	}
+	if updatedCluster != nil {
+		cluster.Status.Conditions = updatedCluster.Status.Conditions
 	}
 
 	return nil

@@ -25,8 +25,12 @@ import (
 	"strings"
 
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	"github.com/xataio/xata-cnpg/tests/internal/resources"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
+	"github.com/xataio/xata-cnpg/tests/utils/environment"
 	"github.com/xataio/xata-cnpg/tests/utils/exec"
+	"github.com/xataio/xata-cnpg/tests/utils/objects"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -61,14 +65,18 @@ var _ = Describe("InitDB settings", Label(tests.LabelSmoke, tests.LabelBasic), f
 
 		By(fmt.Sprintf(
 			"querying the %s table in the %s database defined by postInit SQL",
-			tableName, dbName), func() {
-			stdout, _, err := exec.QueryInInstancePod(
+			tableName, dbName,
+		), func() {
+			stdout, _, err := exec.EventuallyExecQueryInInstancePod(
 				env.Ctx, env.Client, env.Interface, env.RestClientConfig,
 				exec.PodLocator{
 					Namespace: namespace,
 					PodName:   primary.Name,
 				}, dbName,
-				query)
+				query,
+				environment.RetryTimeout,
+				objects.PollingTime,
+			)
 			Expect(err).ToNot(HaveOccurred())
 			nRows, atoiErr := strconv.Atoi(strings.Trim(stdout, "\n"))
 			Expect(nRows, atoiErr).To(BeEquivalentTo(expectedCount))
@@ -96,14 +104,14 @@ var _ = Describe("InitDB settings", Label(tests.LabelSmoke, tests.LabelBasic), f
 			namespace, err = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 
-			CreateResourceFromFile(namespace, postInitSQLSecretRef)
-			CreateResourceFromFile(namespace, postInitSQLConfigMapRef)
-			CreateResourceFromFile(namespace, postInitApplicationSQLSecretRef)
-			CreateResourceFromFile(namespace, postInitApplicationSQLConfigMapRef)
-			CreateResourceFromFile(namespace, postInitTemplateSQLSecretRef)
-			CreateResourceFromFile(namespace, postInitTemplateSQLConfigMapRef)
+			resources.CreateResourceFromFile(env, namespace, postInitSQLSecretRef)
+			resources.CreateResourceFromFile(env, namespace, postInitSQLConfigMapRef)
+			resources.CreateResourceFromFile(env, namespace, postInitApplicationSQLSecretRef)
+			resources.CreateResourceFromFile(env, namespace, postInitApplicationSQLConfigMapRef)
+			resources.CreateResourceFromFile(env, namespace, postInitTemplateSQLSecretRef)
+			resources.CreateResourceFromFile(env, namespace, postInitTemplateSQLConfigMapRef)
 
-			AssertCreateCluster(namespace, clusterName, postInitSQLCluster, env)
+			clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, postInitSQLCluster)
 
 			// Data defined by postInitSQL, postInitApplicationSQL and postInitTemplateSQL
 			assertPostInitData(namespace, clusterName, "sql",
@@ -135,25 +143,29 @@ var _ = Describe("InitDB settings", Label(tests.LabelSmoke, tests.LabelBasic), f
 				primary, err := clusterutils.GetPrimary(env.Ctx, env.Client, namespace, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 
-				stdout, _, err := exec.QueryInInstancePod(
+				stdout, _, err := exec.EventuallyExecQueryInInstancePod(
 					env.Ctx, env.Client, env.Interface, env.RestClientConfig,
 					exec.PodLocator{
 						Namespace: namespace,
 						PodName:   primary.Name,
 					}, "postgres",
-					"select datcollate from pg_catalog.pg_database where datname='template0'")
+					"select datcollate from pg_catalog.pg_database where datname='template0'",
+					environment.RetryTimeout,
+					objects.PollingTime,
+				)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(stdout, err).To(Equal("C\n"))
 			})
 		})
 	})
 
-	// Regression test for CWE-426 search_path operator hijack
-	// (CNPG-PROBE-SEARCH-PATH-OPERATOR-HIJACK). A database-owner who plants
-	// shadow `>` and `=` operators in `public` and flips the database
-	// search_path must NOT be able to elevate to PostgreSQL superuser via
-	// the operator's introspection probes.
-	Context("search_path operator hijack negative", func() {
+	// Regression test for CWE-426 search_path operator hijack.
+	// postInitApplicationSQL plants a `=` (name, name) overload in
+	// public and flips ALTER DATABASE app SET search_path = public,
+	// pg_catalog. The operator's connection-level search_path pin
+	// must keep operator-issued queries on pg_catalog so the planted
+	// shadow is never invoked.
+	Context("search_path operator hijack regression", func() {
 		const (
 			clusterName    = "p-search-path-hijack"
 			clusterFixture = fixturesInitdbDir + "/cluster-postinit-search-path-hijack.yaml.template"
@@ -161,60 +173,64 @@ var _ = Describe("InitDB settings", Label(tests.LabelSmoke, tests.LabelBasic), f
 
 		var namespace string
 
-		It("does not elevate the application role to superuser through probe queries", func() {
+		It("does not invoke shadow operators planted in the application database", func() {
 			const namespacePrefix = "initdb-search-path-hijack"
 			var err error
 			namespace, err = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 
-			AssertCreateCluster(namespace, clusterName, clusterFixture, env)
+			clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, clusterFixture)
 
 			primary, err := clusterutils.GetPrimary(env.Ctx, env.Client, namespace, clusterName)
 			Expect(err).ToNot(HaveOccurred())
 
-			By("verifying the application role is not a superuser after bootstrap", func() {
-				stdout, _, err := exec.QueryInInstancePod(
+			// shadowCalls returns how many times the planted public.shadow_eq
+			// function has been invoked in the application database. The query
+			// is fully schema-qualified so it cannot itself trigger the shadow.
+			shadowCalls := func() string {
+				stdout, _, err := exec.EventuallyExecQueryInInstancePod(
 					env.Ctx, env.Client, env.Interface, env.RestClientConfig,
 					exec.PodLocator{
 						Namespace: namespace,
 						PodName:   primary.Name,
 					}, "app",
-					"SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = 'app'")
+					"SELECT pg_catalog.count(*)::text FROM public.shadow_calls",
+					RetryTimeout, PollingTime)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(strings.TrimSpace(stdout)).To(Equal("f"))
+				return strings.TrimSpace(stdout)
+			}
+
+			By("verifying operator-issued queries never invoke the planted shadow operator", func() {
+				// The operator's catalog probes against `app` resolve to name
+				// equality (e.g. `... WHERE extname = $1`, extname being `name`
+				// and $1 inferred as `name`). The connection-level pin keeps
+				// pg_catalog first, so they hit pg_catalog.=(name,name) and never
+				// reach the planted public.=(name,name).
+				//
+				// To validate red/green: remove the pin in
+				// pkg/management/postgres/pool/profiles.go (fillDefaultParameters)
+				// and re-run; the probes then inherit the tenant search_path and
+				// this assertion fails with shadow_calls > 0.
+				Consistently(shadowCalls, "30s", "5s").Should(Equal("0"))
 			})
 
-			By("verifying the application role is still not a superuser after reconcile cycles", func() {
-				// The instance manager reconciles managed extensions on a
-				// schedule. Wait long enough for at least one reconcile to
-				// run after bootstrap, then re-check that the planted
-				// operators were not invoked.
-				Eventually(func() (string, error) {
-					stdout, _, err := exec.QueryInInstancePod(
-						env.Ctx, env.Client, env.Interface, env.RestClientConfig,
-						exec.PodLocator{
-							Namespace: namespace,
-							PodName:   primary.Name,
-						}, "app",
-						"SELECT current_setting('is_superuser')")
-					return strings.TrimSpace(stdout), err
-				}, "60s", "5s").Should(Equal("off"))
-			})
-
-			By("verifying the planted shadow_gt function was never invoked", func() {
-				// shadow_gt's body issues `ALTER ROLE ... SUPERUSER` on
-				// invocation. If it ever fired, the role would now be
-				// superuser. We already asserted it is not, but this is the
-				// belt-and-braces check that the body itself never executed.
-				stdout, _, err := exec.QueryInInstancePod(
+			By("confirming the planted shadow operator is actually reachable (positive control)", func() {
+				// Guard against a false pass where shadow_calls stays 0 only
+				// because the shadow is unreachable. Mirror the operator's
+				// resolution path with an inferred $1 (PREPARE infers it just
+				// like the extended protocol), which under the tenant search_path
+				// (public, pg_catalog) resolves to public.=(name,name) and must
+				// increment shadow_calls. PREPARE and EXECUTE share one psql -c
+				// command so the prepared plan survives.
+				_, _, err := exec.QueryInInstancePod(
 					env.Ctx, env.Client, env.Interface, env.RestClientConfig,
 					exec.PodLocator{
 						Namespace: namespace,
 						PodName:   primary.Name,
 					}, "app",
-					"SELECT pg_catalog.count(*)::text FROM pg_catalog.pg_roles WHERE rolname = 'app' AND rolsuper")
+					"PREPARE shadow_probe AS SELECT 'x'::name = $1; EXECUTE shadow_probe('y')")
 				Expect(err).ToNot(HaveOccurred())
-				Expect(strings.TrimSpace(stdout)).To(Equal("0"))
+				Eventually(shadowCalls, "10s", "2s").ShouldNot(Equal("0"))
 			})
 		})
 	})
@@ -233,19 +249,22 @@ var _ = Describe("InitDB settings", Label(tests.LabelSmoke, tests.LabelBasic), f
 			var err error
 			namespace, err = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
-			AssertCreateCluster(namespace, clusterName, postInitSQLCluster, env)
+			clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, postInitSQLCluster)
 
 			By("checking inside the database", func() {
 				primary, err := clusterutils.GetPrimary(env.Ctx, env.Client, namespace, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 
-				stdout, _, err := exec.QueryInInstancePod(
+				stdout, _, err := exec.EventuallyExecQueryInInstancePod(
 					env.Ctx, env.Client, env.Interface, env.RestClientConfig,
 					exec.PodLocator{
 						Namespace: namespace,
 						PodName:   primary.Name,
 					}, "postgres",
-					"select datcollate from pg_catalog.pg_database where datname='template0'")
+					"select datcollate from pg_catalog.pg_database where datname='template0'",
+					environment.RetryTimeout,
+					objects.PollingTime,
+				)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(strings.TrimSpace(stdout), err).To(Equal("C"))
 			})

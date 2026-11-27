@@ -25,6 +25,7 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/specs"
 	pkgutils "github.com/xataio/xata-cnpg/pkg/utils"
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -55,7 +56,7 @@ var _ = Describe("AppArmor support", Serial, Label(tests.LabelNoOpenshift, tests
 		namespace, err = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
 
-		AssertCreateCluster(namespace, clusterName, clusterAppArmorFile, env)
+		clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, clusterAppArmorFile)
 
 		By("verifying AppArmor annotations on cluster and pods", func() {
 			// Gathers the pod list using annotations

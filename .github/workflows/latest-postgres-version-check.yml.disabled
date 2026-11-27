@@ -16,19 +16,19 @@ defaults:
 
 jobs:
   check-latest-postgres-version:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python
-        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
-          python-version: 3.14
+          python-version: 3.15
 
       - name: Install Python dependencies
         run: |
-          pip install -r .github/workflow-requirements.txt
+          pip install --require-hashes -r .github/workflow-requirements.txt
 
       - name: Generate PostgreSQL JSON files
         run: |
@@ -78,13 +78,15 @@ jobs:
         if: |
           env.LATEST_POSTGRES_VERSION_IMAGE != env.CURRENT_POSTGRES_VERSION_IMAGE &&
           github.ref == 'refs/heads/main'
-        uses: peter-evans/create-pull-request@84ae59a2cdc2258d6fa0732dd66352dddae2a412 # v7
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8
         with:
           token: ${{ secrets.REPO_GHA_PAT }}
           title: "feat: update default PostgreSQL version to ${{ env.LATEST_POSTGRES_VERSION }}"
           body: "Update default PostgreSQL version from ${{ env.CURRENT_POSTGRES_VERSION }} to ${{ env.LATEST_POSTGRES_VERSION }}"
           branch: "postgres-versions-update"
           author: "postgres-versions-updater <postgres-versions-updater@users.noreply.github.com>"
+          committer: "postgres-versions-updater <postgres-versions-updater@users.noreply.github.com>"
+          labels: "no-issue,automated"
           commit-message: "feat: update default PostgreSQL version to ${{ env.LATEST_POSTGRES_VERSION }}"
           signoff: true
 
@@ -92,13 +94,15 @@ jobs:
         if: |
           env.LATEST_POSTGRES_VERSION_IMAGE == env.CURRENT_POSTGRES_VERSION_IMAGE &&
           github.ref == 'refs/heads/main'
-        uses: peter-evans/create-pull-request@84ae59a2cdc2258d6fa0732dd66352dddae2a412 # v7
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8
         with:
           token: ${{ secrets.REPO_GHA_PAT }}
           title: "test: Updated Postgres versions used in E2E tests"
           body: "Update the Postgres versions used in E2E tests"
           branch: "postgres-versions-update"
           author: "postgres-versions-updater <postgres-versions-updater@users.noreply.github.com>"
+          committer: "postgres-versions-updater <postgres-versions-updater@users.noreply.github.com>"
+          labels: "no-issue,automated"
           add-paths: ".github/"
           commit-message: "test: Updated Postgres versions used in E2E tests"
           signoff: true

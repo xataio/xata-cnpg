@@ -12,13 +12,22 @@ type PostgresConfigurationApplyConfiguration struct {
 	// Configuration of the PostgreSQL synchronous replication feature
 	Synchronous *SynchronousReplicaConfigurationApplyConfiguration `json:"synchronous,omitempty"`
 	// PostgreSQL Host Based Authentication rules (lines to be appended
-	// to the pg_hba.conf file)
+	// to the pg_hba.conf file).
+	// Use the ${podselector:NAME} syntax to reference a pod selector;
+	// the rule will be expanded for each Pod IP matching that selector.
 	PgHBA []string `json:"pg_hba,omitempty"`
 	// PostgreSQL User Name Maps rules (lines to be appended
 	// to the pg_ident.conf file)
 	PgIdent []string `json:"pg_ident,omitempty"`
 	// Requirements to be met by sync replicas. This will affect how the "synchronous_standby_names" parameter will be
 	// set up.
+	//
+	// This field only applies to the legacy synchronous replication method.
+	//
+	// Deprecated: this field will be removed in CloudNativePG 1.33.0, along
+	// with the method. Use the failure domain options of
+	// `.spec.postgresql.synchronous` instead.
+	//
 	SyncReplicaElectionConstraint *SyncReplicaElectionConstraintsApplyConfiguration `json:"syncReplicaElectionConstraint,omitempty"`
 	// Lists of shared preload libraries to add to the default ones
 	AdditionalLibraries []string `json:"shared_preload_libraries,omitempty"`

@@ -11,7 +11,7 @@ import (
 //
 // ImageCatalogRef defines the reference to a major version in an ImageCatalog
 type ImageCatalogRefApplyConfiguration struct {
-	corev1.TypedLocalObjectReferenceApplyConfiguration `json:",inline"`
+	corev1.TypedLocalObjectReferenceApplyConfiguration `json:""`
 	// The major version of PostgreSQL we want to use from the ImageCatalog
 	Major *int `json:"major,omitempty"`
 }

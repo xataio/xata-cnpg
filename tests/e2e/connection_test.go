@@ -26,6 +26,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	pgasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/postgres"
+	replicationasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/replication"
 	"github.com/xataio/xata-cnpg/tests/utils/environment"
 	"github.com/xataio/xata-cnpg/tests/utils/postgres"
 
@@ -63,11 +66,11 @@ var _ = Describe("Connection via services", Label(tests.LabelServiceConnectivity
 		roService := fmt.Sprintf("%v-ro", clusterName)
 		services := []string{rwService, roService, rService}
 		for _, service := range services {
-			AssertConnection(namespace, service, appDBName, postgres.PostgresDBName, superuserPassword, env)
+			pgasserts.AssertConnection(env, namespace, service, appDBName, postgres.PostgresDBName, superuserPassword)
 		}
 
-		AssertWritesToReplicaFails(namespace, roService, appDBName, appDBUser, appPassword)
-		AssertWritesToPrimarySucceeds(namespace, rwService, appDBName, appDBUser, appPassword)
+		replicationasserts.AssertWritesToReplicaFails(env, namespace, roService, appDBName, appDBUser, appPassword)
+		replicationasserts.AssertWritesToPrimarySucceeds(env, namespace, rwService, appDBName, appDBUser, appPassword)
 	}
 
 	Context("Auto-generated passwords", func() {
@@ -83,7 +86,7 @@ var _ = Describe("Connection via services", Label(tests.LabelServiceConnectivity
 			var err error
 			namespace, err = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
-			AssertCreateCluster(namespace, clusterName, sampleFile, env)
+			clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFile)
 
 			// Get the superuser password from the -superuser secret
 			superuserSecretName := clusterName + "-superuser"
@@ -128,7 +131,7 @@ var _ = Describe("Connection via services", Label(tests.LabelServiceConnectivity
 			var err error
 			namespace, err = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
-			AssertCreateCluster(namespace, clusterName, sampleFile, env)
+			clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFile)
 			AssertServices(namespace, clusterName, appDBName, appDBUser,
 				suppliedAppUserPassword, suppliedSuperuserPassword, env)
 		})

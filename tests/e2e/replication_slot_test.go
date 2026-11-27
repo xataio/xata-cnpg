@@ -27,6 +27,8 @@ import (
 
 	"github.com/xataio/xata-cnpg/pkg/specs"
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	replicationasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/replication"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
 	"github.com/xataio/xata-cnpg/tests/utils/exec"
 	"github.com/xataio/xata-cnpg/tests/utils/postgres"
@@ -55,7 +57,7 @@ var _ = Describe("Replication Slot", Label(tests.LabelReplication), func() {
 		Expect(err).ToNot(HaveOccurred())
 		clusterName, err := yaml.GetResourceNameFromYAML(env.Scheme, sampleFile)
 		Expect(err).ToNot(HaveOccurred())
-		AssertCreateCluster(namespace, clusterName, sampleFile, env)
+		clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFile)
 
 		By("enabling replication slot on cluster", func() {
 			err := replicationslot.ToggleHAReplicationSlots(
@@ -83,7 +85,7 @@ var _ = Describe("Replication Slot", Label(tests.LabelReplication), func() {
 				primaryPod.GetName(),
 			)
 			Expect(err).ToNot(HaveOccurred())
-			AssertReplicationSlotsOnPod(namespace, clusterName, *primaryPod, expectedSlots, true, false)
+			replicationasserts.AssertReplicationSlotsOnPod(env, namespace, clusterName, *primaryPod, expectedSlots, true, false)
 		})
 
 		By("checking standbys HA slots exist", func() {
@@ -99,13 +101,13 @@ var _ = Describe("Replication Slot", Label(tests.LabelReplication), func() {
 					namespace, clusterName, pod.GetName(),
 				)
 				Expect(err).ToNot(HaveOccurred())
-				AssertReplicationSlotsOnPod(namespace, clusterName, pod, expectedSlots, true, false)
+				replicationasserts.AssertReplicationSlotsOnPod(env, namespace, clusterName, pod, expectedSlots, true, false)
 			}
 			GinkgoWriter.Println("Replica pods slot check succeeded in", time.Since(before))
 		})
 
 		By("checking all the slots restart_lsn's are aligned", func() {
-			AssertClusterReplicationSlotsAligned(namespace, clusterName)
+			replicationasserts.AssertClusterReplicationSlotsAligned(env, namespace, clusterName)
 		})
 
 		By("creating a physical replication slots on the primary", func() {
@@ -132,7 +134,15 @@ var _ = Describe("Replication Slot", Label(tests.LabelReplication), func() {
 			}, 90, 2).Should(Succeed())
 			before := time.Now()
 			for _, pod := range replicaPods.Items {
-				AssertReplicationSlotsOnPod(namespace, clusterName, pod, []string{userPhysicalSlot}, false, false)
+				replicationasserts.AssertReplicationSlotsOnPod(
+					env,
+					namespace,
+					clusterName,
+					pod,
+					[]string{userPhysicalSlot},
+					false,
+					false,
+				)
 			}
 			GinkgoWriter.Println("Slot:", userPhysicalSlot, "synchronized to replica pods in", time.Since(before))
 		})

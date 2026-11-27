@@ -12,11 +12,17 @@ import (
 // SchemaSpec configures a schema in a database
 type SchemaSpecApplyConfiguration struct {
 	// Common fields
-	DatabaseObjectSpecApplyConfiguration `json:",inline"`
+	DatabaseObjectSpecApplyConfiguration `json:""`
 	// The role name of the user who owns the schema inside PostgreSQL.
 	// It maps to the `AUTHORIZATION` parameter of `CREATE SCHEMA` and the
-	// `OWNER TO` command of `ALTER SCHEMA`.
+	// `OWNER TO` command of `ALTER SCHEMA`. If left empty, the schema is
+	// owned by `postgres`, the role CloudNativePG uses to connect to the
+	// database.
 	Owner *string `json:"owner,omitempty"`
+	// Permissions defines the privileges to grant or revoke on the schema,
+	// keyed by privilege. Each entry carries a role name and a type of
+	// `grant` (default) or `revoke`, mirroring the existing usage model.
+	Permissions *SchemaPermissionsSpecApplyConfiguration `json:"permissions,omitempty"`
 }
 
 // SchemaSpecApplyConfiguration constructs a declarative configuration of the SchemaSpec type for use with
@@ -46,5 +52,13 @@ func (b *SchemaSpecApplyConfiguration) WithEnsure(value apiv1.EnsureOption) *Sch
 // If called multiple times, the Owner field is set to the value of the last call.
 func (b *SchemaSpecApplyConfiguration) WithOwner(value string) *SchemaSpecApplyConfiguration {
 	b.Owner = &value
+	return b
+}
+
+// WithPermissions sets the Permissions field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Permissions field is set to the value of the last call.
+func (b *SchemaSpecApplyConfiguration) WithPermissions(value *SchemaPermissionsSpecApplyConfiguration) *SchemaSpecApplyConfiguration {
+	b.Permissions = value
 	return b
 }

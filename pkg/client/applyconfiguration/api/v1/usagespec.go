@@ -9,11 +9,11 @@ import (
 // UsageSpecApplyConfiguration represents a declarative configuration of the UsageSpec type for use
 // with apply.
 //
-// UsageSpec configures a usage for a foreign data wrapper
+// UsageSpec grants or revokes a privilege for a role, or for `public`
 type UsageSpecApplyConfiguration struct {
-	// Name of the usage
+	// Name of the role, or `public` to target all roles
 	Name *string `json:"name,omitempty"`
-	// The type of usage
+	// Whether the privilege is granted to or revoked from the role
 	Type *apiv1.UsageSpecType `json:"type,omitempty"`
 }
 

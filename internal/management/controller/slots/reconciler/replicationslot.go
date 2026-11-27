@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
+	"go.uber.org/multierr"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
@@ -62,7 +63,8 @@ func ReconcileReplicationSlots(
 	return reconcile.Result{}, nil
 }
 
-// reconcilePrimaryHAReplicationSlots reconciles the HA replication slots of the primary instance
+// reconcilePrimaryHAReplicationSlots reconciles the HA replication slots of the primary instance.
+// A failure on one slot doesn't stop the rest; errors are collected and returned together.
 func reconcilePrimaryHAReplicationSlots(
 	ctx context.Context,
 	db *sql.DB,
@@ -79,8 +81,16 @@ func reconcilePrimaryHAReplicationSlots(
 	expectedSlots := make(map[string]bool)
 
 	// Add every slot that is missing
+	var errs error
 	for _, instanceName := range cluster.Status.InstanceNames {
 		if instanceName == cluster.Status.CurrentPrimary {
+			continue
+		}
+
+		// A replica fenced for a timeline divergence can never catch up, and
+		// its slot would pin WAL on the primary until a manual rebuild: the
+		// cleanup loop below drops it like any other slot no longer expected.
+		if diverged, ok := cluster.Status.DivergedInstances[apiv1.PodName(instanceName)]; ok && diverged.Parked {
 			continue
 		}
 
@@ -93,7 +103,8 @@ func reconcilePrimaryHAReplicationSlots(
 
 		// At this point, the cluster instance does not have a HA replication slot
 		if err := infrastructure.Create(ctx, db, infrastructure.ReplicationSlot{SlotName: slotName}); err != nil {
-			return reconcile.Result{}, fmt.Errorf("creating primary HA replication slots: %w", err)
+			errs = multierr.Append(errs,
+				fmt.Errorf("creating replication slot %q: %w", slotName, err))
 		}
 	}
 
@@ -120,21 +131,23 @@ func reconcilePrimaryHAReplicationSlots(
 			contextLogger.Trace("Attempt to delete replication slot",
 				"slot", slot)
 			if err := infrastructure.Delete(ctx, db, slot); err != nil {
-				return reconcile.Result{}, fmt.Errorf("failure deleting replication slot %q: %w", slot.SlotName, err)
+				errs = multierr.Append(errs,
+					fmt.Errorf("dropping replication slot %q: %w", slot.SlotName, err))
 			}
 		}
 	}
 
 	if needToReschedule {
-		return reconcile.Result{RequeueAfter: time.Second}, nil
+		return reconcile.Result{RequeueAfter: time.Second}, errs
 	}
 
-	return reconcile.Result{}, nil
+	return reconcile.Result{}, errs
 }
 
 // dropReplicationSlots cleans up the HA replication slots when the feature is disabled.
 // If both the HA replication slots and the user defined replication slots features are disabled,
 // we also clean up the slots that fall under the user defined replication slots feature here.
+// A failure on one slot doesn't stop the rest; errors are collected and returned together.
 func dropReplicationSlots(
 	ctx context.Context,
 	db *sql.DB,
@@ -153,6 +166,7 @@ func dropReplicationSlots(
 		return reconcile.Result{}, err
 	}
 
+	var errs error
 	needToReschedule := false
 	for _, slot := range slots.Items {
 		// On the primary,  we only drop the HA replication slots
@@ -174,13 +188,14 @@ func dropReplicationSlots(
 		contextLogger.Trace("Attempt to delete replication slot",
 			"slot", slot)
 		if err := infrastructure.Delete(ctx, db, slot); err != nil {
-			return reconcile.Result{}, fmt.Errorf("while disabling standby HA replication slots: %w", err)
+			errs = multierr.Append(errs,
+				fmt.Errorf("dropping replication slot %q: %w", slot.SlotName, err))
 		}
 	}
 
 	if needToReschedule {
-		return reconcile.Result{RequeueAfter: time.Second}, nil
+		return reconcile.Result{RequeueAfter: time.Second}, errs
 	}
 
-	return reconcile.Result{}, nil
+	return reconcile.Result{}, errs
 }

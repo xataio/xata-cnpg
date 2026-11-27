@@ -54,6 +54,10 @@ func (r *fakeCertificateRefresher) RefreshSecrets(context.Context, *apiv1.Cluste
 	return r.changed, r.err
 }
 
+func (r *fakeCertificateRefresher) EnsureServerCertificateLoaded(context.Context, *apiv1.Cluster) error {
+	return nil
+}
+
 func (s *fakePgBackRestTLSServer) Start(context.Context) error {
 	s.startCalls++
 	if s.startErr == nil {
@@ -156,7 +160,7 @@ var _ = Describe("pgbackrest TLS server configuration", func() {
 		cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
 		instance := postgres.NewInstance().WithClusterName(cluster.Name).WithNamespace(cluster.Namespace)
 		instance.SetWaitingForPGData(true)
-		reconciler := NewInstanceReconciler(instance, cli, nil, repository.New())
+		reconciler := NewInstanceReconciler(instance, cli, nil, repository.New(), nil, nil, nil, nil)
 		refreshErr := errors.New("reading a later secret failed")
 		refresher := &fakeCertificateRefresher{changed: true, err: refreshErr}
 		reconciler.certificateReconciler = refresher

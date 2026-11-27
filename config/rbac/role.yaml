@@ -58,6 +58,12 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - pods/resize
+  verbs:
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - pods/status
   verbs:
   - get
@@ -109,8 +115,19 @@ rules:
   - leases
   verbs:
   - create
+  - delete
   - get
+  - list
   - update
+  - watch
+- apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - monitoring.coreos.com
   resources:
@@ -139,6 +156,7 @@ rules:
   resources:
   - backups
   - clusters
+  - databaseroles
   - databases
   - poolers
   - publications
@@ -177,6 +195,7 @@ rules:
   - postgresql.cnpg.io
   resources:
   - clusters/finalizers
+  - databaseroles/finalizers
   - poolers/finalizers
   verbs:
   - update
@@ -184,6 +203,7 @@ rules:
   - postgresql.cnpg.io
   resources:
   - clusters/status
+  - databaseroles/status
   - failoverquorums/status
   - poolers/status
   verbs:

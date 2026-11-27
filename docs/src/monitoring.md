@@ -7,11 +7,12 @@ title: Monitoring
 # Monitoring
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-!!! Important
+:::info[Important]
     Installing Prometheus and Grafana is beyond the scope of this project.
     We assume they are correctly installed in your system. However, for
     experimentation we provide instructions in
     [Part 4 of the Quickstart](quickstart.md#part-4-monitor-clusters-with-prometheus-and-grafana).
+:::
 
 ## Monitoring Instances
 
@@ -22,21 +23,30 @@ configurable and customizable system to define additional queries via one or
 more `ConfigMap` or `Secret` resources (see the
 ["User defined metrics" section](#user-defined-metrics) below for details).
 
-!!! Important
+:::info[Important]
     CloudNativePG, by default, installs a set of [predefined metrics](#default-set-of-metrics)
     in a `ConfigMap` named `cnpg-default-monitoring`.
+:::
 
-!!! Info
+:::info
     You can inspect the exported metrics by following the instructions in
     the ["How to inspect the exported metrics"](#how-to-inspect-the-exported-metrics)
     section below.
+:::
 
 All monitoring queries that are performed on PostgreSQL are:
 
-- atomic (one transaction per query)
-- executed with the `pg_monitor` role
+- atomic (one read-only transaction per query)
+- executed as the `cnpg_metrics_exporter` role (a member of `pg_monitor`)
 - executed with `application_name` set to `cnpg_metrics_exporter`
-- executed as user `postgres`
+
+The connection uses peer authentication on the pod-local Unix socket;
+because `session_user` is never a superuser, the monitoring session
+cannot escalate via `RESET ROLE` or `RESET SESSION AUTHORIZATION`. Do
+not grant additional privileges or role memberships to
+`cnpg_metrics_exporter` beyond `pg_monitor` and the table-level grants
+required by your custom queries: any extra membership flows into the
+scrape session via inheritance and weakens this property.
 
 Please refer to the "Predefined Roles" section in PostgreSQL
 [documentation](https://www.postgresql.org/docs/current/predefined-roles.html)
@@ -56,10 +66,11 @@ to the following logic:
 The default database can always be overridden for a given user-defined metric,
 by specifying a list of one or more databases in the `target_databases` option.
 
-!!! Seealso "Prometheus/Grafana"
+:::note[Prometheus/Grafana]
     If you are interested in evaluating the integration of CloudNativePG
     with Prometheus and Grafana, you can find a quick setup guide
     in [Part 4 of the quickstart](quickstart.md#part-4-monitor-clusters-with-prometheus-and-grafana)
+:::
 
 ### Output caching
 
@@ -104,18 +115,20 @@ spec:
   - port: metrics
 ```
 
-!!! important "Important Configuration Details"
+:::info[Important Configuration Details]
     - `metadata.name`: Give your `PodMonitor` a unique name.
     - `spec.namespaceSelector`: Use this to specify the namespace where
       your PostgreSQL cluster is running.
     - `spec.selector.matchLabels`: You must use the `cnpg.io/cluster: <cluster-name>`
       label to correctly target the PostgreSQL instances.
+:::
 
 #### Deprecation of Automatic `PodMonitor` Creation
 
-!!!warning "Feature Deprecation Notice"
+:::warning[Feature Deprecation Notice]
     The `.spec.monitoring.enablePodMonitor` field in the `Cluster` resource is
     now deprecated and will be removed in a future version of the operator.
+:::
 
 If you are currently using this feature, we strongly recommend you either
 remove or set `.spec.monitoring.enablePodMonitor` to `false` and manually
@@ -129,8 +142,9 @@ To enable TLS communication on the metrics port, configure the `.spec.monitoring
 setting to `true`. This setup ensures that the metrics exporter uses the same
 server certificate used by PostgreSQL to secure communication on port 5432.
 
-!!! Important
+:::info[Important]
     Changing the `.spec.monitoring.tls.enabled` setting will trigger a rolling restart of the Cluster.
+:::
 
 If the `PodMonitor` is managed by the operator (`.spec.monitoring.enablePodMonitor` set to `true`),
 it will automatically contain the necessary configurations to access the metrics via TLS.
@@ -158,14 +172,16 @@ spec:
       serverName: cluster-example-rw
 ```
 
-!!! Important
+:::info[Important]
     Ensure you modify the example above with a unique name, as well as the
     correct Cluster's namespace and labels (e.g., `cluster-example`).
+:::
 
-!!! Important
+:::info[Important]
     The `serverName` field in the metrics endpoint must match one of the names
     defined in the server certificate. If the default certificate is in use,
     the `serverName` value should be in the format `<cluster-name>-rw`.
+:::
 
 ### Predefined set of metrics
 
@@ -236,7 +252,11 @@ cnpg_collector_pg_wal_archive_status{value="ready"} 0
 # TYPE cnpg_collector_replica_mode gauge
 cnpg_collector_replica_mode 0
 
-# HELP cnpg_collector_sync_replicas Number of requested synchronous replicas (synchronous_standby_names)
+# HELP cnpg_collector_replicas_diverged Number of replicas that replayed WAL past the point where the current primary's timeline forked away from theirs. Such a replica cannot follow the primary and is fenced until it is rebuilt.
+# TYPE cnpg_collector_replicas_diverged gauge
+cnpg_collector_replicas_diverged 0
+
+# HELP cnpg_collector_sync_replicas Number of synchronous replicas: expected is the configured number, observed is the number of standbys currently attached as synchronous (min and max are deprecated and will be removed in 1.33.0)
 # TYPE cnpg_collector_sync_replicas gauge
 cnpg_collector_sync_replicas{value="expected"} 0
 cnpg_collector_sync_replicas{value="max"} 0
@@ -249,7 +269,7 @@ cnpg_collector_up{cluster="cluster-example"} 1
 
 # HELP cnpg_collector_postgres_version Postgres version
 # TYPE cnpg_collector_postgres_version gauge
-cnpg_collector_postgres_version{cluster="cluster-example",full="18.1"} 18.1
+cnpg_collector_postgres_version{cluster="cluster-example",full="19.0"} 19.0
 
 # HELP cnpg_collector_last_failed_backup_timestamp The last failed backup as a unix timestamp (Deprecated)
 # TYPE cnpg_collector_last_failed_backup_timestamp gauge
@@ -423,13 +443,14 @@ go_memstats_sys_bytes 7.6891144e+07
 go_threads 18
 ```
 
-!!! Note
+:::note
     `cnpg_collector_postgres_version` is a GaugeVec metric containing
     the `Major.Minor` version of PostgreSQL. The full semantic version
     `Major.Minor.Patch` can be found inside one of its label field
     named `full`.
+:::
 
-!!! Warning
+:::warning
     The metrics `cnpg_collector_last_failed_backup_timestamp`,
     `cnpg_collector_last_available_backup_timestamp`, and
     `cnpg_collector_first_recoverability_point` have been deprecated starting
@@ -439,6 +460,60 @@ go_threads 18
     `cnpg_collector_last_available_backup_timestamp` will remain zero until the
     first backup is completed to the object store. This is separate from WAL
     archiving.
+:::
+
+### Synchronous replication metrics
+
+The `cnpg_collector_sync_replicas` metric reports the state of synchronous
+replication through the `value` label:
+
+- `expected`: the number of synchronous replicas the cluster is configured to
+  have, as set in `.spec.postgresql.synchronous.number` (or computed from
+  `minSyncReplicas`, `maxSyncReplicas` and the number of ready replicas when
+  using the legacy method). It is `0` when synchronous replication is not
+  configured, which, on a cluster with more than one instance, is a
+  configuration problem worth alerting on.
+- `observed`: the number of standbys currently attached to the primary as
+  synchronous, as reported by `sync_state` in the `pg_stat_replication` system
+  view (`sync` for priority-based replication, `quorum` for quorum-based
+  replication). Unlike `expected`, it reflects what is happening right now.
+  With quorum-based replication, every attached standby that is a candidate is
+  reported as `quorum`, so `observed` can be higher than `expected`.
+  It is `-1` if the value cannot be collected. Only the primary exposes it.
+- `min` and `max` (**deprecated**): the lower and upper bound of synchronous
+  replicas. With the legacy method they are `minSyncReplicas` and
+  `maxSyncReplicas`. With `.spec.postgresql.synchronous` they are derived from
+  `number`, and `min` is `0` when `dataDurability` is `preferred`. These two
+  values are removed in CloudNativePG 1.33.0: use `expected` and `observed`
+  instead.
+
+:::warning
+    Before CloudNativePG 1.31, `observed` reported the number found in the
+    `synchronous_standby_names` setting, which says what is requested, not
+    whether synchronous replication is actually working.
+:::
+
+To be alerted when a cluster is not protected by the synchronous standbys it
+is configured for, compare `observed` with `expected`:
+
+```yaml
+- alert: SynchronousReplicationDegraded
+  expr: |-
+    cnpg_collector_sync_replicas{value="observed"}
+      < ignoring(value)
+    (cnpg_collector_sync_replicas{value="expected"} > 0)
+  for: 1m
+  labels:
+    severity: warning
+```
+
+When `dataDurability` is `required`, writes are blocked while this alert is
+firing, as PostgreSQL waits for the missing standbys. When it is `preferred`,
+the operator relaxes the requirement instead, and the cluster continues
+accepting writes with reduced durability.
+
+With the legacy method, `expected` never exceeds the number of ready replicas,
+so this alert does not fire when replicas are down.
 
 ### User defined metrics
 
@@ -471,15 +546,63 @@ The `customQueriesConfigMap`/`customQueriesSecret` sections contain a list of
 `ConfigMap`/`Secret` references specifying the key in which the custom queries are defined.
 Take care that the referred resources have to be created **in the same namespace as the Cluster** resource.
 
-!!! Note
+:::note
     If you want ConfigMaps and Secrets to be **automatically** reloaded by instances, you can
     add a label with key `cnpg.io/reload` to it, otherwise you will have to reload
     the instances using the `kubectl cnpg reload` subcommand.
+:::
 
-!!! Important
+:::info[Important]
     When a user defined metric overwrites an already existing metric the instance manager prints a json warning log,
     containing the message:`Query with the same name already found. Overwriting the existing one.`
     and a key `queryName` containing the overwritten query name.
+:::
+
+#### Custom query privileges and safety
+
+:::warning
+    Custom queries run as the `cnpg_metrics_exporter` role, which inherits
+    `pg_monitor`. Queries within `pg_monitor`'s scope (catalog reads,
+    `pg_stat_*` views, configuration parameters) work without modification.
+    Queries that read user-owned tables or superuser-only catalogs (e.g.
+    `pg_authid`, `pg_subscription`) need explicit grants. Reading a table
+    also requires USAGE on its schema:
+
+    ```sql
+    GRANT USAGE ON SCHEMA myschema TO cnpg_metrics_exporter;
+    GRANT SELECT ON TABLE myschema.mytable TO cnpg_metrics_exporter;
+    ```
+
+    Every database in `target_databases` must allow
+    `cnpg_metrics_exporter` to `CONNECT`. CloudNativePG grants it on the new
+    databases on which it revokes `CONNECT` from `PUBLIC`, as described in
+    [Managing Database Permissions](declarative_database_management.md#managing-database-permissions).
+    For any other database that has revoked `CONNECT` from `PUBLIC`, grant it
+    explicitly to that role:
+
+    ```sql
+    GRANT CONNECT ON DATABASE domainapp TO cnpg_metrics_exporter;
+    ```
+
+    Prefer an explicit list of trusted databases (e.g.
+    `target_databases: ["domainapp"]`) over the `"*"` wildcard. The
+    wildcard scrapes every database the role can connect to and
+    silently skips the rest, so an explicit list makes a missing grant
+    easier to notice. Use `"*"` only when the query is meant to
+    collect per-database metrics across the whole cluster.
+
+    Schema-qualify catalog references (`pg_catalog.now()`,
+    `pg_catalog.current_database()`) to prevent `search_path` shadowing
+    by user-owned objects.
+
+    Custom monitoring queries run inside a transaction whose
+    `search_path` is pinned to `pg_catalog, public, pg_temp`,
+    regardless of any `search_path` configured on the database or the
+    role. Unqualified references to objects in other user-defined
+    schemas will therefore fail to resolve: schema-qualify them (e.g.
+    `myschema.mytable`) so the query does not depend on the
+    `search_path`.
+:::
 
 #### Example of a user defined metric
 
@@ -497,14 +620,14 @@ metadata:
 data:
   custom-queries: |
     pg_replication:
-      query: "SELECT CASE WHEN NOT pg_is_in_recovery()
+      query: "SELECT CASE WHEN NOT pg_catalog.pg_is_in_recovery()
               THEN 0
               ELSE GREATEST (0,
-                EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())))
+                EXTRACT(EPOCH FROM (pg_catalog.now() OPERATOR(pg_catalog.-) pg_catalog.pg_last_xact_replay_timestamp())))
               END AS lag,
-              pg_is_in_recovery() AS in_recovery,
-              EXISTS (TABLE pg_stat_wal_receiver) AS is_wal_receiver_up,
-              (SELECT count(*) FROM pg_stat_replication) AS streaming_replicas"
+              pg_catalog.pg_is_in_recovery() AS in_recovery,
+              EXISTS (TABLE pg_catalog.pg_stat_wal_receiver) AS is_wal_receiver_up,
+              (SELECT pg_catalog.count(*) FROM pg_catalog.pg_stat_replication) AS streaming_replicas"
 
       metrics:
         - lag:
@@ -540,7 +663,7 @@ some_query: |
     FROM some_table
   query: |
     SELECT
-     count(*) as rows
+     pg_catalog.count(*) as rows
     FROM some_table
   metrics:
     - rows:
@@ -557,23 +680,29 @@ Database auto-discovery can be enabled for a specific query by specifying a
 *shell-like pattern* (i.e., containing `*`, `?` or `[]`) in the list of
 `target_databases`. If provided, the operator will expand the list of target
 databases by adding all the databases returned by the execution of `SELECT
-datname FROM pg_database WHERE datallowconn AND NOT datistemplate` and matching
-the pattern according to [path.Match()](https://pkg.go.dev/path#Match) rules.
+datname FROM pg_catalog.pg_database WHERE datallowconn AND NOT datistemplate
+AND pg_catalog.has_database_privilege(datname, 'CONNECT')` and matching the
+pattern according to [path.Match()](https://pkg.go.dev/path#Match) rules.
+Databases on which `cnpg_metrics_exporter` lacks the `CONNECT` privilege are
+silently skipped; if you want a database with revoked `PUBLIC` access to be
+scraped, grant `CONNECT` explicitly (see "Custom query privileges and safety"
+above).
 
-!!! Note
+:::note
     The `*` character has a [special meaning](https://yaml.org/spec/1.2/spec.html#id2786448) in yaml,
     so you need to quote (`"*"`) the `target_databases` value when it includes such a pattern.
+:::
 
 It is recommended that you always include the name of the database
-in the returned labels, for example using the `current_database()` function
-as in the following example:
+in the returned labels, for example using the `pg_catalog.current_database()`
+function as in the following example:
 
 ```yaml
 some_query: |
   query: |
     SELECT
-     current_database() as datname,
-     count(*) as rows
+     pg_catalog.current_database() as datname,
+     pg_catalog.count(*) as rows
     FROM some_table
   metrics:
     - datname:
@@ -604,8 +733,8 @@ aforementioned query):
 some_query: |
   query: |
     SELECT
-     current_database() as datname,
-     count(*) as rows
+     pg_catalog.current_database() as datname,
+     pg_catalog.count(*) as rows
     FROM some_table
   metrics:
     - datname:
@@ -687,8 +816,9 @@ with the following format:
 cnpg_<MetricName>_<ColumnName>{<LabelColumnName>=<LabelColumnValue> ... } <ColumnValue>
 ```
 
-!!! Note
+:::note
     `LabelColumnName` are metrics with `usage` set to `LABEL` and their `Value`
+:::
 
 Considering the `pg_replication` example above, the exporter's endpoint would
 return the following output when invoked:
@@ -730,10 +860,11 @@ If you want to disable the default set of metrics, you can:
   (empty string), in the operator ConfigMap. Changes to operator ConfigMap require an operator restart.
 - disable it for a specific Cluster: set `.spec.monitoring.disableDefaultQueries` to `true` in the Cluster.
 
-!!! Important
+:::info[Important]
     The ConfigMap or Secret specified via `MONITORING_QUERIES_CONFIGMAP`/`MONITORING_QUERIES_SECRET`
     will always be copied to the Cluster's namespace with a fixed name: `cnpg-default-monitoring`.
     So that, if you intend to have default metrics, you should not create a ConfigMap with this name in the cluster's namespace.
+:::
 
 ### Differences with the Prometheus Postgres exporter
 
@@ -741,15 +872,43 @@ CloudNativePG is inspired by the PostgreSQL Prometheus Exporter, but
 presents some differences. In particular, the `cache_seconds` field is not implemented
 in CloudNativePG's exporter.
 
+### Manually creating the metrics exporter role
+
+The operator creates the `cnpg_metrics_exporter` PostgreSQL role on the
+primary during reconciliation; it then propagates to standbys and
+replica clusters via streaming replication.
+
+If the role is missing (replica cluster upgraded before its primary,
+restore from a backup that predates the role, accidental removal),
+recreate it as a superuser on the writable primary of the replication
+chain (the source primary, not a designated primary of a replica
+cluster):
+
+```sql
+CREATE ROLE cnpg_metrics_exporter WITH LOGIN NOSUPERUSER NOCREATEDB
+    NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT;
+GRANT pg_monitor TO cnpg_metrics_exporter;
+```
+
+If your custom monitoring queries need access to objects outside
+`pg_monitor`'s scope, grant the necessary privileges explicitly. SELECT
+on a table also requires USAGE on its schema:
+
+```sql
+GRANT USAGE ON SCHEMA myschema TO cnpg_metrics_exporter;
+GRANT SELECT ON TABLE myschema.mytable TO cnpg_metrics_exporter;
+```
+
 ## Monitoring the CloudNativePG operator
 
 The operator internally exposes [Prometheus](https://prometheus.io/) metrics
 via HTTP on port 8080, named `metrics`.
 
-!!! Info
+:::info
     You can inspect the exported metrics by following the instructions in
     the ["How to inspect the exported metrics"](#how-to-inspect-the-exported-metrics)
     section below.
+:::
 
 Currently, the operator exposes default `kubebuilder` metrics. See
 [kubebuilder documentation](https://book.kubebuilder.io/reference/metrics.html)
@@ -827,10 +986,11 @@ spec:
           defaultMode: 420
 ```
 
-!!! Note
+:::note
     When `METRICS_CERT_DIR` is set, the operator automatically enables TLS for
     the metrics server. You must also update your PodMonitor configuration to
     use the `https` scheme.
+:::
 
 Example `PodMonitor` configuration with TLS enabled:
 
@@ -857,10 +1017,11 @@ In this section we provide basic instructions on how to inspect
 the metrics exported by a specific PostgreSQL instance manager (primary
 or replica) or the operator.
 
-!!! Note
+:::note
     In the examples below we assume we are working in the default namespace, and
     with the operator installed in the `cnpg-system` namespace.
     Please adapt to your use case.
+:::
 
 ### Using port forwarding
 
@@ -902,7 +1063,7 @@ metadata:
 spec:
   containers:
   - name: curl
-    image: curlimages/curl:8.17.0
+    image: curlimages/curl:8.23.0
     command: ['sleep', '3600']
 EOF
 ```
@@ -948,9 +1109,10 @@ kubectl delete -f curl.yaml
 
 ## Auxiliary resources
 
-!!! Important
+:::info[Important]
     These resources are provided for illustration and experimentation, and do
     not represent any kind of recommendation for your production system
+:::
 
 In the [`doc/src/samples/monitoring/`](https://github.com/cloudnative-pg/cloudnative-pg/tree/main/docs/src/samples/monitoring)
 directory you will find a series of sample files for observability.

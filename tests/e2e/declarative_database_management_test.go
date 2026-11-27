@@ -21,12 +21,16 @@ package e2e
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	pgasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/postgres"
+	"github.com/xataio/xata-cnpg/tests/internal/resources"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
 	"github.com/xataio/xata-cnpg/tests/utils/exec"
 	"github.com/xataio/xata-cnpg/tests/utils/namespaces"
@@ -73,7 +77,7 @@ var _ = Describe("Declarative database management", Label(tests.LabelSmoke, test
 			Expect(err).ToNot(HaveOccurred())
 
 			By("setting up cluster and declarative database CRD", func() {
-				AssertCreateCluster(namespace, clusterName, clusterManifest, env)
+				clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, clusterManifest)
 			})
 		})
 
@@ -95,6 +99,45 @@ var _ = Describe("Declarative database management", Label(tests.LabelSmoke, test
 			}, 30).Should(Succeed())
 		}
 
+		// assertDatabasePermissions checks, for every entry of the permissions of
+		// the database, that the role holds the privilege if it is granted and
+		// that it doesn't if it is revoked
+		assertDatabasePermissions := func(database apiv1.Database) {
+			primaryPodInfo, err := clusterutils.GetPrimary(env.Ctx, env.Client, namespace, clusterName)
+			Expect(err).ToNot(HaveOccurred())
+
+			permissions := database.Spec.Permissions
+			for privilege, entries := range map[string][]apiv1.UsageSpec{
+				"CONNECT":   slices.Concat(permissions.Connect, permissions.All),
+				"CREATE":    slices.Concat(permissions.Create, permissions.All),
+				"TEMPORARY": slices.Concat(permissions.Temporary, permissions.All),
+			} {
+				for _, entry := range entries {
+					granted := entry.Type != apiv1.RevokeUsageSpecType
+					Eventually(pgasserts.QueryMatchExpectationPredicate(env, primaryPodInfo, postgres.PostgresDBName,
+						pgasserts.DatabasePrivilegeHeldQuery(database.Spec.Name, entry.Name, privilege),
+						pgasserts.BoolPGOutput(granted)),
+						30).Should(Succeed())
+				}
+			}
+		}
+
+		// assertDefaultConnectPrivileges checks that the operator revoked CONNECT
+		// from PUBLIC on the database, and granted it to the metrics exporter
+		assertDefaultConnectPrivileges := func(databaseName string) {
+			primaryPodInfo, err := clusterutils.GetPrimary(env.Ctx, env.Client, namespace, clusterName)
+			Expect(err).ToNot(HaveOccurred())
+
+			Eventually(pgasserts.QueryMatchExpectationPredicate(env, primaryPodInfo, postgres.PostgresDBName,
+				pgasserts.DatabasePrivilegeHeldQuery(databaseName, "public", "CONNECT"),
+				pgasserts.BoolPGOutput(false)),
+				30).Should(Succeed())
+			Eventually(pgasserts.QueryMatchExpectationPredicate(env, primaryPodInfo, postgres.PostgresDBName,
+				pgasserts.DatabasePrivilegeHeldQuery(databaseName, apiv1.MetricsExporterUserName, "CONNECT"),
+				pgasserts.BoolPGOutput(true)),
+				30).Should(Succeed())
+		}
+
 		assertTestDeclarativeDatabase := func(
 			databaseManifest string,
 			retainOnDeletion bool,
@@ -104,7 +147,7 @@ var _ = Describe("Declarative database management", Label(tests.LabelSmoke, test
 				databaseObjectName string
 			)
 			By("applying Database CRD manifest", func() {
-				CreateResourceFromFile(namespace, databaseManifest)
+				resources.CreateResourceFromFile(env, namespace, databaseManifest)
 				databaseObjectName, err = yaml.GetResourceNameFromYAML(env.Scheme, databaseManifest)
 				Expect(err).NotTo(HaveOccurred())
 			})
@@ -128,10 +171,21 @@ var _ = Describe("Declarative database management", Label(tests.LabelSmoke, test
 				primaryPodInfo, err := clusterutils.GetPrimary(env.Ctx, env.Client, namespace, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 
-				Eventually(QueryMatchExpectationPredicate(primaryPodInfo, postgres.PostgresDBName,
-					databaseExistsQuery(dbname), "t"), 30).Should(Succeed())
+				Eventually(pgasserts.QueryMatchExpectationPredicate(env, primaryPodInfo, postgres.PostgresDBName,
+					pgasserts.DatabaseExistsQuery(dbname), "t"),
+					30).Should(Succeed())
 
 				assertDatabaseHasExpectedFields(namespace, primaryPodInfo.Name, database)
+			})
+
+			By("verifying the default CONNECT privileges of the new database", func() {
+				// the manifest of the retained database sets them explicitly
+				if retainOnDeletion {
+					return
+				}
+				Expect(database.Spec.Permissions).To(BeNil())
+
+				assertDefaultConnectPrivileges(database.Spec.Name)
 			})
 
 			By("verifying the extension presence in the target database", func() {
@@ -139,8 +193,9 @@ var _ = Describe("Declarative database management", Label(tests.LabelSmoke, test
 				Expect(err).ToNot(HaveOccurred())
 
 				for _, extSpec := range database.Spec.Extensions {
-					Eventually(QueryMatchExpectationPredicate(primaryPodInfo, exec.DatabaseName(database.Spec.Name),
-						extensionExistsQuery(extSpec.Name), boolPGOutput(true)), 30).Should(Succeed())
+					Eventually(pgasserts.QueryMatchExpectationPredicate(env, primaryPodInfo, exec.DatabaseName(database.Spec.Name),
+						pgasserts.ExtensionExistsQuery(extSpec.Name), pgasserts.BoolPGOutput(true)),
+						30).Should(Succeed())
 				}
 			})
 
@@ -149,9 +204,78 @@ var _ = Describe("Declarative database management", Label(tests.LabelSmoke, test
 				Expect(err).ToNot(HaveOccurred())
 
 				for _, schemaSpec := range database.Spec.Schemas {
-					Eventually(QueryMatchExpectationPredicate(primaryPodInfo, exec.DatabaseName(database.Spec.Name),
-						schemaExistsQuery(schemaSpec.Name), boolPGOutput(true)), 30).Should(Succeed())
+					Eventually(pgasserts.QueryMatchExpectationPredicate(env, primaryPodInfo, exec.DatabaseName(database.Spec.Name),
+						pgasserts.SchemaExistsQuery(schemaSpec.Name), pgasserts.BoolPGOutput(true)),
+						30).Should(Succeed())
 				}
+			})
+
+			By("verifying the schema privileges have been granted in the target database", func() {
+				primaryPodInfo, err := clusterutils.GetPrimary(env.Ctx, env.Client, namespace, clusterName)
+				Expect(err).ToNot(HaveOccurred())
+
+				for _, schemaSpec := range database.Spec.Schemas {
+					if schemaSpec.Permissions == nil {
+						continue
+					}
+					for _, usage := range schemaSpec.Permissions.Usage {
+						granted := usage.Type != apiv1.RevokeUsageSpecType
+						Eventually(pgasserts.QueryMatchExpectationPredicate(env, primaryPodInfo, exec.DatabaseName(database.Spec.Name),
+							pgasserts.SchemaPrivilegeQuery(usage.Name, schemaSpec.Name, "USAGE"), pgasserts.BoolPGOutput(granted)),
+							30).Should(Succeed())
+					}
+					for _, create := range schemaSpec.Permissions.Create {
+						granted := create.Type != apiv1.RevokeUsageSpecType
+						Eventually(pgasserts.QueryMatchExpectationPredicate(env, primaryPodInfo, exec.DatabaseName(database.Spec.Name),
+							pgasserts.SchemaPrivilegeQuery(create.Name, schemaSpec.Name, "CREATE"), pgasserts.BoolPGOutput(granted)),
+							30).Should(Succeed())
+					}
+				}
+			})
+
+			By("verifying the database permissions have been applied", func() {
+				// only the manifest of the retained database has permissions
+				if !retainOnDeletion {
+					return
+				}
+				Expect(database.Spec.Permissions).ToNot(BeNil())
+
+				assertDatabasePermissions(database)
+
+				permissions := database.Spec.Permissions
+				Expect(database.Status.Permissions).To(HaveLen(
+					len(permissions.Connect) + len(permissions.Create) + len(permissions.Temporary) +
+						3*len(permissions.All)))
+				for _, status := range database.Status.Permissions {
+					Expect(status.Applied).To(BeTrue(), status.Message)
+				}
+			})
+
+			By("revoking what was granted through all", func() {
+				if !retainOnDeletion {
+					return
+				}
+				Expect(database.Spec.Permissions.All).ToNot(BeEmpty())
+
+				databaseNamespacedName := types.NamespacedName{
+					Namespace: namespace,
+					Name:      databaseObjectName,
+				}
+				Eventually(func(g Gomega) {
+					g.Expect(env.Client.Get(env.Ctx, databaseNamespacedName, &database)).To(Succeed())
+					for i := range database.Spec.Permissions.All {
+						database.Spec.Permissions.All[i].Type = apiv1.RevokeUsageSpecType
+					}
+					g.Expect(env.Client.Update(env.Ctx, &database)).To(Succeed())
+				}, 30).Should(Succeed())
+
+				Eventually(func(g Gomega) {
+					g.Expect(env.Client.Get(env.Ctx, databaseNamespacedName, &database)).To(Succeed())
+					g.Expect(database.Status.ObservedGeneration).To(Equal(database.Generation))
+					g.Expect(database.Status.Applied).Should(HaveValue(BeTrue()))
+				}, 300).WithPolling(10 * time.Second).Should(Succeed())
+
+				assertDatabasePermissions(database)
 			})
 
 			By("verifying the fdw presence in the target database", func() {
@@ -159,8 +283,9 @@ var _ = Describe("Declarative database management", Label(tests.LabelSmoke, test
 				Expect(err).ToNot(HaveOccurred())
 
 				for _, fdwSpec := range database.Spec.FDWs {
-					Eventually(QueryMatchExpectationPredicate(primaryPodInfo, exec.DatabaseName(database.Spec.Name),
-						fdwExistsQuery(fdwSpec.Name), boolPGOutput(true)), 30).Should(Succeed())
+					Eventually(pgasserts.QueryMatchExpectationPredicate(env, primaryPodInfo, exec.DatabaseName(database.Spec.Name),
+						pgasserts.FDWExistsQuery(fdwSpec.Name), pgasserts.BoolPGOutput(true)),
+						30).Should(Succeed())
 				}
 			})
 
@@ -169,8 +294,9 @@ var _ = Describe("Declarative database management", Label(tests.LabelSmoke, test
 				Expect(err).ToNot(HaveOccurred())
 
 				for _, serverSpec := range database.Spec.Servers {
-					Eventually(QueryMatchExpectationPredicate(primaryPodInfo, exec.DatabaseName(database.Spec.Name),
-						foreignServerExistsQuery(serverSpec.Name), boolPGOutput(true)), 30).Should(Succeed())
+					Eventually(pgasserts.QueryMatchExpectationPredicate(env, primaryPodInfo, exec.DatabaseName(database.Spec.Name),
+						pgasserts.ForeignServerExistsQuery(serverSpec.Name), pgasserts.BoolPGOutput(true)),
+						30).Should(Succeed())
 				}
 			})
 
@@ -182,10 +308,19 @@ var _ = Describe("Declarative database management", Label(tests.LabelSmoke, test
 				primaryPodInfo, err := clusterutils.GetPrimary(env.Ctx, env.Client, namespace, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 
-				Eventually(QueryMatchExpectationPredicate(primaryPodInfo, postgres.PostgresDBName,
-					databaseExistsQuery(dbname), boolPGOutput(retainOnDeletion)), 30).Should(Succeed())
+				Eventually(pgasserts.QueryMatchExpectationPredicate(env, primaryPodInfo, postgres.PostgresDBName,
+					pgasserts.DatabaseExistsQuery(dbname), pgasserts.BoolPGOutput(retainOnDeletion)),
+					30).Should(Succeed())
 			})
 		}
+
+		It("revokes CONNECT from PUBLIC on the databases of a new cluster", func() {
+			for _, databaseName := range []string{postgres.PostgresDBName, "template1", postgres.AppDBName} {
+				By(fmt.Sprintf("checking the database %q", databaseName), func() {
+					assertDefaultConnectPrivileges(databaseName)
+				})
+			}
+		})
 
 		When("Database CRD reclaim policy is set to delete", func() {
 			It("can manage a declarative database and delete it in Postgres", func() {
@@ -221,14 +356,14 @@ var _ = Describe("Declarative database management", Label(tests.LabelSmoke, test
 				clusterName, err = yaml.GetResourceNameFromYAML(env.Scheme, clusterManifest)
 				Expect(err).ToNot(HaveOccurred())
 
-				AssertCreateCluster(namespace, clusterName, clusterManifest, env)
+				clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, clusterManifest)
 			})
 			By("creating the database", func() {
 				databaseManifest := fixturesDir +
 					"/declarative_databases/database-with-delete-reclaim-policy.yaml.template"
 				databaseObjectName, err = yaml.GetResourceNameFromYAML(env.Scheme, databaseManifest)
 				Expect(err).NotTo(HaveOccurred())
-				CreateResourceFromFile(namespace, databaseManifest)
+				resources.CreateResourceFromFile(env, namespace, databaseManifest)
 			})
 			By("ensuring the database is reconciled successfully", func() {
 				// get database object

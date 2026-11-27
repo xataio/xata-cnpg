@@ -1,8 +1,23 @@
+> Processing: config/olm-manifests/bases/cloudnative-pg.clusterserviceversion.yaml
+> Processing: docs/src/appendixes/backup_barmanobjectstore.md
+> Processing: docs/src/appendixes/backup_volumesnapshot.md
+> Processing: docs/src/appendixes/object_stores.md
+> Processing: docs/src/applications.md
+> Processing: docs/src/backup_recovery.md
+> Processing: docs/src/cncf-projects/cilium.md
+> Processing: docs/src/cncf-projects/external-secrets.md
+> Processing: docs/src/cnpg_i.md
+> Processing: docs/src/e2e.md
+> Processing: docs/src/faq.md
+> Processing: docs/src/release_notes/edb-cloud-native-postgresql.md
+> Processing: docs/src/release_notes/v1.30.md
+> Processing: docs/src/release_notes/v1.31.md
 AES
 API's
 APIGroup
 APIs
 ARMv
+ARN
 AUR
 AZ
 AZs
@@ -34,11 +49,13 @@ BRGOVIND
 BUSL
 BackupCapabilities
 BackupConfiguration
+BackupFailureReason
 BackupFrom
 BackupLabelFile
 BackupList
 BackupMethod
 BackupMethodBarmanObjectStore
+BackupMethodPgBackRest
 BackupMethodPlugin
 BackupMethodVolumeSnapshot
 BackupPhase
@@ -56,6 +73,7 @@ Battiato
 BlaiseAntony
 BootstrapConfiguration
 BootstrapInitDB
+BootstrapNoop
 BootstrapPgBaseBackup
 BootstrapRecovery
 Buildx
@@ -209,6 +227,7 @@ FQDNs
 FailoverQuorum
 FailoverQuorumStatus
 FailureDomainKeys
+FailureReason
 Fei
 Filesystem
 Fluentd
@@ -231,6 +250,7 @@ GellertBabel
 GeneratedPasswordState
 GeoSpatial
 Gi
+GiB
 GitOps
 GoArch
 GoReleaser
@@ -246,6 +266,7 @@ Hetzner
 HistoryTags
 Homebrew
 HoniSanders
+HostToContainer
 Huß
 IAM
 INPLACE
@@ -280,6 +301,8 @@ Joda
 KEP
 KV
 Karpenter
+KeyRef
+KeyType
 KinD
 Klio
 Krew
@@ -330,6 +353,8 @@ MinLength
 Minikube
 MonitoringConfiguration
 MonolithSnapshotType
+MountPropagation
+MountPropagationMode
 MultiNamespace
 NFS
 NGINX
@@ -337,6 +362,7 @@ NOBYPASSRLS
 NOCREATEDB
 NOCREATEROLE
 NOSUPERUSER
+NVMe
 Namespaces
 Nenciarini
 NetworkPolicies
@@ -375,6 +401,7 @@ PDB
 PDBs
 PEM
 PGAudit
+PGBACKREST
 PGDATA
 PGDG
 PGData
@@ -406,6 +433,21 @@ PendingRevocation
 Percona
 PersistentVolumeClaim
 PersistentVolumeClaimSpec
+PgBackRest
+PgBackRestAzure
+PgBackRestBackupType
+PgBackRestBackupTypeDiff
+PgBackRestBackupTypeFull
+PgBackRestBackupTypeIncr
+PgBackRestCipher
+PgBackRestConfiguration
+PgBackRestExternalCluster
+PgBackRestGCS
+PgBackRestOptions
+PgBackRestRecoverySource
+PgBackRestRepository
+PgBackRestRetention
+PgBackRestS
 PgBouncer's
 PgBouncerIntegrationStatus
 PgBouncerPoolMode
@@ -472,6 +514,7 @@ ProbeStrategyType
 ProbeTerminationGracePeriod
 ProbeWithStrategy
 ProbesConfiguration
+ProcessMax
 ProjectedVolumeSource
 Promotable
 PublicationReclaimDelete
@@ -490,6 +533,7 @@ QuickStart
 RBAC
 RCE
 README
+REPO
 RHSA
 RLS
 RPO
@@ -505,6 +549,7 @@ ReplicaSet
 ReplicationSlotsConfiguration
 ReplicationSlotsHAConfiguration
 ReplicationTLSSecret
+RepoPath
 ResizingPVC
 ResourceRequirements
 ResourceVersion
@@ -515,6 +560,7 @@ RestoreJobHook
 RestoreJobHookCapabilities
 RetentionPolicy
 RevokeUsageSpecType
+RoleARN
 RoleBinding
 RoleConfiguration
 RoleStatus
@@ -589,6 +635,7 @@ Snyk
 Stackgres
 StandbyNames
 StandbyNumber
+StanzaName
 StartupProbe
 StatefulSets
 StorageClass
@@ -616,6 +663,7 @@ TLS
 TLSv
 TOC
 TODO
+TPS
 TTL
 TTY
 TablespaceClassName
@@ -683,6 +731,7 @@ additionalCommandArgs
 additionalPodAffinity
 additionalPodAntiAffinity
 addons
+aes
 affinityconfiguration
 aks
 albert
@@ -715,6 +764,7 @@ applicationSecretVersion
 appsv
 appuser
 archiveAdditionalCommandArgs
+archiveAsync
 archiver
 ardentperf
 args
@@ -752,6 +802,7 @@ backupName
 backupOwnerReference
 backupRetentionPolicy
 backupconfiguration
+backupfailurereason
 backuplist
 backupmethod
 backupphase
@@ -788,6 +839,7 @@ bool
 booleanSwitch
 bootstrapconfiguration
 bootstrapinitdb
+bootstrapnoop
 bootstrappgbasebackup
 bootstraprecovery
 boto
@@ -798,14 +850,17 @@ builtinLocale
 bw
 byStatus
 bypassrls
+bz
 bzip
 cGFzc
 caSecretVersion
+cancelled
 cannotReconcile
 catalogName
 catalogcomponentimage
 catalogimage
 cb
+cbc
 cd
 ce
 certificatesconfiguration
@@ -946,6 +1001,7 @@ defaultMode
 demotionToken
 dennispidun
 deploymentStrategy
+deprioritization
 dereference
 destinationPath
 dev
@@ -1062,6 +1118,7 @@ goroutines
 gosec
 govulncheck
 grafana
+gz
 gzip
 hanshal
 hardcoded
@@ -1072,6 +1129,7 @@ healthyPVC
 healthz
 highAvailability
 historyTags
+honoured
 hostPort
 hostname
 hostssl
@@ -1107,6 +1165,7 @@ importsource
 inPlace
 inProgress
 inRoles
+incr
 indistinctively
 inheritFromAzureAD
 inheritFromIAMRole
@@ -1155,6 +1214,7 @@ kb
 kbytes
 kdautrey
 keepalive
+keyType
 kms
 kube
 kubebuilder
@@ -1284,6 +1344,7 @@ noexec
 nosuid
 ntt
 num
+oF
 oauth
 objectmeta
 objectstore
@@ -1339,6 +1400,7 @@ persistentVolumeClaims
 persistentvolumeclaim
 persistentvolumeclaims
 pgAdmin
+pgBackRest
 pgBouncer
 pgBouncerIntegration
 pgBouncerSecrets
@@ -1352,6 +1414,18 @@ pgRouting
 pgSQL
 pgadmin
 pgaudit
+pgbackrest
+pgbackrestazure
+pgbackrestbackuptype
+pgbackrestcipher
+pgbackrestconfiguration
+pgbackrestexternalcluster
+pgbackrestgcs
+pgbackrestoptions
+pgbackrestrecoverysource
+pgbackrestrepository
+pgbackrestretention
+pgbackrests
 pgbarman
 pgbasebackup
 pgbench
@@ -1450,6 +1524,7 @@ probesconfiguration
 probestrategytype
 probewithstrategy
 proc
+processMax
 programmatically
 proj
 projectedVolumeTemplate
@@ -1509,6 +1584,8 @@ replicationTLSSecret
 replicationslotsconfiguration
 replicationslotshaconfiguration
 repmgr
+repo
+repoPath
 reportNonRedacted
 reportRedacted
 req
@@ -1809,4 +1886,5 @@ xml
 xz
 yaml
 yml
+zst
 zstd

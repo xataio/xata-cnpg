@@ -137,6 +137,100 @@ var _ = Describe("Database validation", func() {
 		expectDuplicateErrors(errs, map[string]string{"spec.schemas[2].name": "test_two"})
 	})
 
+	It("doesn't complain with distinct schema permissions usage and create names", func() {
+		db := &apiv1.Database{
+			Spec: apiv1.DatabaseSpec{
+				Schemas: []apiv1.SchemaSpec{
+					{
+						DatabaseObjectSpec: apiv1.DatabaseObjectSpec{Name: "analytics", Ensure: apiv1.EnsurePresent},
+						Permissions: &apiv1.SchemaPermissionsSpec{
+							Usage:  []apiv1.UsageSpec{{Name: "reader"}, {Name: "writer"}},
+							Create: []apiv1.UsageSpec{{Name: "app_owner"}},
+						},
+					},
+				},
+			},
+		}
+		errs := v.validate(db)
+		Expect(errs).To(BeEmpty())
+	})
+
+	It("complains if there are duplicate names within schema permissions usage", func() {
+		db := &apiv1.Database{
+			Spec: apiv1.DatabaseSpec{
+				Schemas: []apiv1.SchemaSpec{
+					{
+						DatabaseObjectSpec: apiv1.DatabaseObjectSpec{Name: "analytics", Ensure: apiv1.EnsurePresent},
+						Permissions: &apiv1.SchemaPermissionsSpec{
+							Usage: []apiv1.UsageSpec{
+								{Name: "reader", Type: apiv1.GrantUsageSpecType},
+								{Name: "reader", Type: apiv1.RevokeUsageSpecType},
+							},
+						},
+					},
+				},
+			},
+		}
+		errs := v.validate(db)
+		Expect(extractErrorFields(errs)).To(ConsistOf("spec.schemas[0].permissions.usage[1].name"))
+		expectDuplicateErrors(errs, map[string]string{"spec.schemas[0].permissions.usage[1].name": "reader"})
+	})
+
+	It("complains if there are duplicate names within schema permissions create", func() {
+		db := &apiv1.Database{
+			Spec: apiv1.DatabaseSpec{
+				Schemas: []apiv1.SchemaSpec{
+					{
+						DatabaseObjectSpec: apiv1.DatabaseObjectSpec{Name: "analytics", Ensure: apiv1.EnsurePresent},
+						Permissions: &apiv1.SchemaPermissionsSpec{
+							Create: []apiv1.UsageSpec{{Name: "app_owner"}, {Name: "app_owner"}},
+						},
+					},
+				},
+			},
+		}
+		errs := v.validate(db)
+		Expect(extractErrorFields(errs)).To(ConsistOf("spec.schemas[0].permissions.create[1].name"))
+		expectDuplicateErrors(errs, map[string]string{"spec.schemas[0].permissions.create[1].name": "app_owner"})
+	})
+
+	It("complains when the PUBLIC pseudo-role is named twice with a different case", func() {
+		db := &apiv1.Database{
+			Spec: apiv1.DatabaseSpec{
+				Schemas: []apiv1.SchemaSpec{
+					{
+						DatabaseObjectSpec: apiv1.DatabaseObjectSpec{Name: "analytics", Ensure: apiv1.EnsurePresent},
+						Permissions: &apiv1.SchemaPermissionsSpec{
+							Usage: []apiv1.UsageSpec{
+								{Name: "public", Type: apiv1.GrantUsageSpecType},
+								{Name: "PUBLIC", Type: apiv1.RevokeUsageSpecType},
+							},
+						},
+					},
+				},
+			},
+		}
+		errs := v.validate(db)
+		Expect(extractErrorFields(errs)).To(ConsistOf("spec.schemas[0].permissions.usage[1].name"))
+		expectDuplicateErrors(errs, map[string]string{"spec.schemas[0].permissions.usage[1].name": "PUBLIC"})
+	})
+
+	It("doesn't fold role names that only differ in case", func() {
+		db := &apiv1.Database{
+			Spec: apiv1.DatabaseSpec{
+				Schemas: []apiv1.SchemaSpec{
+					{
+						DatabaseObjectSpec: apiv1.DatabaseObjectSpec{Name: "analytics", Ensure: apiv1.EnsurePresent},
+						Permissions: &apiv1.SchemaPermissionsSpec{
+							Usage: []apiv1.UsageSpec{{Name: "reader"}, {Name: "Reader"}},
+						},
+					},
+				},
+			},
+		}
+		Expect(v.validate(db)).To(BeEmpty())
+	})
+
 	It("doesn't complain with distinct FDWs and usage names", func() {
 		db := &apiv1.Database{
 			Spec: apiv1.DatabaseSpec{
@@ -317,6 +411,81 @@ var _ = Describe("Database validation", func() {
 			"spec.servers[0].options[1].name": "dup_option",
 			"spec.servers[0].usages[1].name":  "dup_usage",
 			"spec.servers[1].name":            "server1",
+		})
+	})
+
+	Context("database permissions", func() {
+		withPermissions := func(p *apiv1.DatabasePermissionsSpec) *apiv1.Database {
+			return &apiv1.Database{Spec: apiv1.DatabaseSpec{Permissions: p}}
+		}
+
+		It("accepts a database without permissions", func() {
+			Expect(v.validate(withPermissions(nil))).To(BeEmpty())
+		})
+
+		It("accepts the hardening use case", func() {
+			db := withPermissions(&apiv1.DatabasePermissionsSpec{
+				Connect: []apiv1.UsageSpec{
+					{Name: "app", Type: apiv1.GrantUsageSpecType},
+					{Name: "public", Type: apiv1.RevokeUsageSpecType},
+				},
+				Create:    []apiv1.UsageSpec{{Name: "app", Type: apiv1.GrantUsageSpecType}},
+				Temporary: []apiv1.UsageSpec{{Name: "public", Type: apiv1.RevokeUsageSpecType}},
+			})
+			Expect(v.validate(db)).To(BeEmpty())
+		})
+
+		It("rejects the same entry repeated in a list", func() {
+			db := withPermissions(&apiv1.DatabasePermissionsSpec{
+				Connect: []apiv1.UsageSpec{{Name: "app"}, {Name: "app", Type: apiv1.GrantUsageSpecType}},
+			})
+			errs := v.validate(db)
+			expectDuplicateErrors(errs, map[string]string{"spec.permissions.connect[1].name": "app"})
+		})
+
+		It("rejects an entry repeated through all", func() {
+			db := withPermissions(&apiv1.DatabasePermissionsSpec{
+				Connect: []apiv1.UsageSpec{{Name: "app", Type: apiv1.GrantUsageSpecType}},
+				All:     []apiv1.UsageSpec{{Name: "app", Type: apiv1.GrantUsageSpecType}},
+			})
+			errs := v.validate(db)
+			expectDuplicateErrors(errs, map[string]string{"spec.permissions.all[0].name": "app"})
+		})
+
+		It("rejects a role granted and revoked the same privilege", func() {
+			db := withPermissions(&apiv1.DatabasePermissionsSpec{
+				Connect: []apiv1.UsageSpec{
+					{Name: "app", Type: apiv1.GrantUsageSpecType},
+					{Name: "app", Type: apiv1.RevokeUsageSpecType},
+				},
+			})
+			errs := v.validate(db)
+			Expect(extractErrorFields(errs)).To(ConsistOf("spec.permissions.connect[1].name"))
+			Expect(errs[0].Type).To(Equal(field.ErrorTypeInvalid))
+		})
+
+		It("rejects a conflict between all and a single privilege", func() {
+			db := withPermissions(&apiv1.DatabasePermissionsSpec{
+				Connect: []apiv1.UsageSpec{{Name: "app", Type: apiv1.RevokeUsageSpecType}},
+				All:     []apiv1.UsageSpec{{Name: "app", Type: apiv1.GrantUsageSpecType}},
+			})
+			errs := v.validate(db)
+			Expect(extractErrorFields(errs)).To(ConsistOf("spec.permissions.all[0].name"))
+			Expect(errs[0].Type).To(Equal(field.ErrorTypeInvalid))
+		})
+
+		It("treats every spelling of public as the PUBLIC pseudo-role", func() {
+			db := withPermissions(&apiv1.DatabasePermissionsSpec{
+				Connect: []apiv1.UsageSpec{
+					{Name: "public", Type: apiv1.RevokeUsageSpecType},
+					{Name: "PUBLIC", Type: apiv1.GrantUsageSpecType},
+					{Name: "Public", Type: apiv1.RevokeUsageSpecType},
+				},
+			})
+			Expect(extractErrorFields(v.validate(db))).To(ConsistOf(
+				"spec.permissions.connect[1].name",
+				"spec.permissions.connect[2].name",
+			))
 		})
 	})
 })

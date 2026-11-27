@@ -21,6 +21,9 @@ package e2e
 
 import (
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	replicationasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/replication"
+	storageasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/storage"
 	"github.com/xataio/xata-cnpg/tests/utils/yaml"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -50,10 +53,10 @@ var _ = Describe("Switchover", Serial, Label(tests.LabelSelfHealing), func() {
 			clusterName, err := yaml.GetResourceNameFromYAML(env.Scheme, sampleFileWithReplicationSlots)
 			Expect(err).ToNot(HaveOccurred())
 
-			AssertCreateCluster(namespace, clusterName, sampleFileWithReplicationSlots, env)
-			AssertSwitchover(namespace, clusterName, env)
-			AssertPvcHasLabels(namespace, clusterName)
-			AssertClusterHAReplicationSlots(namespace, clusterName)
+			clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFileWithReplicationSlots)
+			clusterasserts.AssertSwitchover(env, testTimeouts, namespace, clusterName)
+			storageasserts.AssertPvcHasLabels(env, namespace, clusterName)
+			replicationasserts.AssertClusterHAReplicationSlots(env, namespace, clusterName)
 		})
 	})
 	Context("without HA Replication slots", func() {
@@ -66,9 +69,9 @@ var _ = Describe("Switchover", Serial, Label(tests.LabelSelfHealing), func() {
 			clusterName, err := yaml.GetResourceNameFromYAML(env.Scheme, sampleFileWithoutReplicationSlots)
 			Expect(err).ToNot(HaveOccurred())
 
-			AssertCreateCluster(namespace, clusterName, sampleFileWithoutReplicationSlots, env)
-			AssertSwitchover(namespace, clusterName, env)
-			AssertPvcHasLabels(namespace, clusterName)
+			clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFileWithoutReplicationSlots)
+			clusterasserts.AssertSwitchover(env, testTimeouts, namespace, clusterName)
+			storageasserts.AssertPvcHasLabels(env, namespace, clusterName)
 		})
 	})
 })

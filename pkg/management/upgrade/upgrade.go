@@ -34,6 +34,7 @@ import (
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
 	"github.com/xataio/xata-cnpg/pkg/concurrency"
+	"github.com/xataio/xata-cnpg/pkg/management"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 )
 
@@ -66,7 +67,7 @@ func FromReader(
 	defer func() {
 		// This code is executed only if the instance manager has not been updated, and
 		// this is the only condition we have a temporary file to remove
-		removeError := os.Remove(updatedInstanceManager.Name())
+		removeError := os.Remove(updatedInstanceManager.Name()) //nolint:gosec // path from our own temp file
 		if removeError != nil {
 			log.Warning("Error while removing temporary instance manager upload file",
 				"name", updatedInstanceManager.Name(), "err", err)
@@ -91,17 +92,25 @@ func FromReader(
 		"temporaryName", updatedInstanceManager.Name())
 
 	// Grant the executable bit to the new file
-	err = os.Chmod(updatedInstanceManager.Name(), 0o755) // #nosec
+	err = os.Chmod(updatedInstanceManager.Name(), 0o755) //nolint:gosec // path from our own temp file
 	if err != nil {
 		return fmt.Errorf("while granting the executable bit to the instance manager binary: %w", err)
 	}
 
 	// Replace the new instance manager with the new one
+	//nolint:gosec // path from our own temp file
 	if err := os.Rename(updatedInstanceManager.Name(), InstanceManagerPath); err != nil {
 		return fmt.Errorf("while replacing instance manager binary: %w", err)
 	}
 
-	// We are ready to reload the instance manager
+	// We are ready to reload the instance manager.
+	// The queued log records are exported before the log pipes stop, so that
+	// an unreachable collector can only delay the upgrade, never leave the
+	// PostgreSQL log without a reader. The records written from now until the
+	// process is replaced are not exported, and neither are the ones after a
+	// failed reload, as the export stays stopped.
+	management.ShutdownLogExport()
+
 	// First we are going to cancel the context, this will trigger the shutdown of all
 	// the Runnables handled by the manager.
 	// Only the postgres process will not be actually killed, as the postgres lifecycle
@@ -184,7 +193,7 @@ func validateInstanceManagerHash(
 // This function never returns in case of success.
 func reloadInstanceManager() error {
 	log.Info("Replacing current instance")
-	err := syscall.Exec(InstanceManagerPath, os.Args, os.Environ()) // #nosec G204
+	err := syscall.Exec(InstanceManagerPath, os.Args, os.Environ()) //nolint:gosec // execing our own binary with os.Args
 	if err != nil {
 		return err
 	}

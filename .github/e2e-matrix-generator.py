@@ -32,6 +32,7 @@ AKS_VERSIONS_FILE = ".github/aks_versions.json"
 EKS_VERSIONS_FILE = ".github/eks_versions.json"
 GKE_VERSIONS_FILE = ".github/gke_versions.json"
 KIND_VERSIONS_FILE = ".github/kind_versions.json"
+K3D_VERSIONS_FILE = ".github/k3d_versions.json"
 VERSION_SCOPE_FILE = ".github/k8s_versions_scope.json"
 E2E_TEST_TIMEOUT = ".github/e2e_test_timeout.json"
 
@@ -113,6 +114,16 @@ except:
     print(f"Failed opening file: {KIND_VERSIONS_FILE}")
     exit(1)
 
+# Kubernetes versions on k3d to use during the tests
+try:
+    with open(K3D_VERSIONS_FILE) as json_file:
+        version_list = json.load(json_file)
+        k3d_versions = filter_version(version_list, SUPPORT_K8S_VERSION["K3D"])
+    K3D_K8S = VersionList(k3d_versions)
+except:
+    print(f"Failed opening file: {K3D_VERSIONS_FILE}")
+    exit(1)
+
 # Kubernetes versions on EKS to use during the tests
 try:
     with open(EKS_VERSIONS_FILE) as json_file:
@@ -164,7 +175,7 @@ class E2EJob(dict):
     def __init__(self, k8s_version, postgres_version_list, flavor):
         postgres_version = postgres_version_list.latest
         postgres_version_pre = postgres_version_list.oldest
-        short_postgres_version = postgres_version.split('-')[0]
+        short_postgres_version = postgres_version.split("-")[0]
 
         if flavor == "pg":
             name = f"{k8s_version}-PostgreSQL-{short_postgres_version}"
@@ -186,7 +197,7 @@ class E2EJob(dict):
         return hash(self["id"])
 
 
-def build_push_include_local():
+def build_push_include_kind():
     """Build the list of tests running on push"""
     return {
         E2EJob(KIND_K8S.latest, POSTGRES.latest, "pg"),
@@ -194,9 +205,9 @@ def build_push_include_local():
     }
 
 
-def build_pull_request_include_local():
+def build_pull_request_include_kind():
     """Build the list of tests running on pull request"""
-    result = build_push_include_local()
+    result = build_push_include_kind()
 
     # Iterate over K8S versions
     for k8s_version in KIND_K8S:
@@ -211,9 +222,9 @@ def build_pull_request_include_local():
     return result
 
 
-def build_main_include_local():
+def build_main_include_kind():
     """Build the list tests running on main"""
-    result = build_pull_request_include_local()
+    result = build_pull_request_include_kind()
 
     # Iterate over K8S versions
     for k8s_version in KIND_K8S:
@@ -228,29 +239,29 @@ def build_main_include_local():
     return result
 
 
-def build_schedule_include_local():
+def build_schedule_include_kind():
     """Build the list of tests running on schedule"""
     # For the moment scheduled tests are identical to main
-    return build_main_include_local()
+    return build_main_include_kind()
 
 
-def build_push_include_cloud(engine_version_list):
+def build_push_include_default(engine_version_list):
     return {}
 
 
-def build_pull_request_include_cloud(engine_version_list):
+def build_pull_request_include_default(engine_version_list):
     return {
         E2EJob(engine_version_list.latest, POSTGRES.latest, "pg"),
     }
 
 
-def build_main_include_cloud(engine_version_list):
+def build_main_include_default(engine_version_list):
     return {
         E2EJob(engine_version_list.latest, POSTGRES.latest, "pg"),
     }
 
 
-def build_schedule_include_cloud(engine_version_list):
+def build_schedule_include_default(engine_version_list):
     """Build the list of tests running on schedule"""
     result = set()
     # Iterate over K8S versions
@@ -263,37 +274,45 @@ def build_schedule_include_cloud(engine_version_list):
 
 
 ENGINE_MODES = {
-    "local": {
-        "push": build_push_include_local,
-        "pull_request": build_pull_request_include_local,
-        "issue_comment": build_pull_request_include_local,
-        "workflow_dispatch": build_pull_request_include_local,
-        "main": build_main_include_local,
-        "schedule": build_schedule_include_local,
+    "kind": {
+        "push": build_push_include_kind,
+        "pull_request": build_pull_request_include_kind,
+        "issue_comment": build_pull_request_include_kind,
+        "workflow_dispatch": build_pull_request_include_kind,
+        "main": build_main_include_kind,
+        "schedule": build_schedule_include_kind,
+    },
+    "k3d": {
+        "push": lambda: build_push_include_default(K3D_K8S),
+        "pull_request": lambda: build_pull_request_include_default(K3D_K8S),
+        "issue_comment": lambda: build_pull_request_include_default(K3D_K8S),
+        "workflow_dispatch": lambda: build_pull_request_include_default(K3D_K8S),
+        "main": lambda: build_main_include_default(K3D_K8S),
+        "schedule": lambda: build_schedule_include_default(K3D_K8S),
     },
     "eks": {
-        "push": lambda: build_push_include_cloud(EKS_K8S),
-        "pull_request": lambda: build_pull_request_include_cloud(EKS_K8S),
-        "issue_comment": lambda: build_pull_request_include_cloud(EKS_K8S),
-        "workflow_dispatch": lambda: build_pull_request_include_cloud(EKS_K8S),
-        "main": lambda: build_main_include_cloud(EKS_K8S),
-        "schedule": lambda: build_schedule_include_cloud(EKS_K8S),
+        "push": lambda: build_push_include_default(EKS_K8S),
+        "pull_request": lambda: build_pull_request_include_default(EKS_K8S),
+        "issue_comment": lambda: build_pull_request_include_default(EKS_K8S),
+        "workflow_dispatch": lambda: build_pull_request_include_default(EKS_K8S),
+        "main": lambda: build_main_include_default(EKS_K8S),
+        "schedule": lambda: build_schedule_include_default(EKS_K8S),
     },
     "aks": {
-        "push": lambda: build_push_include_cloud(AKS_K8S),
-        "pull_request": lambda: build_pull_request_include_cloud(AKS_K8S),
-        "issue_comment": lambda: build_pull_request_include_cloud(AKS_K8S),
-        "workflow_dispatch": lambda: build_pull_request_include_cloud(AKS_K8S),
-        "main": lambda: build_main_include_cloud(AKS_K8S),
-        "schedule": lambda: build_schedule_include_cloud(AKS_K8S),
+        "push": lambda: build_push_include_default(AKS_K8S),
+        "pull_request": lambda: build_pull_request_include_default(AKS_K8S),
+        "issue_comment": lambda: build_pull_request_include_default(AKS_K8S),
+        "workflow_dispatch": lambda: build_pull_request_include_default(AKS_K8S),
+        "main": lambda: build_main_include_default(AKS_K8S),
+        "schedule": lambda: build_schedule_include_default(AKS_K8S),
     },
     "gke": {
-        "push": lambda: build_push_include_cloud(GKE_K8S),
-        "pull_request": lambda: build_pull_request_include_cloud(GKE_K8S),
-        "issue_comment": lambda: build_pull_request_include_cloud(GKE_K8S),
-        "workflow_dispatch": lambda: build_pull_request_include_cloud(GKE_K8S),
-        "main": lambda: build_main_include_cloud(GKE_K8S),
-        "schedule": lambda: build_schedule_include_cloud(GKE_K8S),
+        "push": lambda: build_push_include_default(GKE_K8S),
+        "pull_request": lambda: build_pull_request_include_default(GKE_K8S),
+        "issue_comment": lambda: build_pull_request_include_default(GKE_K8S),
+        "workflow_dispatch": lambda: build_pull_request_include_default(GKE_K8S),
+        "main": lambda: build_main_include_default(GKE_K8S),
+        "schedule": lambda: build_schedule_include_default(GKE_K8S),
     },
 }
 
@@ -320,13 +339,15 @@ if __name__ == "__main__":
         "--limit",
         type=str,
         default="",
-        help="limit to a list of engines",
+        help="limit to a list of engines, or 'none' to run no engine",
     )
     args = parser.parse_args()
 
     engines = set(ENGINE_MODES.keys())
 
-    if args.limit:
+    if args.limit.strip() == "none":
+        engines = set()
+    elif args.limit:
         required_engines = set(re.split(r"[, ]+", args.limit.strip()))
         if len(wrong_engines := required_engines - engines):
             raise SystemExit(

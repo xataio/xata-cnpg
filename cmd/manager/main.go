@@ -38,6 +38,7 @@ import (
 	"github.com/xataio/xata-cnpg/internal/cmd/manager/walarchive"
 	"github.com/xataio/xata-cnpg/internal/cmd/manager/walrestore"
 	"github.com/xataio/xata-cnpg/internal/cmd/versions"
+	"github.com/xataio/xata-cnpg/pkg/management"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
@@ -45,13 +46,22 @@ import (
 func main() {
 	cobra.EnableTraverseRunHooks = true
 
+	err := newRootCmd().Execute()
+	// PostRunE doesn't run when RunE fails
+	management.ShutdownLogExport()
+	if err != nil {
+		os.Exit(1)
+	}
+}
+
+func newRootCmd() *cobra.Command {
 	logFlags := &log.Flags{}
 
 	cmd := &cobra.Command{
 		Use:          "manager [cmd]",
 		SilenceUsage: true,
-		PersistentPreRun: func(_ *cobra.Command, _ []string) {
-			logFlags.ConfigureLogging()
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+			logFlags.ConfigureLogging(loggingOptions(cmd)...)
 		},
 	}
 
@@ -68,7 +78,40 @@ func main() {
 	cmd.AddCommand(pgbouncer.NewCmd())
 	cmd.AddCommand(debug.NewCmd())
 
-	if err := cmd.Execute(); err != nil {
-		os.Exit(1)
+	return cmd
+}
+
+// loggingOptions returns the logging configuration for the subcommand being
+// executed. The controller keeps the sampling that controller-runtime applies
+// to every operator, since a reconciliation storm can log the same message
+// well beyond the sampler threshold. Every other subcommand runs inside a
+// Cluster's pods, where the process output is the pod's log stream and
+// dropping records is never acceptable, most importantly for the instance
+// manager forwarding the PostgreSQL log, whose records share a single message
+// and would otherwise be collapsed by the sampler under a burst of activity.
+//
+// The controller, instance and pgbouncer subcommands, which run in the
+// operator, Cluster and Pooler pods, also export their records via
+// OpenTelemetry. wal-archive and wal-restore don't: the instance manager
+// forwards what they write, and exporting from them would add the export to
+// the latency of every WAL file.
+func loggingOptions(cmd *cobra.Command) []log.ConfigureOption {
+	switch topLevelCommand(cmd).Name() {
+	case "controller":
+		return []log.ConfigureOption{log.WithOpenTelemetry()}
+	case "instance", "pgbouncer":
+		return []log.ConfigureOption{log.WithDisabledSampling(), log.WithOpenTelemetry()}
+	default:
+		return []log.ConfigureOption{log.WithDisabledSampling()}
 	}
+}
+
+// topLevelCommand walks up the command tree until it finds the direct child
+// of the root command, i.e. the manager subcommand that was invoked
+func topLevelCommand(cmd *cobra.Command) *cobra.Command {
+	for cmd.HasParent() && cmd.Parent().HasParent() {
+		cmd = cmd.Parent()
+	}
+
+	return cmd
 }

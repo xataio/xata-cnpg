@@ -33,6 +33,8 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/specs"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	pgasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/postgres"
 	"github.com/xataio/xata-cnpg/tests/utils/operator"
 	podutils "github.com/xataio/xata-cnpg/tests/utils/pods"
 	"github.com/xataio/xata-cnpg/tests/utils/postgres"
@@ -68,17 +70,17 @@ var _ = Describe("Operator unavailable", Serial, Label(tests.LabelDisruptive, te
 			// Create the cluster namespace
 			namespace, err = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
-			AssertCreateCluster(namespace, clusterName, sampleFile, env)
+			clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFile)
 
 			// Load test data
 			currentPrimary := clusterName + "-1"
-			tableLocator := TableLocator{
+			tableLocator := pgasserts.TableLocator{
 				Namespace:    namespace,
 				ClusterName:  clusterName,
 				DatabaseName: postgres.AppDBName,
 				TableName:    "test",
 			}
-			AssertCreateTestData(env, tableLocator)
+			pgasserts.AssertCreateTestData(env, tableLocator)
 
 			By("scaling down operator replicas to zero", func() {
 				err := operator.ScaleOperatorDeployment(env.Ctx, env.Client, 0)
@@ -125,7 +127,7 @@ var _ = Describe("Operator unavailable", Serial, Label(tests.LabelDisruptive, te
 			})
 
 			// Expect a new primary to be elected and promoted
-			AssertNewPrimary(namespace, clusterName, currentPrimary)
+			clusterasserts.AssertNewPrimary(env, namespace, clusterName, currentPrimary)
 
 			By("expect a standby with the same name of the old primary to be created", func() {
 				namespacedName := types.NamespacedName{
@@ -139,7 +141,7 @@ var _ = Describe("Operator unavailable", Serial, Label(tests.LabelDisruptive, te
 					return specs.IsPodStandby(pod), err
 				}, timeout).Should(BeTrue())
 			})
-			AssertDataExpectedCount(env, tableLocator, 2)
+			pgasserts.AssertDataExpectedCount(env, tableLocator, 2)
 		})
 	})
 
@@ -152,17 +154,17 @@ var _ = Describe("Operator unavailable", Serial, Label(tests.LabelDisruptive, te
 			// Create the cluster namespace
 			namespace, err = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
-			AssertCreateCluster(namespace, clusterName, sampleFile, env)
+			clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFile)
 
 			// Load test data
 			currentPrimary := clusterName + "-1"
-			tableLocator := TableLocator{
+			tableLocator := pgasserts.TableLocator{
 				Namespace:    namespace,
 				ClusterName:  clusterName,
 				DatabaseName: postgres.AppDBName,
 				TableName:    "test",
 			}
-			AssertCreateTestData(env, tableLocator)
+			pgasserts.AssertCreateTestData(env, tableLocator)
 
 			operatorNamespace, err := operator.NamespaceName(env.Ctx, env.Client)
 			Expect(err).ToNot(HaveOccurred())
@@ -215,7 +217,7 @@ var _ = Describe("Operator unavailable", Serial, Label(tests.LabelDisruptive, te
 			})
 
 			// Expect a new primary to be elected and promoted
-			AssertNewPrimary(namespace, clusterName, currentPrimary)
+			clusterasserts.AssertNewPrimary(env, namespace, clusterName, currentPrimary)
 
 			By("expect a standby with the same name of the old primary to be created", func() {
 				namespacedName := types.NamespacedName{
@@ -229,7 +231,7 @@ var _ = Describe("Operator unavailable", Serial, Label(tests.LabelDisruptive, te
 					return specs.IsPodStandby(pod), err
 				}, timeout).Should(BeTrue())
 			})
-			AssertDataExpectedCount(env, tableLocator, 2)
+			pgasserts.AssertDataExpectedCount(env, tableLocator, 2)
 
 			// There is a chance that the webhook is not able to reach the new operator pod yet.
 			// This could make following tests fail, so we need to wait for the webhook to be working again.

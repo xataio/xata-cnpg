@@ -116,6 +116,19 @@ transparently configures replicas to take advantage of `restore_command` when in
 continuous recovery. As a result, PostgreSQL can use the WAL archive as a
 fallback option whenever pulling WALs via streaming replication fails.
 
+PostgreSQL switches a standby from the WAL archive back to streaming
+replication only when `restore_command` fails. While the archive keeps up with
+the standby, for example on a busy primary, this may never happen: the standby
+has no WAL receiver, its replication slot stays inactive, and it cannot take
+part in synchronous replication.
+
+To avoid this, once a standby has been restoring WAL files from the archive for
+30 seconds, the instance manager makes `restore_command` fail, so that
+PostgreSQL tries streaming replication. If streaming replication does not
+hold, the interval doubles, up to 5 minutes. This applies to the designated
+primary of a replica cluster as well, when it can stream from its source, and
+never happens outside standby mode or while a promotion is pending.
+
 ## Synchronous Replication
 
 CloudNativePG supports both
@@ -125,9 +138,12 @@ CloudNativePG supports both
     By default, synchronous replication pauses write operations if the required
     number of standby nodes for WAL replication during transaction commits is
     unavailable. This behavior prioritizes data durability and aligns with
-    PostgreSQL DBA best practices. However, if self-healing is a higher priority
+    PostgreSQL DBA best practices. As a general rule, plan for synchronous
+    replication in clusters with at least three instances, to tolerate the loss
+    of one of them. However, if self-healing is a higher priority
     than strict data durability in your setup, this setting can be adjusted. For
-    details on managing this behavior, refer to the [Data Durability and Synchronous Replication](#data-durability-and-synchronous-replication)
+    details on managing this behavior, refer to the
+    [Data Durability and Synchronous Replication](#data-durability-and-synchronous-replication)
     section.
 :::
 
@@ -223,6 +239,14 @@ spec:
 
 To prioritize self-healing over strict data durability, set `dataDurability`
 to `preferred` instead.
+
+:::warning
+    The legacy and the new configuration methods are mutually exclusive:
+    remove `minSyncReplicas` and `maxSyncReplicas` from the `Cluster`
+    specification in the same change that adds `.spec.postgresql.synchronous`.
+    If you use `syncReplicaElectionConstraint`, replace it with the
+    [failure domain options](#failure-domain-aware-synchronous-replication).
+:::
 
 ### Priority-based Synchronous Replication
 
@@ -475,17 +499,110 @@ spec:
 5. When the replicas are back, `synchronous_standby_names` will be back to
    the initial state.
 
+### Failure Domain-Aware Synchronous Replication
+
+CloudNativePG can restrict the choice of synchronous standbys to instances
+located in a failure domain different from the primary's, such as another
+availability zone. The labels that define the failure domains are declared
+through one of the following mutually exclusive options of the
+`.spec.postgresql.synchronous` stanza:
+
+- `podFailureDomainKeys`: a list of pod label keys, resolved from the labels of
+  each instance pod, without ever consulting the node (recommended)
+- `nodeFailureDomainKeys`: a list of node label keys, resolved from the labels
+  of the node hosting each instance (for example,
+  `topology.kubernetes.io/zone`)
+
+Two instances belong to the same failure domain when all the listed labels
+carry the same values.
+
+::::note[Topology labels on pods]
+Starting from Kubernetes 1.35, the `topology.kubernetes.io/zone` and
+`topology.kubernetes.io/region` labels are automatically copied from the node
+onto each pod at scheduling time. As a result, `topology.kubernetes.io/zone`
+(the most common failure domain identifier) is available on pods with no extra
+setup. If you are on Kubernetes 1.34 or older, or the
+`PodTopologyLabelsAdmission` feature is not available or enabled (see
+[KEP-4742](https://github.com/kubernetes/enhancements/issues/4742)), use
+`nodeFailureDomainKeys` instead.
+::::
+
+CloudNativePG applies the failure domain constraint only when there are
+enough cross-domain standbys to satisfy it completely: the full configured
+`number` with `required` data durability, or just one with `preferred`. When
+that holds, only the standbys outside the primary's failure domain populate
+`synchronous_standby_names`.
+
+With `preferred` data durability this means the placement preference can lower
+the number of required acknowledgments: as ["Preferred Data
+Durability"](#preferred-data-durability) covers, that number is capped to the
+standbys in the list, so a single cross-domain standby out of two healthy
+replicas results in one required acknowledgment instead of the two a cluster
+without failure domain keys would ask for. Writes are never blocked, but the
+durability of each commit follows the failure domain distribution.
+
+If that isn't the case (too few cross-domain standbys, or the topology could
+not be extracted, for example because the node hosting a pod was deleted, or
+a label listed in `podFailureDomainKeys` is missing from a pod), the
+constraint is dropped entirely and standbys are selected exactly as if the
+keys were never configured. This all-or-nothing behavior guarantees that
+write transactions never wait for acknowledgments that cannot arrive.
+
+The `SyncReplicationTopologySatisfied` condition in the cluster status reports
+whether the placement preference is currently honored. The condition's reason
+is also shown in the `SYNCTOPOLOGY` column of `kubectl get clusters -o wide`.
+The `kubectl cnpg status` command shows how the instances are spread across the
+failure domains.
+The underlying data, including the failure domain of each instance and
+whether the topology was successfully extracted, is available under the
+cluster's `.status.topology` key.
+
+:::important
+The condition only evaluates the cluster instances: standby
+names supplied through `standbyNamesPre` and `standbyNamesPost` are outside
+the operator's knowledge and are not part of the check.
+:::
+
+For example, the following cluster keeps two synchronous standbys, chosen from
+the instances running in a different availability zone than the primary
+whenever possible:
+
+```yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cluster-example-syncreplicas
+spec:
+  instances: 5
+
+  postgresql:
+    synchronous:
+      podFailureDomainKeys:
+      - topology.kubernetes.io/zone
+      method: first
+      number: 2
+
+  storage:
+    size: 1Gi
+```
+
 ## Synchronous Replication (Deprecated)
 
 :::warning
     Prior to CloudNativePG 1.24, only the quorum-based synchronous replication
-    implementation was supported. Although this method is now deprecated, it
-    will not be removed anytime soon.
+    implementation was supported. This method, configured through
+    `.spec.minSyncReplicas` and `.spec.maxSyncReplicas`, is deprecated as of
+    CloudNativePG 1.31. **CloudNativePG 1.32 is the last minor release that
+    ships with it, and it is removed starting from 1.33.0.** Releases up to and
+    including 1.32, and their patch releases, keep supporting it for as long as
+    they are supported. You must migrate to the new method before upgrading to
+    1.33 or later. The operator emits an admission warning when you create or
+    update a `Cluster` that uses the legacy method.
     The new method prioritizes data durability over self-healing and offers more
     robust features, including priority-based synchronous replication and full
     control over the `synchronous_standby_names` option.
-    It is recommended to gradually migrate to the new configuration method for
-    synchronous replication, as explained in the previous paragraph.
+    To migrate, follow
+    ["Migrating from Deprecated Synchronous Replication Implementation"](#migrating-from-deprecated-synchronous-replication-implementation).
 :::
 
 :::info[Important]
@@ -544,6 +661,14 @@ requested number of synchronous standbys in the list*.
 
 ### Select nodes for synchronous replication
 
+:::info[Use the new failure domain API]
+Unless you specifically need the deprecated quorum-based synchronous
+replication API, prefer the current API instead. See
+["Failure Domain-Aware Synchronous Replication"](#failure-domain-aware-synchronous-replication)
+for the equivalent, more flexible `podFailureDomainKeys` and
+`nodeFailureDomainKeys` options.
+:::
+
 CloudNativePG enables you to select which PostgreSQL instances are eligible to
 participate in a quorum-based synchronous replication set through anti-affinity
 rules based on the node labels where the PVC holding the PGDATA and the
@@ -557,7 +682,8 @@ Postgres pod are.
 :::warning
     The `.spec.postgresql.syncReplicaElectionConstraint` option only applies to the
     legacy implementation of synchronous replication
-    (see ["Synchronous Replication (Deprecated)"](replication.md#synchronous-replication-deprecated)).
+    (see ["Synchronous Replication (Deprecated)"](replication.md#synchronous-replication-deprecated))
+    and is deprecated along with it as of CloudNativePG 1.31 (removal in 1.33.0).
 :::
 
 As an example use-case for this feature: in a cluster with a single sync
@@ -836,6 +962,38 @@ PostgreSQL documentation on [Logical Replication Failover](https://www.postgresq
 For PostgreSQL 16 and older versions, CloudNativePG uses the
 [`pg_failover_slots` extension](https://github.com/EnterpriseDB/pg_failover_slots)
 to maintain synchronization of logical replication slots across failovers.
+
+#### Replicas that are not caught up
+
+The guarantee above has a cost. Logical decoding sends changes only after
+every listed standby slot has confirmed the WAL, so a replica that is not
+caught up holds logical replication back. This is a deliberate choice of data
+safety over availability: if a lagging replica were left out of the list and
+promoted, a subscriber could already have data the new primary does not have.
+
+CloudNativePG lists the slots of all the replicas, with one exception: a new
+replica is added to the list only after its initial bootstrap, because it
+cannot be promoted before that. Otherwise, logical replication waits:
+
+- while a new replica catches up after its bootstrap, for example after a
+  scale-up;
+- while a replica is lagging;
+- while a replica is down, for as long as its PVC exists.
+
+On PostgreSQL 16 and earlier, `pg_failover_slots` terminates the logical WAL
+sender after `wal_sender_timeout`, and the subscriber restarts its apply
+worker until the replica catches up.
+
+If you need logical replication to keep running during one of these periods,
+you have the following options:
+
+- Disable `synchronizeLogicalDecoding` for that period, and enable it again
+  once the replicas are streaming.
+- On PostgreSQL 16 and earlier, set
+  `pg_failover_slots.standby_slots_min_confirmed` to the number of replicas
+  that must confirm the WAL. This weakens the guarantee in the same way.
+- If a replica is lost for good, remove the instance and its PVCs (for example
+  with `kubectl cnpg destroy`). The operator then drops its slot.
 
 ### Capping the WAL size retained for replication slots
 

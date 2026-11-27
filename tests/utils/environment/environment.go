@@ -22,7 +22,6 @@ package environment
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"sync"
 	"time"
@@ -44,15 +43,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/xataio/xata-cnpg/pkg/utils"
-	"github.com/xataio/xata-cnpg/pkg/versions"
+	"github.com/xataio/xata-cnpg/tests/config"
 	"github.com/xataio/xata-cnpg/tests/utils/namespaces"
 	"github.com/xataio/xata-cnpg/tests/utils/objects"
+	storageutils "github.com/xataio/xata-cnpg/tests/utils/storage"
 
 	// Import the client auth plugin package to allow use gke or ake to run tests
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	. "github.com/onsi/ginkgo/v2" // nolint
-	. "github.com/onsi/gomega"    // nolint
+	. "github.com/onsi/ginkgo/v2" //nolint
+	. "github.com/onsi/gomega"    //nolint
 )
 
 const (
@@ -65,29 +65,42 @@ const (
 	// MinimalSuffix is the suffix for minimal images
 	MinimalSuffix = "minimal-trixie"
 
+	// SystemSuffix is the suffix for system images (includes barman-cloud tools)
+	SystemSuffix = "system-trixie"
+
 	// PostGISSuffix is the suffix for PostGIS images
 	PostGISSuffix = "3-standard-trixie"
+)
 
-	// Official CloudNativePG image repositories
-	defaultPostgresImageRepository = "ghcr.io/cloudnative-pg/postgresql"
-	defaultPostGISImageRepository  = "ghcr.io/cloudnative-pg/postgis"
+// Versions of the extension images used by the ImageVolume tests.
+// The PostgreSQL major in extractVersion is only a Renovate lookup key:
+// image tags are computed inside PostgisExtensionImage() and PgvectorExtensionImage(),
+// based on the PostgreSQL major currently under test.
+//
+//nolint:lll
+const (
+	// renovate: datasource=docker depName=ghcr.io/cloudnative-pg/postgis-extension extractVersion=^(?<version>[\d.]+)-18-trixie$
+	postgisExtensionVersion = "3.7.0"
+	// renovate: datasource=docker depName=ghcr.io/cloudnative-pg/pgvector extractVersion=^(?<version>[\d.]+)-18-trixie$
+	pgvectorExtensionVersion = "0.8.7"
 )
 
 // TestingEnvironment struct for operator testing
 type TestingEnvironment struct {
-	RestClientConfig        *rest.Config
-	Client                  client.Client
-	Interface               kubernetes.Interface
-	APIExtensionClient      apiextensionsclientset.Interface
-	Ctx                     context.Context
-	Scheme                  *runtime.Scheme
-	Log                     logr.Logger
-	PostgresImageName       string
-	PostgresImageTag        string
-	PostgresVersion         uint64
-	PostgresImageRepository string
-	PostGISImageRepository  string
-	createdNamespaces       *uniqueStringSlice
+	RestClientConfig           *rest.Config
+	Client                     client.Client
+	Interface                  kubernetes.Interface
+	APIExtensionClient         apiextensionsclientset.Interface
+	Ctx                        context.Context
+	Scheme                     *runtime.Scheme
+	Log                        logr.Logger
+	PostgresImageName          string
+	PostgresImageTag           string
+	PostgresVersion            uint64
+	DefaultStorageClass        string
+	CSIStorageClass            string
+	DefaultVolumeSnapshotClass string
+	createdNamespaces          *uniqueStringSlice
 }
 
 type uniqueStringSlice struct {
@@ -137,27 +150,11 @@ func NewTestingEnvironment() (*TestingEnvironment, error) {
 
 	env.createdNamespaces = &uniqueStringSlice{}
 
-	postgresImage := versions.DefaultImageName
+	cfg := config.Current()
 
-	// Fetching postgres image.
-	if postgresImageFromUser, exist := os.LookupEnv("POSTGRES_IMG"); exist {
-		postgresImage = postgresImageFromUser
-	}
-	imageReference := reference.New(postgresImage)
+	imageReference := reference.New(cfg.Postgres.Image)
 	env.PostgresImageName = imageReference.Name
 	env.PostgresImageTag = imageReference.Tag
-
-	// Set PostgreSQL image repository (can be overridden via env variable)
-	env.PostgresImageRepository = defaultPostgresImageRepository
-	if postgresRepoFromUser, exist := os.LookupEnv("POSTGRES_IMG_REPOSITORY"); exist {
-		env.PostgresImageRepository = postgresRepoFromUser
-	}
-
-	// Set PostGIS image repository (can be overridden via env variable)
-	env.PostGISImageRepository = defaultPostGISImageRepository
-	if postgisRepoFromUser, exist := os.LookupEnv("POSTGIS_IMG_REPOSITORY"); exist {
-		env.PostGISImageRepository = postgisRepoFromUser
-	}
 
 	postgresImageVersion, err := version.FromTag(imageReference.Tag)
 	if err != nil {
@@ -179,6 +176,44 @@ func NewTestingEnvironment() (*TestingEnvironment, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not detect SeccompProfile support: %w", err)
 	}
+
+	// Storage classes left empty in the configuration are detected from
+	// the cluster
+	if cfg.Storage.StorageClass != "" {
+		env.DefaultStorageClass = cfg.Storage.StorageClass
+	} else {
+		env.DefaultStorageClass, err = storageutils.GetDefaultStorageClassName(env.Ctx, env.Interface)
+		if err != nil {
+			return nil, fmt.Errorf("detecting default storage class: %w", err)
+		}
+	}
+
+	if cfg.Storage.CSIStorageClass != "" {
+		env.CSIStorageClass = cfg.Storage.CSIStorageClass
+	} else {
+		env.CSIStorageClass, err = storageutils.GetCSIStorageClassName(env.Ctx, env.Interface)
+		if err != nil {
+			return nil, fmt.Errorf("detecting CSI storage class: %w", err)
+		}
+	}
+
+	if cfg.Storage.VolumeSnapshotClass != "" {
+		env.DefaultVolumeSnapshotClass = cfg.Storage.VolumeSnapshotClass
+	} else {
+		env.DefaultVolumeSnapshotClass, err = storageutils.GetDefaultVolumeSnapshotClassName(
+			env.Ctx, env.Interface, env.CSIStorageClass)
+		if err != nil {
+			return nil, fmt.Errorf("detecting default volume snapshot class: %w", err)
+		}
+	}
+
+	// Write the resolved values back, so that helpers reading the
+	// configuration see the detected classes too
+	config.UpdateStorage(config.StorageConfiguration{
+		StorageClass:        env.DefaultStorageClass,
+		CSIStorageClass:     env.CSIStorageClass,
+		VolumeSnapshotClass: env.DefaultVolumeSnapshotClass,
+	})
 
 	return &env, nil
 }
@@ -216,7 +251,7 @@ func (env TestingEnvironment) CreateUniqueTestNamespace(
 ) (string, error) {
 	name := env.createdNamespaces.generateUniqueName(namespacePrefix)
 
-	return name, namespaces.CreateTestNamespace(ctx, crudClient, name, opts...)
+	return name, namespaces.CreateTestNamespace(ctx, crudClient, env.Interface, env.RestClientConfig, name, opts...)
 }
 
 // StandardImageName returns the full image name for a standard Postgres image.
@@ -234,19 +269,48 @@ func (env *TestingEnvironment) MinimalImageName(tag string) string {
 // PostGISImageName returns the full image name for the official CloudNativePG PostGIS image.
 // Example: ghcr.io/cloudnative-pg/postgis:17-3-standard-trixie
 func (env *TestingEnvironment) PostGISImageName(tag string) string {
-	return fmt.Sprintf("%s:%s-%s", env.PostGISImageRepository, tag, PostGISSuffix)
+	return fmt.Sprintf("%s:%s-%s", config.Current().Postgres.PostGISImageRepository, tag, PostGISSuffix)
 }
 
 // OfficialStandardImageName returns the full image name for the official CloudNativePG standard Postgres image.
 // This is used for major upgrade tests where source images must come from the official registry.
 // Example: ghcr.io/cloudnative-pg/postgresql:16-standard-trixie
 func (env *TestingEnvironment) OfficialStandardImageName(tag string) string {
-	return fmt.Sprintf("%s:%s-%s", env.PostgresImageRepository, tag, StandardSuffix)
+	return fmt.Sprintf("%s:%s-%s", config.Current().Postgres.ImageRepository, tag, StandardSuffix)
 }
 
 // OfficialMinimalImageName returns the full image name for the official CloudNativePG minimal Postgres image.
 // This is used for major upgrade tests where source images must come from the official registry.
 // Example: ghcr.io/cloudnative-pg/postgresql:16-minimal-trixie
 func (env *TestingEnvironment) OfficialMinimalImageName(tag string) string {
-	return fmt.Sprintf("%s:%s-%s", env.PostgresImageRepository, tag, MinimalSuffix)
+	return fmt.Sprintf("%s:%s-%s", config.Current().Postgres.ImageRepository, tag, MinimalSuffix)
+}
+
+// SystemImageName returns the full image name for a system Postgres image.
+// System images include barman-cloud tools for backup and recovery.
+// Example: ghcr.io/cloudnative-pg/postgresql:17-system-trixie
+func (env *TestingEnvironment) SystemImageName(tag string) string {
+	return fmt.Sprintf("%s:%s-%s", env.PostgresImageName, tag, SystemSuffix)
+}
+
+// OfficialSystemImageName returns the full image name for the official CloudNativePG system Postgres image.
+// This is used for major upgrade tests where source images must come from the official registry.
+// System images include barman-cloud tools for backup and recovery.
+// Example: ghcr.io/cloudnative-pg/postgresql:16-system-trixie
+func (env *TestingEnvironment) OfficialSystemImageName(tag string) string {
+	return fmt.Sprintf("%s:%s-%s", config.Current().Postgres.ImageRepository, tag, SystemSuffix)
+}
+
+// PostgisExtensionImage returns the PostGIS extension image matching the
+// PostgreSQL major version under test.
+func (env *TestingEnvironment) PostgisExtensionImage() string {
+	return fmt.Sprintf("ghcr.io/cloudnative-pg/postgis-extension:%s-%d-trixie",
+		postgisExtensionVersion, env.PostgresVersion)
+}
+
+// PgvectorExtensionImage returns the pgvector extension image matching the
+// PostgreSQL major version under test.
+func (env *TestingEnvironment) PgvectorExtensionImage() string {
+	return fmt.Sprintf("ghcr.io/cloudnative-pg/pgvector:%s-%d-trixie",
+		pgvectorExtensionVersion, env.PostgresVersion)
 }

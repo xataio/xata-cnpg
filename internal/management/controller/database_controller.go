@@ -22,16 +22,21 @@ package controller
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/webhook/guard"
 	"github.com/xataio/xata-cnpg/pkg/management/postgres"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 )
@@ -41,6 +46,7 @@ type DatabaseReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
+	admission           *guard.Admission[*apiv1.Database]
 	instance            instanceInterface
 	finalizerReconciler *finalizerReconciler[*apiv1.Database]
 
@@ -87,6 +93,15 @@ var serverObjectManager = databaseObjectManager[apiv1.ServerSpec, serverInfo]{
 // database reconciliation loop failures
 const databaseReconciliationInterval = 30 * time.Second
 
+// metricsExporterRoleRetryInterval is how long to wait before retrying a
+// database that can't be created until the metrics exporter role exists
+const metricsExporterRoleRetryInterval = 5 * time.Second
+
+// errMetricsExporterRoleNotReady is raised when a database has to be created
+// but the metrics exporter role is not there yet
+var errMetricsExporterRoleNotReady = fmt.Errorf("waiting for the %s role to be created",
+	apiv1.MetricsExporterUserName)
+
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=databases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=databases/status,verbs=get;update;patch
 
@@ -115,15 +130,38 @@ func (r *DatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	// If everything is reconciled, we're done here
-	if database.Generation == database.Status.ObservedGeneration {
-		return ctrl.Result{}, nil
+	if result, err := r.admission.EnsureResourceIsAdmitted(
+		ctx,
+		guard.AdmissionParams[*apiv1.Database]{
+			Object:       &database,
+			Client:       r.Client,
+			ApplyChanges: true,
+		},
+	); !result.IsZero() || err != nil {
+		return result, err
 	}
 
 	// Fetch the Cluster from the cache
 	cluster, err := r.GetCluster(ctx)
 	if err != nil {
+		// A reconciled database keeps its status: the cluster may be gone
+		// or unreadable while it is being deleted.
+		if database.Generation == database.Status.ObservedGeneration {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
 		return ctrl.Result{}, markAsFailed(ctx, r.Client, &database, fmt.Errorf("while fetching the cluster: %w", err))
+	}
+
+	// If everything is reconciled, we're done here
+	if database.Generation == database.Status.ObservedGeneration {
+		// ...unless the cluster moved in or out of the replica role after
+		// the database was applied: report the demotion on the status, and
+		// evaluate the database again after the promotion.
+		result, proceed, err := handleReplicaRoleTransition(
+			ctx, r.Client, r.instance, cluster, &database, databaseReconciliationInterval)
+		if err != nil || !proceed {
+			return result, err
+		}
 	}
 
 	contextLogger.Info("Reconciling database")
@@ -141,8 +179,11 @@ func (r *DatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{RequeueAfter: databaseReconciliationInterval}, nil
 	}
 
-	// Cannot do anything on a replica cluster
-	if cluster.IsReplica() {
+	// A replica cluster is read-only, so the apply path is gated here. Deletion
+	// is still allowed through: an object that acquired its finalizer while this
+	// cluster was primary must release it after a demotion. The drop itself is
+	// skipped on a replica (see evaluateDropDatabase).
+	if cluster.IsReplica() && database.GetDeletionTimestamp().IsZero() {
 		if err := markAsUnknown(ctx, r.Client, &database, errClusterIsReplica); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -162,6 +203,16 @@ func (r *DatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if err := r.reconcileDatabaseResource(ctx, &database); err != nil {
+		// This is expected on a new cluster, so it is not a failure
+		if errors.Is(err, errMetricsExporterRoleNotReady) {
+			contextLogger.Info("waiting for the metrics exporter role before creating the database",
+				"database", database.Spec.Name)
+			if markErr := markAsUnknown(ctx, r.Client, &database, err); markErr != nil {
+				return ctrl.Result{}, markErr
+			}
+			return ctrl.Result{RequeueAfter: metricsExporterRoleRetryInterval}, nil
+		}
+
 		if markErr := markAsFailed(ctx, r.Client, &database, err); markErr != nil {
 			contextLogger.Error(err, "while marking as failed the database resource",
 				"error", err,
@@ -185,6 +236,25 @@ func (r *DatabaseReconciler) evaluateDropDatabase(ctx context.Context, db *apiv1
 	if db.Spec.ReclaimPolicy != apiv1.DatabaseReclaimDelete {
 		return nil
 	}
+
+	// On a replica we cannot drop the database: return without touching
+	// PostgreSQL so the finalizer is released. Dropping it is left to the
+	// primary cluster's own Database object, if any.
+	cluster, err := r.GetCluster(ctx)
+	if err != nil {
+		return fmt.Errorf("while fetching the cluster: %w", err)
+	}
+	if cluster.IsReplica() {
+		return nil
+	}
+
+	// An object that never reconciled does not own the database: a
+	// conflicting duplicate is blocked before applying anything, and its
+	// deletion must not drop the database owned by the surviving object.
+	if !db.HasReconciliations() {
+		return nil
+	}
+
 	sqlDB, err := r.getSuperUserDB()
 	if err != nil {
 		return fmt.Errorf("while getting DB connection: %w", err)
@@ -197,10 +267,12 @@ func (r *DatabaseReconciler) evaluateDropDatabase(ctx context.Context, db *apiv1
 func NewDatabaseReconciler(
 	mgr manager.Manager,
 	instance *postgres.Instance,
+	admission *guard.Admission[*apiv1.Database],
 ) *DatabaseReconciler {
 	dr := &DatabaseReconciler{
-		Client:   mgr.GetClient(),
-		instance: instance,
+		Client:    mgr.GetClient(),
+		instance:  instance,
+		admission: admission,
 		getSuperUserDB: func() (*sql.DB, error) {
 			return instance.GetSuperUserDB()
 		},
@@ -222,6 +294,13 @@ func NewDatabaseReconciler(
 func (r *DatabaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Database{}).
+		Watches(
+			&apiv1.Cluster{},
+			handler.EnqueueRequestsFromMapFunc(mapClusterToManagedResources(
+				r.instance, mgr.GetClient(),
+				func() client.ObjectList { return &apiv1.DatabaseList{} })),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
 		Named("instance-database").
 		Complete(r)
 }
@@ -245,6 +324,10 @@ func (r *DatabaseReconciler) reconcileDatabaseResource(ctx context.Context, obj 
 		return err
 	}
 
+	// GRANT and REVOKE on a database act on the shared pg_database catalog,
+	// so the superuser connection to the postgres database is enough
+	obj.Status.Permissions = reconcileDatabasePermissions(ctx, db, obj)
+
 	if err := r.reconcileDatabaseObjects(ctx, obj); err != nil {
 		return err
 	}
@@ -265,6 +348,11 @@ func (r *DatabaseReconciler) reconcileDatabaseResource(ctx context.Context, obj 
 		}
 	}
 	for _, status := range obj.Status.Servers {
+		if !status.Applied {
+			return ErrFailedDatabaseObjectReconciliation
+		}
+	}
+	for _, status := range obj.Status.Permissions {
 		if !status.Applied {
 			return ErrFailedDatabaseObjectReconciliation
 		}
@@ -309,5 +397,22 @@ func (r *DatabaseReconciler) reconcilePostgresDatabase(ctx context.Context, db *
 		return updateDatabase(ctx, db, obj)
 	}
 
-	return createDatabase(ctx, db, obj)
+	// The exporter must exist before creating the database, otherwise a failure
+	// would leave a database that is not restricted and is never retried
+	exporterExists, err := postgres.MetricsExporterRoleExists(ctx, db)
+	if err != nil {
+		return fmt.Errorf("while checking the metrics exporter role: %w", err)
+	}
+	if !exporterExists {
+		return errMetricsExporterRoleNotReady
+	}
+
+	if err := createDatabase(ctx, db, obj); err != nil {
+		return err
+	}
+
+	// New databases don't allow PUBLIC to connect, but the metrics exporter
+	// can. The permissions of the resource are reconciled afterwards, so they
+	// can override this.
+	return postgres.SetupNewDatabase(ctx, db, obj.Spec.Name)
 }

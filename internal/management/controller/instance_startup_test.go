@@ -1,0 +1,264 @@
+/*
+Copyright © contributors to CloudNativePG, established as
+CloudNativePG a Series of LF Projects, LLC.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
+package controller
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	apiv1 "github.com/xataio/xata-cnpg/api/v1"
+	"github.com/xataio/xata-cnpg/internal/cmd/manager/instance/run/lease"
+	"github.com/xataio/xata-cnpg/internal/controller"
+	schemeBuilder "github.com/xataio/xata-cnpg/internal/scheme"
+	"github.com/xataio/xata-cnpg/pkg/management/postgres"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+// fakeLeaseAcquirer reports whatever acquirePrimaryLease's caller should see
+// and counts the yields it is asked for. It also stands for what the previous
+// primary published on the lease, and records the calls that the promotion
+// makes on it, in order.
+type fakeLeaseAcquirer struct {
+	err    error
+	yields int
+
+	annotation  string
+	positionErr error
+	markErr     error
+
+	// calls are the names of the methods that the promotion called
+	calls []string
+	marks int
+}
+
+func (f *fakeLeaseAcquirer) Acquire(context.Context, lease.Config) error {
+	return f.err
+}
+
+func (f *fakeLeaseAcquirer) Yield(context.Context) {
+	f.yields++
+}
+
+func (f *fakeLeaseAcquirer) Position(context.Context) (string, error) {
+	f.calls = append(f.calls, "Position")
+	return f.annotation, f.positionErr
+}
+
+func (f *fakeLeaseAcquirer) MarkPromoting(context.Context) error {
+	f.calls = append(f.calls, "MarkPromoting")
+	f.marks++
+	return f.markErr
+}
+
+var _ = Describe("verifyPgDataCoherenceForPrimary primary lease gate", func() {
+	const (
+		namespace   = "default"
+		clusterName = "cluster-example"
+		podName     = clusterName + "-1"
+	)
+
+	newReconciler := func(acquireErr error) (*InstanceReconciler, *apiv1.Cluster) {
+		cluster := &apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: clusterName},
+			Status:     apiv1.ClusterStatus{TargetPrimary: podName},
+		}
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(schemeBuilder.BuildWithAllKnownScheme()).
+			WithObjects(cluster).
+			WithStatusSubresource(cluster).
+			Build()
+
+		pgInstance := postgres.NewInstance().
+			WithNamespace(namespace).
+			WithPodName(podName).
+			WithClusterName(clusterName)
+		pgInstance.PgData = GinkgoT().TempDir()
+
+		return &InstanceReconciler{
+			client:               fakeClient,
+			instance:             pgInstance,
+			primaryLeaseAcquirer: &fakeLeaseAcquirer{err: acquireErr},
+		}, cluster
+	}
+
+	It("blocks on the lease and does not mark itself primary while it's not held",
+		func(ctx SpecContext) {
+			r, cluster := newReconciler(context.DeadlineExceeded)
+
+			err := r.verifyPgDataCoherenceForPrimary(ctx, cluster)
+
+			Expect(err).To(MatchError(controller.ErrNextLoop))
+			Expect(cluster.Status.CurrentPrimary).To(BeEmpty())
+		})
+
+	It("marks itself primary once the lease is held", func(ctx SpecContext) {
+		r, cluster := newReconciler(nil)
+
+		err := r.verifyPgDataCoherenceForPrimary(ctx, cluster)
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(cluster.Status.CurrentPrimary).To(Equal(podName))
+	})
+
+	// A canceled switchover leaves a marker as current primary. The old
+	// primary, made the target again, must start instead of waiting for a
+	// switchover that will not finish.
+	It("starts as primary when its switchover was canceled", func(ctx SpecContext) {
+		r, cluster := newReconciler(nil)
+		cluster.Status.CurrentPrimary = "cancel"
+
+		err := r.verifyPgDataCoherenceForPrimary(ctx, cluster)
+
+		Expect(err).ToNot(HaveOccurred())
+	})
+})
+
+var _ = Describe("yielding the primary lease when not the target", func() {
+	const (
+		namespace   = "default"
+		clusterName = "cluster-example"
+		podName     = clusterName + "-1"
+		otherPod    = clusterName + "-2"
+	)
+
+	var (
+		r        *InstanceReconciler
+		acquirer *fakeLeaseAcquirer
+		cluster  *apiv1.Cluster
+	)
+
+	// standby.signal is what IsPrimary reads: with it PostgreSQL is in
+	// recovery, without it this PGDATA is a primary.
+	makeReplica := func() {
+		Expect(os.WriteFile(filepath.Join(r.instance.PgData, "standby.signal"), nil, 0o600)).To(Succeed())
+	}
+
+	BeforeEach(func() {
+		acquirer = &fakeLeaseAcquirer{}
+		pgInstance := postgres.NewInstance().
+			WithNamespace(namespace).
+			WithPodName(podName).
+			WithClusterName(clusterName)
+		pgInstance.PgData = GinkgoT().TempDir()
+		r = &InstanceReconciler{instance: pgInstance, primaryLeaseAcquirer: acquirer}
+		cluster = &apiv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: clusterName},
+			Status:     apiv1.ClusterStatus{TargetPrimary: otherPod},
+		}
+	})
+
+	It("yields when this pod is a replica and not the target primary", func(ctx SpecContext) {
+		makeReplica()
+
+		r.yieldPrimaryLeaseIfNotTarget(ctx, cluster)
+		Expect(acquirer.yields).To(Equal(1))
+	})
+
+	It("never yields while this pod is a primary, as during a switchover", func(ctx SpecContext) {
+		r.yieldPrimaryLeaseIfNotTarget(ctx, cluster)
+		Expect(acquirer.yields).To(BeZero())
+	})
+
+	It("never yields once a promotion was requested, whatever standby.signal says", func(ctx SpecContext) {
+		makeReplica()
+		r.promotionRequested = true
+
+		r.yieldPrimaryLeaseIfNotTarget(ctx, cluster)
+		Expect(acquirer.yields).To(BeZero())
+	})
+
+	It("yields when this pod is the target of a replica cluster", func(ctx SpecContext) {
+		makeReplica()
+		cluster.Status.TargetPrimary = podName
+		cluster.Spec.ReplicaCluster = &apiv1.ReplicaClusterConfiguration{Enabled: ptr.To(true)}
+
+		r.yieldPrimaryLeaseIfNotTarget(ctx, cluster)
+		Expect(acquirer.yields).To(Equal(1))
+	})
+
+	It("never yields while this pod is the target primary", func(ctx SpecContext) {
+		makeReplica()
+		cluster.Status.TargetPrimary = podName
+
+		r.yieldPrimaryLeaseIfNotTarget(ctx, cluster)
+		Expect(acquirer.yields).To(BeZero())
+	})
+
+	It("does not yield when it cannot tell whether this pod is a primary", func(ctx SpecContext) {
+		// A regular file as PGDATA makes the standby.signal stat fail with
+		// ENOTDIR, which IsPrimary reports as an error.
+		r.instance.PgData = filepath.Join(r.instance.PgData, "not-a-dir")
+		Expect(os.WriteFile(r.instance.PgData, nil, 0o600)).To(Succeed())
+
+		r.yieldPrimaryLeaseIfNotTarget(ctx, cluster)
+		Expect(acquirer.yields).To(BeZero())
+	})
+
+	It("marks the promotion as requested before promoting, and keeps it when the promotion fails",
+		func(ctx SpecContext) {
+			makeReplica()
+			// The pod is already the current primary, so handlePromotion does
+			// not wait for the WAL receiver through a database connection.
+			cluster.Status.CurrentPrimary = podName
+			var seenAtPromote bool
+			r.promoteInstance = func(context.Context) error {
+				seenAtPromote = r.promotionRequested
+				return errors.New("pg_ctl promote failed")
+			}
+
+			Expect(r.handlePromotion(ctx, cluster)).To(MatchError(ContainSubstring("pg_ctl promote failed")))
+			Expect(seenAtPromote).To(BeTrue())
+			Expect(r.promotionRequested).To(BeTrue())
+		})
+
+	It("marks the promotion on the primary lease before promoting", func(ctx SpecContext) {
+		makeReplica()
+		cluster.Status.CurrentPrimary = podName
+		var markedAtPromote int
+		r.promoteInstance = func(context.Context) error {
+			markedAtPromote = acquirer.marks
+			return nil
+		}
+
+		Expect(r.handlePromotion(ctx, cluster)).To(Succeed())
+		Expect(markedAtPromote).To(Equal(1))
+	})
+
+	It("does not promote when the promotion cannot be marked on the primary lease", func(ctx SpecContext) {
+		makeReplica()
+		cluster.Status.CurrentPrimary = podName
+		acquirer.markErr = errors.New("lease not held")
+		r.promoteInstance = func(context.Context) error {
+			Fail("must not promote")
+			return nil
+		}
+
+		Expect(r.handlePromotion(ctx, cluster)).To(MatchError(ContainSubstring("lease not held")))
+		Expect(r.promotionRequested).To(BeFalse())
+	})
+})

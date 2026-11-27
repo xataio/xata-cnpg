@@ -31,6 +31,8 @@ import (
 	"github.com/xataio/xata-cnpg/pkg/specs"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	logsasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/logs"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
 	"github.com/xataio/xata-cnpg/tests/utils/logs"
 	"github.com/xataio/xata-cnpg/tests/utils/pods"
@@ -57,7 +59,7 @@ var _ = Describe("JSON log output", Label(tests.LabelObservability), func() {
 		// Create a cluster in a namespace we'll delete after the test
 		namespace, namespaceErr = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
 		Expect(namespaceErr).ToNot(HaveOccurred())
-		AssertCreateCluster(namespace, clusterName, sampleFile, env)
+		clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFile)
 
 		By("verifying the presence of possible logger values", func() {
 			podList, _ := clusterutils.ListPods(env.Ctx, env.Client, namespace, clusterName)
@@ -106,7 +108,7 @@ var _ = Describe("JSON log output", Label(tests.LabelObservability), func() {
 					g.Expect(err).ToNot(HaveOccurred())
 
 					// Gather the record containing the wrong query result
-					return logs.AssertQueryRecord(
+					return logsasserts.HasQueryRecord(
 						logEntries,
 						errorTestQuery,
 						queryError.Error(),
@@ -144,8 +146,9 @@ var _ = Describe("JSON log output", Label(tests.LabelObservability), func() {
 				}
 
 				// Gather the record containing the wrong query result
-				return logs.AssertQueryRecord(logEntries, errorTestQuery, queryError.Error(),
-					logpipe.LoggingCollectorRecordName), nil
+				return logsasserts.HasQueryRecord(logEntries, errorTestQuery, queryError.Error(),
+						logpipe.LoggingCollectorRecordName),
+					nil
 			}, timeout).Should(BeTrue())
 
 			// Retrieve cluster replicas
@@ -168,7 +171,7 @@ var _ = Describe("JSON log output", Label(tests.LabelObservability), func() {
 				Expect(logEntries).ToNot(BeEmpty())
 
 				// No record should be returned in this case
-				isQueryRecordContained := logs.AssertQueryRecord(
+				isQueryRecordContained := logsasserts.HasQueryRecord(
 					logEntries,
 					queryError.Error(),
 					errorTestQuery,
@@ -202,7 +205,7 @@ var _ = Describe("JSON log output", Label(tests.LabelObservability), func() {
 
 			// Here we need to verify the number of the ready pods as well as wait for
 			// the cluster status to be PhaseHealthy, using the AssertClusterIsReady.
-			AssertClusterIsReady(namespace, clusterName, timeout, env)
+			clusterasserts.AssertClusterIsReady(env, namespace, clusterName, timeout)
 
 			Eventually(func() (bool, error) {
 				// Gather pod logs in the form of a JSON slice

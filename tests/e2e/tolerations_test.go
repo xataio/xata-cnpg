@@ -23,6 +23,7 @@ import (
 	"fmt"
 
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
 	"github.com/xataio/xata-cnpg/tests/utils/nodes"
 	"github.com/xataio/xata-cnpg/tests/utils/run"
 
@@ -76,6 +77,6 @@ var _ = Describe("E2E Tolerations Node", Serial, Label(tests.LabelDisruptive, te
 				}
 			}
 		})
-		AssertCreateCluster(namespace, clusterName, sampleFile, env)
+		clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFile)
 	})
 })

@@ -17,6 +17,17 @@ intended for public testing prior to the final release.
     They should only be deployed in staging or dedicated testing environments.
 :::
 
+
+## Current Preview Version
+
+The current preview version is **1.31.0-rc1**.
+
+For more information on the current preview version and how to test, please view the links below:
+
+- [Announcement](https://cloudnative-pg.io/releases/cloudnative-pg-1-31.0-rc1-released/)
+- [Documentation](https://cloudnative-pg.io/docs/preview/)
+- [Upgrade instructions](installation_upgrade.md#upgrading-to-1310)
+
 ## Purpose of Release Candidates
 
 Release candidates are provided to the community for extensive testing before
@@ -57,13 +68,15 @@ non-production environment:
 - **Upgrade Test (Crucial):** **Upgrade an existing cluster** (from the
   preceding stable minor version) to the RC version, and verify all key
   operational aspects (scaling, failover, backup/restore) function correctly.
+  Read the upgrade instructions linked in the
+  [current preview version](#current-preview-version) section first.
 - **Basic Operations:** Verify key features like rolling update,
   backup/restore, instance failover, and connection pooling function as
   expected.
 - **Report Issues:** **Immediately report any issues or unexpected behavior**
   by opening a GitHub issue and clearly marking it with a **`Release
   Candidate`** tag or label, along with the RC version number
-  (e.g., `1.28.0-rc1`).
+  (e.g., `1.31.0-rc1`).
 
 ## Usage Advisory
 
@@ -75,16 +88,3 @@ are not backwards compatible and could be removed entirely.
 
 **By testing the Release Candidate, you are helping to prevent a potentially
 critical bug from affecting the entire community upon the GA release.**
-
-## Current Preview Version
-
-There are currently no preview versions available.
-
-<!--
-The current preview version is **1.29.0-rc1**.
-
-For more information on the current preview version and how to test, please view the links below:
-
-- [Announcement](https://cloudnative-pg.io/releases/cloudnative-pg-1-29.0-rc1-released/)
-- [Documentation](https://cloudnative-pg.io/documentation/preview/)
--->

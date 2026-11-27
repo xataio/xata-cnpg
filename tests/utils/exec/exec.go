@@ -34,7 +34,7 @@ import (
 	pkgutils "github.com/xataio/xata-cnpg/pkg/utils"
 	"github.com/xataio/xata-cnpg/tests/utils/pods"
 
-	. "github.com/onsi/gomega" // nolint
+	. "github.com/onsi/gomega" //nolint
 )
 
 // ContainerLocator contains the necessary data to find a container on a pod

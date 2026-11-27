@@ -20,6 +20,7 @@ SPDX-License-Identifier: Apache-2.0
 package postgres
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -62,12 +63,16 @@ var _ = Describe("the detection of a postmaster process using the pid file", fun
 		instance.PgData = pgdata
 		instance.SocketDirectory = socketDir
 
+		// Use a PID that is guaranteed not to exist on any system.
+		// The Linux kernel pid_max is at most 4194304 (2^22),
+		// so 5000000 is safely above any possible real PID and
+		// well within the range of a 32-bit int.
 		pidFile := filepath.Join(pgdata, PostgresqlPidFile)
-		err := os.WriteFile(pidFile, []byte("1234"), 0o400)
+		err := os.WriteFile(pidFile, []byte("5000000"), 0o400)
 		Expect(err).ShouldNot(HaveOccurred())
 
 		lockFile := filepath.Join(socketDir, PostgresqlPidFile)
-		err = os.WriteFile(filepath.Join(socketDir, ".s.PGSQL.5432.lock"), []byte("1234"), 0o400)
+		err = os.WriteFile(filepath.Join(socketDir, ".s.PGSQL.5432.lock"), []byte("5000000"), 0o400)
 		Expect(err).ShouldNot(HaveOccurred())
 
 		process, err := instance.CheckForExistingPostmaster(GetPostgresExecutableName())
@@ -103,5 +108,53 @@ var _ = Describe("the detection of a postmaster process using the pid file", fun
 		_, err = instance.CheckForExistingPostmaster(myExecutable, "not_existent_executable")
 		Expect(err).ShouldNot(HaveOccurred())
 		Expect(process).ToNot(BeNil())
+	})
+})
+
+var _ = Describe("shutting down with a PID file pointing to a live process", func() {
+	var instance *Instance
+	var pgCtlCalls string
+
+	BeforeEach(func() {
+		tempDir := GinkgoT().TempDir()
+
+		// This fake pg_ctl records every call and always succeeds, so "status"
+		// reports a running server whatever the PID file contains.
+		pgCtlCalls = filepath.Join(tempDir, "calls")
+		script := fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %s\n", pgCtlCalls)
+		//nolint:gosec // executable fake pg_ctl needs the execute bit
+		Expect(os.WriteFile(filepath.Join(tempDir, "pg_ctl"), []byte(script), 0o700)).To(Succeed())
+		GinkgoT().Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+		instance = &Instance{PgData: tempDir}
+		Expect(os.WriteFile(
+			filepath.Join(tempDir, PostgresqlPidFile),
+			[]byte(fmt.Sprintf("%v\n", os.Getpid())), 0o600)).To(Succeed())
+	})
+
+	shutdown := func(ctx context.Context) error {
+		return instance.Shutdown(ctx, shutdownOptions{Mode: shutdownModeImmediate, Wait: true})
+	}
+
+	calls := func() string {
+		content, err := os.ReadFile(pgCtlCalls) //nolint:gosec // path under the spec's temporary directory
+		Expect(err).ToNot(HaveOccurred())
+		return string(content)
+	}
+
+	It("does not stop a process that is not PostgreSQL", func(ctx context.Context) {
+		GinkgoT().Setenv("POSTGRES_NAME", "")
+
+		Expect(shutdown(ctx)).To(MatchError("instance is not running"))
+		Expect(calls()).ToNot(ContainSubstring(" stop "))
+	})
+
+	It("stops PostgreSQL", func(ctx context.Context) {
+		myProcess, err := ps.FindProcess(os.Getpid())
+		Expect(err).ToNot(HaveOccurred())
+		GinkgoT().Setenv("POSTGRES_NAME", myProcess.Executable())
+
+		Expect(shutdown(ctx)).To(Succeed())
+		Expect(calls()).To(ContainSubstring(" stop "))
 	})
 })

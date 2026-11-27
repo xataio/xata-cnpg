@@ -38,11 +38,11 @@ them in your systems.
 
 #### Debian packages
 
-For example, let's install the 1.28.0 release of the plugin, for an Intel based
+For example, let's install the 1.31.0-rc1 release of the plugin, for an Intel based
 64 bit server. First, we download the right `.deb` file.
 
 ```sh
-wget https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.28.0/kubectl-cnpg_1.28.0_linux_x86_64.deb \
+wget https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.31.0-rc1/kubectl-cnpg_1.31.0-rc1_linux_x86_64.deb \
   --output-document kube-plugin.deb
 ```
 
@@ -53,17 +53,17 @@ $ sudo dpkg -i kube-plugin.deb
 Selecting previously unselected package cnpg.
 (Reading database ... 6688 files and directories currently installed.)
 Preparing to unpack kube-plugin.deb ...
-Unpacking cnpg (1.28.0) ...
-Setting up cnpg (1.28.0) ...
+Unpacking cnpg (1.31.0-rc1) ...
+Setting up cnpg (1.31.0-rc1) ...
 ```
 
 #### RPM packages
 
-As in the example for `.rpm` packages, let's install the 1.28.0 release for an
+As in the example for `.rpm` packages, let's install the 1.31.0-rc1 release for an
 Intel 64 bit machine. Note the `--output` flag to provide a file name.
 
 ```sh
-curl -L https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.28.0/kubectl-cnpg_1.28.0_linux_x86_64.rpm \
+curl -L https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.31.0-rc1/kubectl-cnpg_1.31.0-rc1_linux_x86_64.rpm \
   --output kube-plugin.rpm
 ```
 
@@ -77,7 +77,7 @@ Dependencies resolved.
  Package            Architecture         Version                   Repository                  Size
 ====================================================================================================
 Installing:
- cnpg               x86_64               1.28.0                  @commandline                20 M
+ cnpg               x86_64               1.31.0-rc1-1                  @commandline                20 M
 
 Transaction Summary
 ====================================================================================================
@@ -306,9 +306,9 @@ sandbox-3  0/604DE38  0/604DE38  0/604DE38  0/604DE38   00:00:00   00:00:00   00
 Instances status
 Name       Current LSN  Replication role  Status  QoS         Manager Version  Node
 ----       -----------  ----------------  ------  ---         ---------------  ----
-sandbox-1  0/604DE38    Primary           OK      BestEffort  1.28.0           k8s-eu-worker
-sandbox-2  0/604DE38    Standby (async)   OK      BestEffort  1.28.0           k8s-eu-worker2
-sandbox-3  0/604DE38    Standby (async)   OK      BestEffort  1.28.0           k8s-eu-worker
+sandbox-1  0/604DE38    Primary           OK      BestEffort  1.31.0-rc1           k8s-eu-worker
+sandbox-2  0/604DE38    Standby (async)   OK      BestEffort  1.31.0-rc1           k8s-eu-worker2
+sandbox-3  0/604DE38    Standby (async)   OK      BestEffort  1.31.0-rc1           k8s-eu-worker
 ```
 
 If you require more detailed status information, use the `--verbose` option (or
@@ -362,9 +362,9 @@ sandbox-primary  primary  1              1                1                     
 Instances status
 Name       Current LSN  Replication role  Status  QoS         Manager Version  Node
 ----       -----------  ----------------  ------  ---         ---------------  ----
-sandbox-1  0/6053720    Primary           OK      BestEffort  1.28.0           k8s-eu-worker
-sandbox-2  0/6053720    Standby (async)   OK      BestEffort  1.28.0           k8s-eu-worker2
-sandbox-3  0/6053720    Standby (async)   OK      BestEffort  1.28.0           k8s-eu-worker
+sandbox-1  0/6053720    Primary           OK      BestEffort  1.31.0-rc1           k8s-eu-worker
+sandbox-2  0/6053720    Standby (async)   OK      BestEffort  1.31.0-rc1           k8s-eu-worker2
+sandbox-3  0/6053720    Standby (async)   OK      BestEffort  1.31.0-rc1           k8s-eu-worker
 ```
 
 With an additional `-v` (e.g. `kubectl cnpg status sandbox -v -v`), you can
@@ -394,6 +394,27 @@ Or you can use the instance node number to promote:
 ```sh
 kubectl cnpg promote CLUSTER INSTANCE
 ```
+
+While a switchover is in progress, the command does not change its target.
+The only allowed action is to cancel it, by promoting the current primary
+back. This needs the `--force` flag:
+
+```sh
+kubectl cnpg promote --force CLUSTER CLUSTER-INSTANCE
+```
+
+This is how to go back to the previous primary when a switchover does not
+complete. If the previous primary does not come back, `--force` also
+promotes another instance in place of a canceled switchover. A failover is
+not a switchover: promoting an instance during a failover works as usual,
+and `--force` has no effect.
+
+:::warning
+    Canceling a switchover is safe as long as the new primary did not
+    promote yet. If it did, the cluster can end up with two primaries, and
+    the data written on the new primary is lost. A promotion that has just
+    started can also overtake the cancellation.
+:::
 
 ### Certificates
 
@@ -640,12 +661,12 @@ Archive:  report_operator_<TIMESTAMP>.zip
 
 ```output
 ====== Beginning of Previous Log =====
-2023-03-28T12:56:41.251711811Z {"level":"info","ts":"2023-03-28T12:56:41Z","logger":"setup","msg":"Starting CloudNativePG Operator","version":"1.28.0","build":{"Version":"1.28.0+dev107","Commit":"cc9bab17","Date":"2023-03-28"}}
+2023-03-28T12:56:41.251711811Z {"level":"info","ts":"2023-03-28T12:56:41Z","logger":"setup","msg":"Starting CloudNativePG Operator","version":"1.31.0-rc1","build":{"Version":"1.31.0-rc1+dev107","Commit":"cc9bab17","Date":"2023-03-28"}}
 2023-03-28T12:56:41.251851909Z {"level":"info","ts":"2023-03-28T12:56:41Z","logger":"setup","msg":"Starting pprof HTTP server","addr":"0.0.0.0:6060"}
   <snipped …>
 
 ====== End of Previous Log =====
-2023-03-28T12:57:09.854306024Z {"level":"info","ts":"2023-03-28T12:57:09Z","logger":"setup","msg":"Starting CloudNativePG Operator","version":"1.28.0","build":{"Version":"1.28.0+dev107","Commit":"cc9bab17","Date":"2023-03-28"}}
+2023-03-28T12:57:09.854306024Z {"level":"info","ts":"2023-03-28T12:57:09Z","logger":"setup","msg":"Starting CloudNativePG Operator","version":"1.31.0-rc1","build":{"Version":"1.31.0-rc1+dev107","Commit":"cc9bab17","Date":"2023-03-28"}}
 2023-03-28T12:57:09.854363943Z {"level":"info","ts":"2023-03-28T12:57:09Z","logger":"setup","msg":"Starting pprof HTTP server","addr":"0.0.0.0:6060"}
 ```
 
@@ -778,8 +799,7 @@ Archive:  report_cluster_example_<TIMESTAMP>.zip
    creating: report_cluster_example_<TIMESTAMP>/logs/
   inflating: report_cluster_example_<TIMESTAMP>/logs/cluster-example-full-1.jsonl
    creating: report_cluster_example_<TIMESTAMP>/job-logs/
-  inflating: report_cluster_example_<TIMESTAMP>/job-logs/cluster-example-full-1-initdb-qnnvw.jsonl
-  inflating: report_cluster_example_<TIMESTAMP>/job-logs/cluster-example-full-2-join-tvj8r.jsonl
+  inflating: report_cluster_example_<TIMESTAMP>/job-logs/cluster-example-full-1-major-upgrade-qnnvw.jsonl
 ```
 
 ### Logs
@@ -1061,6 +1081,13 @@ to request an online/hot backup or an offline/cold one: additionally, you can
 also tune online backups by explicitly setting the `--immediate-checkpoint` and
 `--wait-for-archive` options.
 
+You can use the `--dry-run` option to preview the `Backup` resource that would
+be created, without actually submitting it to the API server:
+
+```sh
+kubectl cnpg backup CLUSTER --dry-run
+```
+
 The ["Backup" section](./backup.md) contains more information about
 the configuration settings.
 
@@ -1068,17 +1095,18 @@ the configuration settings.
 
 The `kubectl cnpg psql CLUSTER` command starts a new PostgreSQL interactive front-end
 process (psql) connected to an existing Postgres cluster, as if you were running
-it from the actual pod. This means that you will be using the `postgres` user.
+it from the actual pod. This means that you will be using the `postgres` user and connecting
+to the `postgres` database.
 
 :::info[Important]
-    As you will be connecting as `postgres` user, in production environments this
-    method should be used with extreme care, by authorized personnel only.
+As you will be connecting as `postgres` user, in production environments this
+method should be used with extreme care, by authorized personnel only.
 :::
 
 ```console
 $ kubectl cnpg psql cluster-example
 
-psql (18.1 (Debian 18.1-1.pgdg110+1))
+psql (19.0 (Debian 19.0-1.pgdg110+1))
 Type "help" for help.
 
 postgres=#
@@ -1090,7 +1118,7 @@ select to work against a replica by using the `--replica` option:
 ```console
 $ kubectl cnpg psql --replica cluster-example
 
-psql (18.1 (Debian 18.1-1.pgdg110+1))
+psql (19.0 (Debian 19.0-1.pgdg110+1))
 
 Type "help" for help.
 
@@ -1105,6 +1133,29 @@ postgres=# \q
 
 This command will start `kubectl exec`, and the `kubectl` executable must be
 reachable in your `PATH` variable to correctly work.
+
+By default, the `postgres` database will be used. Any option supported by
+`psql` can be passed after the `--` delimiter. For example, to connect to a
+specific database:
+
+```console
+$ kubectl cnpg psql cluster-example -- app
+
+psql (19.0 (Debian 19.0-1.pgdg110+1))
+Type "help" for help.
+
+app=#
+```
+
+Also, you can directly execute a query with the psql option `-c`.
+
+```console
+$ kubectl cnpg psql cluster-example -- -c "SELECT pg_is_in_recovery();"
+ pg_is_in_recovery
+-------------------
+ f
+(1 row)
+```
 
 ### Snapshotting a Postgres cluster
 
@@ -1383,7 +1434,7 @@ The `cnpg subscription drop` command seamlessly complements the `create` command
 You can drop a `SUBSCRIPTION` with the following command structure:
 
 ```sh
-kubectl cnpg subcription drop \
+kubectl cnpg subscription drop \
   --subscription SUBSCRIPTION_NAME \
   LOCAL_CLUSTER [options]
 ```
@@ -1449,7 +1500,7 @@ kubectl cnpg subscription sync-sequences destination-cluster \
 The `cnpg` plugin can be easily integrated in [K9s](https://k9scli.io/), a
 popular terminal-based UI to interact with Kubernetes clusters.
 
-See [`k9s/plugins.yml`](samples/k9s/plugins.yml) for details.
+See [`K9s repo`](https://github.com/derailed/k9s/blob/master/plugins/cloudnative-pg.yaml) for details. <!-- wokeignore:rule=master -->
 
 ## Permissions required by the plugin
 
@@ -1478,13 +1529,16 @@ table contains the full details:
 | report cluster  | clusters: get<br/>pods: list<br/>pods/log: get<br/>jobs: list<br/>events: list<br/>PVCs: list                                                                                                                                                                                                                                                         |
 | report operator | **Required:**<br/>deployments: get<br/>**Optional (for full report):**<br/>configmaps: get<br/>events: list<br/>pods: list<br/>pods/log: get<br/>secrets: get<br/>services: get<br/>mutatingwebhookconfigurations: list[^1]<br/>validatingwebhookconfigurations: list[^1]<br/>**If OLM is present:**<br/>clusterserviceversions: list[^1]<br/>installplans: list[^1]<br/>subscriptions: list[^1] |
 | restart         | clusters: get,patch<br/>pods: get,delete                                                                                                                                                                                                                                                                                                              |
-| status          | clusters: get<br/>pods: list<br/>pods/exec: create<br/>pods/proxy: create<br/>PDBs: list<br/>objectstores.barmancloud.cnpg.io: get                                                                                                                                                                                                                    |
+| status          | clusters: get<br/>pods: list<br/>pods/exec: create (optional)<br/>pods/proxy: create<br/>PDBs: list<br/>objectstores.barmancloud.cnpg.io: get                                                                                                                                                                                                         |
 | subscription    | clusters: get<br/>pods: get,list<br/>pods/exec: create                                                                                                                                                                                                                                                                                                |
 | version         | none                                                                                                                                                                                                                                                                                                                                                  |
 
 [^1]: The permissions are cluster scope ClusterRole resources.
 
 ///Footnotes Go Here///
+
+Without `pods/exec`, `status` still works: the cluster size and, with
+`--verbose`, the PostgreSQL configuration are shown as not permitted.
 
 Additionally, assigning the `list` permission on the `clusters` will enable
 autocompletion for multiple commands.

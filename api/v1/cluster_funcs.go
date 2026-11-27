@@ -35,12 +35,15 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/postgres/version"
 	"github.com/cloudnative-pg/machinery/pkg/stringset"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/xataio/xata-cnpg/internal/configuration"
+	"github.com/xataio/xata-cnpg/pkg/configfile"
 	"github.com/xataio/xata-cnpg/pkg/system"
 	"github.com/xataio/xata-cnpg/pkg/utils"
 	contextutils "github.com/xataio/xata-cnpg/pkg/utils/context"
@@ -138,7 +141,7 @@ func (cluster *Cluster) GetJobEnabledPluginNames() (result []string) {
 func GetExternalClustersEnabledPluginNames(externalClusters []ExternalCluster) (result []string) {
 	pluginNames := make([]string, 0, len(externalClusters))
 	for _, externalCluster := range externalClusters {
-		if externalCluster.PluginConfiguration != nil {
+		if externalCluster.PluginConfiguration != nil && externalCluster.PluginConfiguration.IsEnabled() {
 			pluginNames = append(pluginNames, externalCluster.PluginConfiguration.Name)
 		}
 	}
@@ -177,6 +180,16 @@ func (st *ServiceAccountTemplate) MergeMetadata(sa *corev1.ServiceAccount) {
 
 	maps.Copy(sa.Labels, st.Metadata.Labels)
 	maps.Copy(sa.Annotations, st.Metadata.Annotations)
+}
+
+// FailureDomainKeys returns the label keys defining the failure domains,
+// coming from either podFailureDomainKeys or nodeFailureDomainKeys (the two
+// fields are mutually exclusive)
+func (s *SynchronousReplicaConfiguration) FailureDomainKeys() []string {
+	if len(s.PodFailureDomainKeys) > 0 {
+		return s.PodFailureDomainKeys
+	}
+	return s.NodeFailureDomainKeys
 }
 
 // MatchesTopology checks if the two topologies have
@@ -412,8 +425,8 @@ func (config *PluginConfiguration) IsEnabled() bool {
 	return *config.Enabled
 }
 
-// GetRoleSecretsName gets the name of the secret which is used to store the role's password
-func (roleConfiguration *RoleConfiguration) GetRoleSecretsName() string {
+// GetRoleSecretName gets the name of the secret which is used to store the role's password
+func (roleConfiguration *RoleConfiguration) GetRoleSecretName() string {
 	if roleConfiguration.PasswordSecret != nil {
 		return roleConfiguration.PasswordSecret.Name
 	}
@@ -714,6 +727,17 @@ func (cluster *Cluster) GetServiceReadWriteName() string {
 	return fmt.Sprintf("%v%v", cluster.Name, ServiceReadWriteSuffix)
 }
 
+// GetInstancesSelector returns the serialized label selector that matches all
+// the instance pods managed by this cluster. It is published in the status and
+// exposed through the scale sub-resource so that autoscalers (such as HPA or
+// VPA) can discover the managed pods.
+func (cluster *Cluster) GetInstancesSelector() string {
+	return labels.SelectorFromSet(labels.Set{
+		utils.ClusterLabelName: cluster.Name,
+		utils.PodRoleLabelName: string(utils.PodRoleInstance),
+	}).String()
+}
+
 // GetMaxStartDelay get the amount of time of startDelay config option
 func (cluster *Cluster) GetMaxStartDelay() int32 {
 	if cluster.Spec.MaxStartDelay > 0 {
@@ -730,12 +754,14 @@ func (cluster *Cluster) GetMaxStopDelay() int32 {
 	return 1800
 }
 
-// GetSmartShutdownTimeout is used to ensure that smart shutdown timeout is a positive integer
+// GetSmartShutdownTimeout returns the time reserved for the smart shutdown of
+// PostgreSQL, in seconds. A value of 0 (the default) skips the smart shutdown
+// and requests a fast shutdown right away.
 func (cluster *Cluster) GetSmartShutdownTimeout() int32 {
 	if cluster.Spec.SmartShutdownTimeout != nil {
 		return *cluster.Spec.SmartShutdownTimeout
 	}
-	return 180
+	return 0
 }
 
 // GetRestartTimeout is used to have a timeout for operations that involve
@@ -744,12 +770,55 @@ func (cluster *Cluster) GetRestartTimeout() time.Duration {
 	return time.Duration(cluster.GetMaxStopDelay()+cluster.GetMaxStartDelay()) * time.Second
 }
 
+// GetPrimaryLeaseDuration returns how long the primary lease is valid before it expires
+func (cluster *Cluster) GetPrimaryLeaseDuration() time.Duration {
+	if l := cluster.Spec.PrimaryLease; l != nil && l.LeaseDurationSeconds != nil {
+		return time.Duration(*l.LeaseDurationSeconds) * time.Second
+	}
+	return DefaultPrimaryLeaseDurationSeconds * time.Second
+}
+
+// GetPrimaryLeaseRenewDeadline returns how long the primary keeps trying to renew the lease
+// before giving up
+func (cluster *Cluster) GetPrimaryLeaseRenewDeadline() time.Duration {
+	if l := cluster.Spec.PrimaryLease; l != nil && l.RenewDeadlineSeconds != nil {
+		return time.Duration(*l.RenewDeadlineSeconds) * time.Second
+	}
+	return DefaultPrimaryLeaseRenewDeadlineSeconds * time.Second
+}
+
+// GetPrimaryLeaseRetryPeriod returns how frequently a non-holder retries acquiring the lease
+func (cluster *Cluster) GetPrimaryLeaseRetryPeriod() time.Duration {
+	if l := cluster.Spec.PrimaryLease; l != nil && l.RetryPeriodSeconds != nil {
+		return time.Duration(*l.RetryPeriodSeconds) * time.Second
+	}
+	return DefaultPrimaryLeaseRetryPeriodSeconds * time.Second
+}
+
+// GetPrimaryLeaseReleasedDuration returns the TTL written when the primary explicitly releases
+// the lease on a clean shutdown
+func (cluster *Cluster) GetPrimaryLeaseReleasedDuration() time.Duration {
+	if l := cluster.Spec.PrimaryLease; l != nil && l.ReleasedLeaseDurationSeconds != nil {
+		return time.Duration(*l.ReleasedLeaseDurationSeconds) * time.Second
+	}
+	return DefaultPrimaryLeaseReleasedDurationSeconds * time.Second
+}
+
 // GetMaxSwitchoverDelay get the amount of time PostgreSQL has to stop before switchover
 func (cluster *Cluster) GetMaxSwitchoverDelay() int32 {
 	if cluster.Spec.MaxSwitchoverDelay > 0 {
 		return cluster.Spec.MaxSwitchoverDelay
 	}
 	return DefaultMaxSwitchoverDelay
+}
+
+// GetImmediateShutdownTimeout get the amount of time PostgreSQL has to stop after an immediate
+// shutdown request before the instance is considered unresponsive
+func (cluster *Cluster) GetImmediateShutdownTimeout() int32 {
+	if cluster.Spec.ImmediateShutdownTimeout > 0 {
+		return cluster.Spec.ImmediateShutdownTimeout
+	}
+	return DefaultImmediateShutdownTimeout
 }
 
 // GetPrimaryUpdateStrategy get the cluster primary update strategy,
@@ -1472,47 +1541,36 @@ func (cluster *Cluster) EnsureGVKIsPresent() {
 // should be added to the PostgreSQL configuration to
 // recover given a certain target
 func (target *RecoveryTarget) BuildPostgresOptions() string {
-	result := ""
-
 	if target == nil {
-		return result
+		return ""
 	}
 
+	options := map[string]string{}
 	if target.TargetTLI != "" {
-		result += fmt.Sprintf(
-			"recovery_target_timeline = '%v'\n",
-			target.TargetTLI)
+		options["recovery_target_timeline"] = target.TargetTLI
 	}
 	if target.TargetXID != "" {
-		result += fmt.Sprintf(
-			"recovery_target_xid = '%v'\n",
-			target.TargetXID)
+		options["recovery_target_xid"] = target.TargetXID
 	}
 	if target.TargetName != "" {
-		result += fmt.Sprintf(
-			"recovery_target_name = '%v'\n",
-			target.TargetName)
+		options["recovery_target_name"] = target.TargetName
 	}
 	if target.TargetLSN != "" {
-		result += fmt.Sprintf(
-			"recovery_target_lsn = '%v'\n",
-			target.TargetLSN)
+		options["recovery_target_lsn"] = target.TargetLSN
 	}
 	if target.TargetTime != "" {
-		result += fmt.Sprintf(
-			"recovery_target_time = '%v'\n",
-			pgTime.ConvertToPostgresFormat(target.TargetTime))
+		options["recovery_target_time"] = pgTime.ConvertToPostgresFormat(target.TargetTime)
 	}
 	if target.TargetImmediate != nil && *target.TargetImmediate {
-		result += "recovery_target = immediate\n"
+		options["recovery_target"] = "immediate"
 	}
 	if target.Exclusive != nil && *target.Exclusive {
-		result += "recovery_target_inclusive = false\n"
+		options["recovery_target_inclusive"] = "false"
 	} else {
-		result += "recovery_target_inclusive = true\n"
+		options["recovery_target_inclusive"] = "true"
 	}
 
-	return result
+	return configfile.RenderPostgresConfiguration(options)
 }
 
 // ApplyInto applies the content of the probe configuration in a Kubernetes
@@ -1572,4 +1630,78 @@ func (cluster *Cluster) IsFailoverQuorumActive() bool {
 	}
 
 	return cluster.Spec.PostgresConfiguration.Synchronous.FailoverQuorum
+}
+
+// GetPodSelectorIPs builds a map from podSelectorRef names to their resolved
+// pod IPs, using status data populated by the operator. Returns nil when
+// no resolved podSelectorRefs are present in the status.
+func (cluster *Cluster) GetPodSelectorIPs() map[string][]string {
+	if len(cluster.Status.PodSelectorRefs) == 0 {
+		return nil
+	}
+
+	result := make(map[string][]string, len(cluster.Status.PodSelectorRefs))
+	for i := range cluster.Status.PodSelectorRefs {
+		ref := &cluster.Status.PodSelectorRefs[i]
+		result[ref.Name] = ref.IPs
+	}
+	return result
+}
+
+// GetServiceAccountName returns the name of the ServiceAccount for this cluster.
+func (cluster *Cluster) GetServiceAccountName() string {
+	if cluster.Spec.ServiceAccountName != "" {
+		return cluster.Spec.ServiceAccountName
+	}
+	return cluster.Name
+}
+
+// IsInitialized is true when the cluster has been running once.
+// Falls back to LatestGeneratedNode when the condition is absent or False,
+// to handle clusters upgraded from operator versions that predate the
+// Initialized condition.
+func (cluster *Cluster) IsInitialized() bool {
+	c := meta.FindStatusCondition(cluster.Status.Conditions, string(ConditionInitialized))
+	if c == nil || c.Status == metav1.ConditionFalse {
+		return cluster.Status.LatestGeneratedNode != 0
+	}
+
+	return c.Status == metav1.ConditionTrue
+}
+
+// SetAdmissionError sets the admission error status on the Cluster resource
+func (cluster *Cluster) SetAdmissionError(msg string) {
+	if len(msg) > 0 {
+		cluster.Status.Phase = PhaseDefinitionInvalid
+		cluster.Status.PhaseReason = msg
+		// The cluster definition is invalid, so it cannot be ready: mirror
+		// SetClusterReadyCondition here so an invalid cluster does not keep
+		// reporting Ready=True from a previous healthy loop. RegisterPhase
+		// would normally update the condition together with the phase, but the
+		// guard records the invalid phase directly.
+		meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
+			Type:    string(ConditionClusterReady),
+			Status:  metav1.ConditionFalse,
+			Reason:  string(ClusterIsNotReady),
+			Message: "Cluster Is Not Ready",
+		})
+		return
+	}
+
+	// Only clear the reason we set above for a previous admission error.
+	// PhaseReason is shared with the normal phase-reporting machinery, so
+	// clearing it unconditionally here would wipe an unrelated, legitimate
+	// message (e.g. "Some instances are not yet active") on every successful
+	// admission check.
+	if cluster.Status.Phase == PhaseDefinitionInvalid {
+		cluster.Status.PhaseReason = ""
+	}
+}
+
+// GetAdmissionError always returns an empty string: the Cluster encodes the
+// admission error in its phase, which the reconciler rewrites through the phase
+// machinery on the next healthy loop, so the guard must not persist the clear
+// itself and race that logic.
+func (cluster *Cluster) GetAdmissionError() string {
+	return ""
 }

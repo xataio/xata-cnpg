@@ -190,6 +190,44 @@ you can add this section:
        # ...
 ```
 
+### Online backups and the WAL volume
+
+When a cluster has a separate volume for WAL files (`.spec.walStorage`), an
+online volume snapshot backup never snapshots it: only `PGDATA` (and the
+tablespaces, if any) are snapshotted. The snapshots are cut before
+`pg_backup_stop`, so recovering the backup requires the WAL archive anyway, and
+keeping the WAL files twice would waste storage space and increase costs.
+
+The `onlineConfiguration.waitForArchive` option is only passed to
+`pg_backup_stop`: making sure the WAL archive is complete is up to you. Keep in
+mind that `pg_backup_stop` doesn't wait for the archiver when:
+
+- the backup is taken on a standby of a cluster that is not a
+  [replica cluster](../replica_cluster.md): set the backup `target` to `primary`
+- `archive_mode` is `off`, which CloudNativePG sets while the
+  `cnpg.io/skipWalArchiving` annotation is present, and until the primary is
+  restarted after you remove it
+- a plugin streams the WAL files without `archive_command`, and is not set as
+  the WAL archiver (`isWALArchiver: true`)
+
+The `.status.snapshotBackupStatus.elements` list of an online `Backup` has no
+`PG_WAL` entry.
+When restoring it, CloudNativePG creates an empty WAL volume, and PostgreSQL
+fetches the WAL files from the archive: the recovery requires a `source`
+pointing to the WAL archive, as described in
+["Recovery from VolumeSnapshot objects"](../recovery.md#recovery-from-volumesnapshot-objects).
+Replicas created from an online backup fetch their WAL files from the archive of
+the cluster.
+
+:::warning
+    Recovering an online volume snapshot backup always requires a working WAL
+    archive, whether or not the WAL volume is snapshotted: nothing guarantees
+    that the WAL volume holds every WAL file needed to reach the consistent
+    point of the backup. Keep this in mind when you copy the volume snapshots
+    to another region or account, and when you define the retention policy of
+    the WAL archive. A cold backup always includes the WAL volume.
+:::
+
 ### Overriding the default behavior
 
 You can change the default behavior defined in the cluster resource by setting
@@ -266,12 +304,12 @@ for details on this standard behavior.
 
 ## Backup Volume Snapshot Deadlines
 
-CloudNativePG supports backups using the volume snapshot method. In some
-environments, volume snapshots may encounter temporary issues that can be
-retried.
+CloudNativePG supports backups using the volume snapshot method. Volume
+snapshot operations may encounter errors, which CloudNativePG retries for a
+configurable amount of time before giving up.
 
 The `backup.cnpg.io/volumeSnapshotDeadline` annotation defines how long
-CloudNativePG should continue retrying recoverable errors before marking the
+CloudNativePG should continue retrying these errors before marking the
 backup as failed.
 
 You can add the `backup.cnpg.io/volumeSnapshotDeadline` annotation to both
@@ -283,22 +321,20 @@ If not specified, the default retry deadline is **10 minutes**.
 
 ### Error Handling
 
-When a retryable error occurs during a volume snapshot operation:
+When an error occurs during a volume snapshot operation:
 
 1. CloudNativePG records the time of the first error.
 2. The system retries the operation every **10 seconds**.
 3. If the error persists beyond the specified deadline (or the default 10
    minutes), the backup is marked as **failed**.
 
-### Retryable Errors
-
-CloudNativePG treats the following types of errors as retryable:
-
-- **Server timeout errors** (HTTP 408, 429, 500, 502, 503, 504)
-- **Conflicts** (optimistic locking errors)
-- **Internal errors**
-- **Context deadline exceeded errors**
-- **Timeout errors from the CSI snapshot controller**
+The CSI driver reports snapshot errors as free text, with no reliable way to
+tell a permanent condition (for example, a missing `VolumeSnapshotClass` or
+invalid credentials) from a transient one, and a condition that looks
+permanent can become resolvable at any point, for example if someone creates
+the missing class or fixes the credentials while CloudNativePG is retrying.
+For this reason, CloudNativePG retries every volume snapshot error the same
+way, until the deadline is reached.
 
 ### Examples
 
@@ -322,7 +358,7 @@ When you define a `ScheduledBackup` with the annotation, any `Backup` resources
 created from this schedule automatically inherit the specified timeout value.
 
 In the following example, all backups created from the schedule will have a
-30-minute timeout for retrying recoverable snapshot errors.
+30-minute timeout for retrying snapshot errors.
 
 ```yaml
 apiVersion: postgresql.cnpg.io/v1

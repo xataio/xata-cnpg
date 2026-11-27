@@ -63,7 +63,8 @@ func (i *PostgresLifecycle) GetGlobalContext() context.Context {
 }
 
 // Start starts running the PostgresLifecycle
-// nolint:gocognit
+//
+//nolint:gocognit
 func (i *PostgresLifecycle) Start(ctx context.Context) error {
 	contextLogger := log.FromContext(ctx)
 	signals := make(chan os.Signal, 1)
@@ -140,8 +141,15 @@ func (i *PostgresLifecycle) Start(ctx context.Context) error {
 				// resulting in a data corruption.
 				contextLogger.Info("Received termination signal",
 					"signal", sig,
-					"smartShutdownTimeout", i.instance.SmartStopDelay,
+					"smartShutdownTimeout", i.instance.GetClusterOrDefault().GetSmartShutdownTimeout(),
 				)
+				// Another attempt would wait out the same wedged postmaster:
+				// leave it to the kubelet.
+				if i.instance.IsImmediateShutdownUnresponsive() {
+					contextLogger.Info(
+						"PostgreSQL was already found unresponsive to an immediate shutdown, exiting without retrying")
+					return nil
+				}
 				if err := i.instance.TryShuttingDownSmartFast(ctx); err != nil {
 					contextLogger.Error(err, "error while shutting down instance, proceeding")
 				}

@@ -27,6 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	"github.com/xataio/xata-cnpg/tests/internal/resources"
 	"github.com/xataio/xata-cnpg/tests/utils/nodes"
 	"github.com/xataio/xata-cnpg/tests/utils/pods"
 	"github.com/xataio/xata-cnpg/tests/utils/run"
@@ -70,7 +72,7 @@ var _ = Describe("nodeSelector", Label(tests.LabelPodScheduling), func() {
 			})
 
 			By(fmt.Sprintf("creating a cluster in the %v namespace", namespace), func() {
-				CreateResourceFromFile(namespace, sampleFile)
+				resources.CreateResourceFromFile(env, namespace, sampleFile)
 			})
 
 			// The cluster should be created but the pods shouldn't be scheduled
@@ -137,7 +139,7 @@ var _ = Describe("nodeSelector", Label(tests.LabelPodScheduling), func() {
 
 			// All the pods should be running on the labeled node
 			By("confirm pods run on the labelled node", func() {
-				AssertCreateCluster(namespace, clusterName, sampleFile, env)
+				clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFile)
 				podList, err := pods.List(env.Ctx, env.Client, namespace)
 				Expect(err).ToNot(HaveOccurred())
 				for _, podDetails := range podList.Items {

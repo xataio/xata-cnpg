@@ -31,6 +31,21 @@ automated, and consistent approach to managing PostgreSQL databases.
     tools or rely on the applications themselves.
 :::
 
+### Connection and Privileges
+
+Every SQL statement described on this page is issued by the instance manager
+running on the primary, as the `postgres` superuser: database-level commands
+over a connection to the `postgres` database, and everything scoped inside a
+database over a connection to that database. Two consequences are worth keeping
+in mind:
+
+- A schema or a foreign data wrapper declared without an `owner` belongs to
+  `postgres`, and the database owner holds no privileges on it until they are
+  declared.
+- Grants and revokes never fail for lack of `GRANT OPTION`, because a superuser
+  acts as the object owner. A privilege you declare is applied even where the
+  database owner could not have granted it itself.
+
 ### Declarative `Database` Manifest
 
 The following example demonstrates how a `Database` resource interacts with a
@@ -64,12 +79,20 @@ role, in the `cluster-example` PostgreSQL cluster.
 
 - `metadata.name`: Unique name of the Kubernetes object within its namespace.
 - `spec.name`: Name of the database as it will appear in PostgreSQL.
-- `spec.owner`: PostgreSQL role that owns the database.
+- `spec.owner`: PostgreSQL role that owns the database. The role must
+  already exist in the cluster, since CloudNativePG does not create it as
+  part of managing the database. See [PostgreSQL Role management](declarative_role_management.md) for how to declare one.
 - `spec.cluster.name`: Name of the target PostgreSQL cluster.
 
 The `Database` object must reference a specific `Cluster`, determining where
 the database will be created. It is managed by the cluster's primary instance,
 ensuring the database is created or updated as needed.
+
+:::warning
+    The `spec.cluster` field is immutable after creation. To target a
+    different `Cluster`, create a new `Database` resource instead of updating
+    an existing one.
+:::
 
 :::info
     The distinction between `metadata.name` and `spec.name` allows multiple
@@ -150,6 +173,11 @@ spec:
 Deleting this `Database` object will automatically remove the `two` database
 from the `cluster-example` cluster.
 
+On a replica cluster the database is read-only, so deleting a `Database` object
+releases its finalizer and removes the Kubernetes object without dropping the
+PostgreSQL database, even with `databaseReclaimPolicy: delete`. Dropping the
+database is left to the primary cluster, which owns it.
+
 ### Declaratively Setting `ensure: absent`
 
 To remove a database, set the `ensure` field to `absent` like in the following
@@ -170,6 +198,159 @@ spec:
 
 This manifest ensures that the `database-to-drop` database is removed from the
 `cluster-example` cluster.
+
+## Managing Database Permissions
+
+CloudNativePG can grant and revoke the privileges that PostgreSQL defines on
+the database itself: `CONNECT`, `CREATE` and `TEMPORARY`.
+
+The most common use is hardening. PostgreSQL grants `CONNECT` and `TEMPORARY`
+on every new database to `PUBLIC`. CloudNativePG already revokes `CONNECT` from
+`PUBLIC` on the databases it creates, as described below. Use `spec.permissions`
+to change that default, to manage the other privileges, or to manage a database
+that already exists.
+
+:::info[Default for new databases]
+    On a new cluster bootstrapped with `initdb`, CloudNativePG revokes
+    `CONNECT` from `PUBLIC` on the `postgres` and `template1` databases and on
+    the application database. It does the same on every database it creates
+    from a `Database` resource. In all these cases, it grants `CONNECT` to the
+    `cnpg_metrics_exporter` role, so that monitoring keeps working. Other roles
+    can connect only if they are superusers, own the database (or inherit from
+    its owner), or are granted `CONNECT`, for example with `spec.permissions`.
+
+    The default is applied only when the database is created. A database that
+    already exists is never changed. This includes upgrading the operator, and
+    bootstrapping a cluster with `recovery` or `pg_basebackup`, as the databases
+    keep the privileges they had in the source. If the source doesn't have the
+    application database, CloudNativePG creates it after the bootstrap and
+    applies the default to it.
+
+    The entries of `spec.permissions` are reconciled after the default, so they
+    can override it. For example, a `grant` of `CONNECT` to `public` restores
+    the PostgreSQL behavior on a new database, while a `revoke` from `public`
+    is already satisfied. Do not revoke `CONNECT` from `cnpg_metrics_exporter`
+    on the application database, otherwise the default metrics stop: see the
+    last warning of this section.
+:::
+
+To enable this feature, define the `spec.permissions` field, as shown in the
+following example:
+
+```yaml
+# ...
+spec:
+  permissions:
+    connect:
+      - name: app
+        type: grant
+      # the metrics exporter needs it, see the warning below
+      - name: cnpg_metrics_exporter
+        type: grant
+      - name: public
+        type: revoke
+    create:
+      - name: app
+        type: grant
+    temporary:
+      - name: public
+        type: revoke
+# ...
+```
+
+The `permissions` stanza supports the following lists, one for each privilege:
+
+- `connect`: `CONNECT` privilege specifications.
+- `create`: `CREATE` privilege specifications.
+- `temporary`: `TEMPORARY` privilege specifications.
+- `all`: a shortcut for `connect`, `create` and `temporary` together.
+
+Every item of these lists accepts the following fields:
+
+- `name` *(required, string)*: The target role name. Using `public` targets the
+  PostgreSQL `PUBLIC` pseudo-role (which applies to all existing and future
+  roles). PostgreSQL reserves `public`, so no role can have this name.
+  CloudNativePG matches it in any letter case, as it does for schemas and
+  foreign data wrappers, so a role named `Public` or `PUBLIC` cannot be
+  targeted: an entry with that name applies to every role.
+- `type` *(string)*: The action to take on the privilege. Accepts `grant` or
+  `revoke` (default: `grant`).
+
+The `all` list is only a shortcut. It is expanded into `connect`, `create` and
+`temporary` before the database is reconciled, and the status reports the
+expanded entries.
+
+A role can appear only once for each privilege, once `all` has been expanded.
+Repeating a role, whether with the same or a different `type`, is rejected when
+the resource is created or updated.
+
+For each privilege and role, CloudNativePG reads the privileges currently held
+on the database and runs a `GRANT` or `REVOKE` only when it is needed. The
+outcome of every entry is reported in `status.permissions`:
+
+```yaml
+status:
+  applied: false
+  permissions:
+    - privilege: CONNECT
+      name: public
+      type: revoke
+      applied: true
+    - privilege: CONNECT
+      name: reporting
+      type: grant
+      applied: false
+      message: role does not exist
+```
+
+The entries are applied in the order they are listed, grouped by privilege.
+Within each privilege, the entries of the `all` list are applied after the
+entries of the list of that privilege, wherever `all` appears in the manifest.
+They are independent: if a role does not exist, which is reported for both
+`grant` and `revoke`, the other entries are still applied. The `Database` is
+retried until all of them succeed.
+
+When you revoke a privilege from `public` and grant it to specific roles, list
+the `grant` entries first. This way, the roles receive the privilege before
+`public` loses it. If a grant fails, the revoke is still applied and the
+failed grant is retried.
+
+:::info
+    CloudNativePG manages database permissions using the
+    [`GRANT`](https://www.postgresql.org/docs/current/sql-grant.html) and
+    [`REVOKE`](https://www.postgresql.org/docs/current/sql-revoke.html)
+    PostgreSQL commands. `WITH GRANT OPTION` and `GRANTED BY` are not supported.
+    A `revoke` is run without `CASCADE`: it fails, and is retried, while the
+    role has granted the privilege to other roles.
+:::
+
+:::warning
+    A `revoke` removes only the privilege that was granted to the named role
+    itself, and only if the owner of the database granted it. It has no effect
+    on privileges the role holds through `PUBLIC`, through the membership of
+    another role, or through a grant made by another role holding `WITH GRANT
+    OPTION`. For example, revoking `CONNECT` from `app` does not prevent `app`
+    from connecting while `PUBLIC` still has it: revoke it from `public` too.
+
+    Privileges are applied when the `Database` spec changes, not continuously,
+    so one changed directly in PostgreSQL is not brought back to the declared
+    state until the spec is modified, or until a failed reconciliation is
+    retried. Removing an entry from the spec revokes nothing: to remove a
+    privilege, set the `type` field to `revoke`.
+
+    Revoking `CONNECT` from the application role while `public` does not have it,
+    or from `public` when the application role has no other way to connect,
+    refuses the new connections of the application.
+
+    The instance manager is not affected, as it connects as the superuser. The
+    metrics exporter is, as it connects as the `cnpg_metrics_exporter` role. It
+    queries the application database of the cluster by default, so if that
+    database loses `CONNECT`, all the [default metrics](monitoring.md#default-set-of-metrics) and the
+    user-defined ones without `target_databases` stop. For any other database,
+    only the user-defined metrics that target it fail or are skipped. Grant
+    `CONNECT` to `cnpg_metrics_exporter` too, for example with an entry in the
+    `connect` list.
+:::
 
 ## Managing Extensions in a Database
 
@@ -252,23 +433,61 @@ spec:
   schemas:
     - name: app
       owner: app
+      permissions:
+        usage:
+          - name: public
+            type: revoke
 # ...
 ```
 
 Each schema entry supports the following properties:
 
 - `name` *(mandatory)*: The name of the schema.
-- `owner`: The owner of the schema.
-- `ensure`: Specifies whether the schema should be present or absent in the
-  database:
-    - `present`: Ensures that the schema is installed (default).
-    - `absent`: Ensures that the schema is removed.
+- `owner`: The owner of the schema. If left empty, the schema is owned by
+  `postgres`, the role CloudNativePG uses to connect to the database.
+- `ensure`: Defines whether the schema should exist in the database:
+    - `present`: Ensures that the schema is created (default).
+    - `absent`: Ensures that the schema is dropped.
+- `permissions`: Manages `USAGE` and `CREATE` privileges on the schema:
+    - `usage`: A list of `USAGE` privilege specifications.
+    - `create`: A list of `CREATE` privilege specifications.
+
+Both `usage` and `create` items accept the following fields:
+
+- `name` *(required, string)*: The target role name. Using `public` targets the
+  PostgreSQL `PUBLIC` pseudo-role (which applies to all existing and future
+  roles).
+- `type` *(string)*: The action to take on the privilege. Accepts `grant` or
+  `revoke` (default: `grant`).
 
 :::info
     CloudNativePG manages schemas using the following PostgreSQL’s SQL commands:
     [`CREATE SCHEMA`](https://www.postgresql.org/docs/current/sql-createschema.html),
     [`DROP SCHEMA`](https://www.postgresql.org/docs/current/sql-dropschema.html),
-    [`ALTER SCHEMA`](https://www.postgresql.org/docs/current/sql-alterschema.html).
+    [`ALTER SCHEMA`](https://www.postgresql.org/docs/current/sql-alterschema.html),
+    [`GRANT`](https://www.postgresql.org/docs/current/sql-grant.html),
+    [`REVOKE`](https://www.postgresql.org/docs/current/sql-revoke.html).
+:::
+
+:::warning
+    Privileges are applied when the `Database` spec changes, not continuously.
+    CloudNativePG never reads back the privileges currently held in PostgreSQL,
+    so one granted or revoked directly in the database is not brought back to
+    the declared state until the spec is modified. Removing an entry from
+    `usage` or `create` likewise revokes nothing: to remove a privilege, set its
+    `type` field to `revoke`. For example, deleting the entry that grants
+    `USAGE` to `app-rw` leaves that privilege in place, while changing it to
+    `type: revoke` removes it. Keep the `revoke` entry in the spec for as long
+    as you want the privilege to stay removed.
+:::
+
+:::note
+    `USAGE` on a schema only allows a role to look up objects in it. To read or
+    modify a table, the role also needs privileges on the table itself, such as
+    `SELECT` or `INSERT`. These are not managed by the `Database` resource, nor
+    are default privileges for objects created in the future, so grant them
+    separately with SQL, for example in the application's migrations. Likewise,
+    `CREATE` on a schema only lets a role create objects in it.
 :::
 
 ## Managing Foreign Data Wrappers (FDWs) in a Database

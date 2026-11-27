@@ -28,6 +28,8 @@ import (
 
 	"github.com/xataio/xata-cnpg/pkg/utils"
 	"github.com/xataio/xata-cnpg/tests"
+	clusterasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/cluster"
+	storageasserts "github.com/xataio/xata-cnpg/tests/internal/asserts/storage"
 	"github.com/xataio/xata-cnpg/tests/utils/clusterutils"
 	podutils "github.com/xataio/xata-cnpg/tests/utils/pods"
 	"github.com/xataio/xata-cnpg/tests/utils/storage"
@@ -55,7 +57,7 @@ var _ = Describe("PVC Deletion", Label(tests.LabelSelfHealing), func() {
 		// Create a cluster in a namespace we'll delete after the test
 		namespace, err = env.CreateUniqueTestNamespace(env.Ctx, env.Client, namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
-		AssertCreateCluster(namespace, clusterName, sampleFile, env)
+		clusterasserts.AssertCreateCluster(env, testTimeouts, namespace, clusterName, sampleFile)
 
 		// Reuse the same pvc after a deletion
 		By("recreating a pod with the same PVC after it's deleted", func() {
@@ -190,6 +192,6 @@ var _ = Describe("PVC Deletion", Label(tests.LabelSelfHealing), func() {
 		})
 
 		// Check the labels of each PVC
-		AssertPvcHasLabels(namespace, clusterName)
+		storageasserts.AssertPvcHasLabels(env, namespace, clusterName)
 	})
 })

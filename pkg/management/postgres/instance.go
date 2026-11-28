@@ -788,7 +788,9 @@ func (instance *Instance) buildPostgresEnv() []string {
 	envMap, _ := envmap.Parse(env)
 	// With Landlock, /proc is read-only for PostgreSQL, because a write
 	// right would also cover /proc/self/mem. The children of the postmaster
-	// then keep its OOM score adjustment.
+	// then keep its OOM score adjustment. This changes only Guaranteed pods:
+	// elsewhere the write lowers the value and fails without
+	// CAP_SYS_RESOURCE.
 	if !instance.HardeningFeatures.Has(hardening.Landlock) {
 		envMap["PG_OOM_ADJUST_FILE"] = "/proc/self/oom_score_adj"
 		envMap["PG_OOM_ADJUST_VALUE"] = "0"

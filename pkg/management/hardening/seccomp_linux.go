@@ -112,7 +112,8 @@ func nativeArch() (uint32, error) {
 // archFilter returns a filter that applies action to each system call of
 // another ABI, such as a 32-bit call on a 64-bit kernel. The system call
 // numbers of seccompPolicy are those of the native ABI, and that filter
-// allows every call of another one.
+// allows every call of another one: go-seccomp-bpf sends an arch mismatch
+// to the default action and checks only x32.
 func archFilter(arch uint32, action seccomp.Action) []bpf.Instruction {
 	const archOffset = 4 // offsetof(struct seccomp_data, arch)
 	if action == seccomp.ActionErrno {

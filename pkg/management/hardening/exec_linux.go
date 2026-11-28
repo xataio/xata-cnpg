@@ -41,7 +41,9 @@ func Exec(features Features, coredumpFilter, path string, argv []string) error {
 	}
 
 	// Seccomp filters and no_new_privs belong to a thread. execve keeps
-	// only the calling thread, so it must be the restricted one.
+	// only the calling thread, so it must be the restricted one. Never
+	// unlocked: on failure the thread can hold some of the restrictions and
+	// must not return to the scheduler.
 	runtime.LockOSThread()
 
 	// The filter survives execve. Landlock makes /proc read-only, so the

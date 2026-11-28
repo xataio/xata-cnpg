@@ -104,7 +104,8 @@ var (
 	}
 
 	// tokenFileEnvVars identifies workload identity token files used
-	// by backup clients.
+	// by backup clients. GCS "auto" credentials come from the metadata
+	// server and need no file.
 	tokenFileEnvVars = []string{"AWS_WEB_IDENTITY_TOKEN_FILE", "AZURE_FEDERATED_TOKEN_FILE"}
 )
 
